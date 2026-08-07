@@ -1,0 +1,241 @@
+import { notFound } from '../core/errors.js';
+import type {
+  AccessToken,
+  AutomationRule,
+  Device,
+  Household,
+  Integration,
+  PublicIntegration,
+  Room,
+} from '../core/types.js';
+import { nowIso } from '../util/id.js';
+import type { Database, DatabaseShape } from './database.js';
+
+type Collection = keyof Omit<DatabaseShape, 'version'>;
+
+/** Gemeinsame CRUD-Logik für alle Sammlungen. */
+abstract class BaseRepository<T extends { id: string }> {
+  protected constructor(
+    protected readonly db: Database,
+    protected readonly collection: Collection,
+  ) {}
+
+  protected all(): T[] {
+    return this.db.read()[this.collection] as unknown as T[];
+  }
+
+  list(): T[] {
+    return [...this.all()];
+  }
+
+  find(id: string): T | undefined {
+    return this.all().find((item) => item.id === id);
+  }
+
+  get(id: string, label = 'Eintrag'): T {
+    const found = this.find(id);
+    if (!found) throw notFound(`${label} ${id}`);
+    return found;
+  }
+
+  async insert(item: T): Promise<T> {
+    await this.db.update((data) => {
+      (data[this.collection] as unknown as T[]).push(item);
+    });
+    return item;
+  }
+
+  async patch(id: string, changes: Partial<T>, label = 'Eintrag'): Promise<T> {
+    return this.db.update((data) => {
+      const items = data[this.collection] as unknown as T[];
+      const index = items.findIndex((item) => item.id === id);
+      if (index === -1) throw notFound(`${label} ${id}`);
+      const updated = { ...(items[index] as T), ...changes, id } as T;
+      if ('updatedAt' in (updated as object)) {
+        (updated as unknown as { updatedAt: string }).updatedAt = nowIso();
+      }
+      items[index] = updated;
+      return updated;
+    });
+  }
+
+  async remove(id: string): Promise<boolean> {
+    return this.db.update((data) => {
+      const items = data[this.collection] as unknown as T[];
+      const index = items.findIndex((item) => item.id === id);
+      if (index === -1) return false;
+      items.splice(index, 1);
+      return true;
+    });
+  }
+}
+
+export class HouseholdRepository extends BaseRepository<Household> {
+  constructor(db: Database) {
+    super(db, 'households');
+  }
+
+  /** Der Hub verwaltet aktuell genau einen Haushalt. */
+  current(): Household | undefined {
+    return this.all()[0];
+  }
+
+  require(): Household {
+    const household = this.current();
+    if (!household) {
+      throw notFound('Haushalt (bitte zuerst die Einrichtung unter /api/setup abschließen)');
+    }
+    return household;
+  }
+}
+
+export class RoomRepository extends BaseRepository<Room> {
+  constructor(db: Database) {
+    super(db, 'rooms');
+  }
+
+  listByHousehold(householdId: string): Room[] {
+    return this.all()
+      .filter((room) => room.householdId === householdId)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  }
+
+  findByName(householdId: string, name: string): Room | undefined {
+    const needle = name.trim().toLowerCase();
+    return this.all().find(
+      (room) => room.householdId === householdId && room.name.toLowerCase() === needle,
+    );
+  }
+}
+
+export class IntegrationRepository extends BaseRepository<Integration> {
+  constructor(db: Database) {
+    super(db, 'integrations');
+  }
+
+  listByHousehold(householdId: string): Integration[] {
+    return this.all().filter((item) => item.householdId === householdId);
+  }
+
+  findByHost(householdId: string, host: string): Integration | undefined {
+    return this.all().find(
+      (item) =>
+        item.householdId === householdId &&
+        (item.config as { host?: string }).host?.toLowerCase() === host.toLowerCase(),
+    );
+  }
+
+  /** Entfernt die verschlüsselten Secrets für die API-Ausgabe. */
+  static toPublic(integration: Integration): PublicIntegration {
+    const { secretsEnc, ...rest } = integration;
+    return { ...rest, hasSecrets: secretsEnc !== null };
+  }
+}
+
+export class DeviceRepository extends BaseRepository<Device> {
+  constructor(db: Database) {
+    super(db, 'devices');
+  }
+
+  listByHousehold(householdId: string): Device[] {
+    return this.all().filter((device) => device.householdId === householdId);
+  }
+
+  listByIntegration(integrationId: string): Device[] {
+    return this.all().filter((device) => device.integrationId === integrationId);
+  }
+
+  listByRoom(roomId: string): Device[] {
+    return this.all().filter((device) => device.roomId === roomId);
+  }
+
+  findByExternalId(integrationId: string, externalId: string): Device | undefined {
+    return this.all().find(
+      (device) => device.integrationId === integrationId && device.externalId === externalId,
+    );
+  }
+
+  /** Schreibt Zustandsänderungen gepuffert (hochfrequent durch Polling). */
+  async patchState(id: string, state: Device['state'], reachable: boolean): Promise<Device | undefined> {
+    return this.db.updateDeferred((data) => {
+      const device = data.devices.find((item) => item.id === id);
+      if (!device) return undefined;
+      device.state = { ...device.state, ...state, updatedAt: nowIso() };
+      device.reachable = reachable;
+      device.lastSeenAt = reachable ? nowIso() : device.lastSeenAt;
+      device.updatedAt = nowIso();
+      return device;
+    });
+  }
+
+  async removeByIntegration(integrationId: string): Promise<number> {
+    return this.db.update((data) => {
+      const before = data.devices.length;
+      data.devices = data.devices.filter((device) => device.integrationId !== integrationId);
+      return before - data.devices.length;
+    });
+  }
+
+  async clearRoom(roomId: string): Promise<void> {
+    await this.db.update((data) => {
+      for (const device of data.devices) {
+        if (device.roomId === roomId) device.roomId = null;
+      }
+    });
+  }
+}
+
+export class RuleRepository extends BaseRepository<AutomationRule> {
+  constructor(db: Database) {
+    super(db, 'rules');
+  }
+
+  listByHousehold(householdId: string): AutomationRule[] {
+    return this.all().filter((rule) => rule.householdId === householdId);
+  }
+
+  listEnabled(householdId: string): AutomationRule[] {
+    return this.listByHousehold(householdId).filter((rule) => rule.enabled);
+  }
+}
+
+export class TokenRepository extends BaseRepository<AccessToken> {
+  constructor(db: Database) {
+    super(db, 'tokens');
+  }
+
+  findByHash(hash: string): AccessToken | undefined {
+    return this.all().find((token) => token.tokenHash === hash);
+  }
+
+  listByHousehold(householdId: string): AccessToken[] {
+    return this.all().filter((token) => token.householdId === householdId);
+  }
+
+  async touch(id: string): Promise<void> {
+    await this.db.updateDeferred((data) => {
+      const token = data.tokens.find((item) => item.id === id);
+      if (token) token.lastUsedAt = nowIso();
+    });
+  }
+}
+
+export interface Repositories {
+  households: HouseholdRepository;
+  rooms: RoomRepository;
+  integrations: IntegrationRepository;
+  devices: DeviceRepository;
+  rules: RuleRepository;
+  tokens: TokenRepository;
+}
+
+export function createRepositories(db: Database): Repositories {
+  return {
+    households: new HouseholdRepository(db),
+    rooms: new RoomRepository(db),
+    integrations: new IntegrationRepository(db),
+    devices: new DeviceRepository(db),
+    rules: new RuleRepository(db),
+    tokens: new TokenRepository(db),
+  };
+}
