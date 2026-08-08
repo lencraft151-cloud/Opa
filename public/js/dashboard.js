@@ -18,6 +18,7 @@ export const store = {
   climate: null,
   updates: null,
   energy: null,
+  templates: null,
   energyPeriod: 'today',
   historyDeviceId: '',
   historyMetric: 'temperatureC',
@@ -54,6 +55,26 @@ export async function loadDashboardData() {
 
 const deviceById = (id) => store.devices.find((device) => device.id === id);
 const roomName = (roomId) => store.rooms.find((room) => room.id === roomId)?.name ?? 'Ohne Raum';
+
+/**
+ * Aufgeklappte Bereiche über das Neuzeichnen hinweg merken.
+ *
+ * Die Ansichten werden bei jedem Live-Update neu aufgebaut. Ohne diesen
+ * Merker klappt der Farbwähler mitten im Aussuchen wieder zu, weil im
+ * Hintergrund ein Messwert eingetroffen ist.
+ */
+const openSections = new Set();
+
+export function restoreOpenSections(root) {
+  root.querySelectorAll('details[data-section]').forEach((details) => {
+    const key = details.dataset.section;
+    if (openSections.has(key)) details.open = true;
+    details.addEventListener('toggle', () => {
+      if (details.open) openSections.add(key);
+      else openSections.delete(key);
+    });
+  });
+}
 
 /** Ein Gerätekommando senden und die Karte sofort aktualisieren. */
 export async function sendCommand(deviceId, command) {
@@ -346,7 +367,11 @@ function renderRooms() {
   const unassigned = store.devices.filter((device) => device.roomId === null);
 
   if (store.rooms.length === 0 && unassigned.length === 0) {
-    panel.innerHTML = emptyState('🏠', 'Noch keine Räume angelegt.', 'Lege sie in den Einstellungen an.');
+    panel.innerHTML = emptyState(
+      '🏠',
+      'Noch keine Räume angelegt.',
+      'Räume fassen Geräte zusammen: Du siehst die Temperatur je Raum und kannst alles darin auf einmal schalten. Anlegen kannst du sie unter Einstellungen.',
+    );
     return;
   }
 
@@ -394,6 +419,7 @@ function renderRooms() {
 
   panel.innerHTML = groups.join('');
   bindDeviceControls(panel, sendCommand);
+  restoreOpenSections(panel);
 
   panel.querySelectorAll('[data-room-power]').forEach((button) => {
     button.addEventListener('click', async () => {
@@ -440,6 +466,10 @@ function renderDevices() {
   });
 
   panel.innerHTML = `
+    <p class="intro">
+      Alle eingebundenen Geräte an einem Ort – egal ob von Hue oder Shelly.
+      Unter jedem Namen steht, was das Gerät kann.
+    </p>
     <div class="row">
       <input id="device-search" class="grow" placeholder="Geräte durchsuchen…"
              value="${esc(deviceFilter.search)}" />
@@ -469,6 +499,7 @@ function renderDevices() {
     }</div>`;
 
   bindDeviceControls(panel, sendCommand);
+  restoreOpenSections(panel);
 
   $('#device-search').addEventListener('input', (event) => {
     deviceFilter.search = event.target.value;
@@ -511,6 +542,11 @@ async function renderEnergy() {
   const currency = energy.currency;
 
   panel.innerHTML = `
+    <p class="intro">
+      Was verbrauchen deine Geräte – und was kostet das? Gezählt wird nur, was auch messen
+      kann: Shelly-Geräte mit Strommessung. Der Preis pro Kilowattstunde steht in den
+      Einstellungen.
+    </p>
     <div class="chips">${PERIODS.map(
       ([key, label]) =>
         `<button class="chip ${store.energyPeriod === key ? 'active' : ''}" data-period="${key}">${label}</button>`,
@@ -630,6 +666,10 @@ async function renderHistory() {
   if (!metrics.includes(store.historyMetric)) store.historyMetric = metrics[0];
 
   panel.innerHTML = `
+    <p class="intro">
+      Wie hat sich ein Messwert entwickelt? Die Linie zeigt den Mittelwert, die Fläche
+      darum die Schwankung zwischen kleinstem und größtem Wert im jeweiligen Zeitfenster.
+    </p>
     <div class="row">
       <select id="history-device" class="grow">${sensors
         .map(
@@ -721,7 +761,7 @@ function bucketFor(hours) {
 // Automationen
 // ---------------------------------------------------------------------------
 
-function renderAutomations() {
+async function renderAutomations() {
   const panel = $('#panel-automations');
   const sensors = store.devices.filter((device) =>
     device.capabilities.some((capability) => capability.startsWith('sensor.')),
@@ -731,9 +771,35 @@ function renderAutomations() {
   const options = (devices) =>
     devices.map((device) => `<option value="${esc(device.id)}">${esc(device.name)}</option>`).join('');
 
+  if (!store.templates) {
+    store.templates = await guard(() => api('/automations/templates'));
+  }
+  const templates = store.templates?.templates ?? [];
+
   panel.innerHTML = `
-    <details class="card">
-      <summary>Neue Automation anlegen</summary>
+    <p class="intro">
+      Eine Automation macht etwas von allein: „Wenn es im Bad unter 19 °C fällt, schalte den
+      Heizlüfter ein.“ Am schnellsten geht es mit einer der fertigen Vorlagen – die passenden
+      Geräte sind schon ausgewählt.
+    </p>
+
+    <div class="section-head"><h2>Fertige Vorlagen</h2>
+      <span class="muted small">Ein Klick genügt</span></div>
+    <div class="grid">${templates.map(templateCard).join('')}</div>
+
+    <div class="section-head"><h2>Deine Automationen</h2></div>
+    <div class="list">${
+      store.automations.length
+        ? store.automations.map(automationItem).join('')
+        : emptyState(
+            '🤖',
+            'Noch keine Automation angelegt.',
+            'Nimm oben eine Vorlage – ändern kannst du sie später jederzeit.',
+          )
+    }</div>
+
+    <details class="card" data-section="expert-form">
+      <summary>Selbst zusammenstellen (für Fortgeschrittene)</summary>
       <form id="form-automation" class="form">
         <label>Name <input name="name" required maxlength="120" placeholder="z. B. Bad heizen" /></label>
         <fieldset>
@@ -777,12 +843,10 @@ function renderAutomations() {
             : '<p class="muted small">Dafür werden mindestens ein Sensor und ein schaltbares Gerät gebraucht.</p>'
         }
       </form>
-    </details>
-    <div class="list">${
-      store.automations.length
-        ? store.automations.map(automationItem).join('')
-        : emptyState('🤖', 'Noch keine Automationen.', 'Zum Beispiel: Heizung an, wenn es im Bad unter 19 °C fällt.')
-    }</div>`;
+    </details>`;
+
+  wireTemplates(panel);
+  restoreOpenSections(panel);
 
   panel.querySelector('#form-automation').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -811,7 +875,7 @@ function renderAutomations() {
     });
     if (!rule) return;
     store.automations = await api('/automations');
-    renderAutomations();
+    void renderAutomations();
   });
 
   panel.querySelectorAll('[data-rule-action]').forEach((button) => {
@@ -829,7 +893,122 @@ function renderAutomations() {
         await guard(() => api(`/automations/${ruleId}`, { method: 'DELETE' }));
       }
       store.automations = await api('/automations');
-      renderAutomations();
+      void renderAutomations();
+    });
+  });
+}
+
+/** Karte einer fertigen Vorlage inklusive anpassbarer Felder. */
+function templateCard(template) {
+  const fields = template.fields
+    .map((field) => templateField(template, field))
+    .join('');
+
+  return `<article class="device-card template-card ${template.applicable ? '' : 'unavailable'}"
+                   data-template="${esc(template.id)}">
+    <header>
+      <div>
+        <div class="name">${template.emoji} ${esc(template.name)}</div>
+        <div class="meta">${esc(template.summary)}</div>
+      </div>
+    </header>
+    <p class="muted small">${esc(template.explanation)}</p>
+    ${
+      template.applicable
+        ? `<details class="template-fields" data-section="tpl:${esc(template.id)}">
+             <summary>Anpassen</summary>
+             <form class="form" data-template-form="${esc(template.id)}">${fields}</form>
+           </details>
+           <button class="primary" data-template-apply="${esc(template.id)}">Übernehmen</button>`
+        : `<div class="callout warn" style="margin:0">
+             <strong>Dafür fehlt noch etwas</strong>
+             <span>${esc(template.missing.join(' '))}</span>
+           </div>`
+    }
+  </article>`;
+}
+
+function templateField(template, field) {
+  const value = template.defaults[field.key];
+  const help = `<span class="field-help">${esc(field.help)}</span>`;
+
+  if (field.type === 'number') {
+    return `<label>${esc(field.label)}${field.unit ? ` (${esc(field.unit)})` : ''}
+      <input type="number" name="${esc(field.key)}" value="${esc(String(value ?? ''))}"
+             ${field.min !== undefined ? `min="${field.min}"` : ''}
+             ${field.max !== undefined ? `max="${field.max}"` : ''}
+             ${field.step !== undefined ? `step="${field.step}"` : ''} />
+      ${help}</label>`;
+  }
+
+  if (field.type === 'time') {
+    return `<label>${esc(field.label)}
+      <input type="time" name="${esc(field.key)}" value="${esc(String(value ?? '07:00'))}" />
+      ${help}</label>`;
+  }
+
+  const options = template.options[field.key] ?? [];
+  if (field.type === 'device') {
+    return `<label>${esc(field.label)}
+      <select name="${esc(field.key)}">${options
+        .map(
+          (option) =>
+            `<option value="${esc(option.id)}" ${option.id === value ? 'selected' : ''}>${esc(
+              option.label,
+            )}</option>`,
+        )
+        .join('')}</select>
+      ${help}</label>`;
+  }
+
+  // Mehrfachauswahl als Ankreuzfelder – ein Mehrfach-Listenfeld ist auf dem
+  // Handy kaum bedienbar.
+  const selected = new Set(Array.isArray(value) ? value : []);
+  return `<fieldset>
+    <legend>${esc(field.label)}</legend>
+    ${options
+      .map(
+        (option) => `<label class="check">
+          <input type="checkbox" name="${esc(field.key)}" value="${esc(option.id)}"
+                 ${selected.has(option.id) ? 'checked' : ''} />
+          <span>${esc(option.label)}</span>
+        </label>`,
+      )
+      .join('')}
+    ${help}
+  </fieldset>`;
+}
+
+function wireTemplates(panel) {
+  panel.querySelectorAll('[data-template-apply]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.templateApply;
+      const template = (store.templates?.templates ?? []).find((entry) => entry.id === id);
+      const form = panel.querySelector(`[data-template-form="${CSS.escape(id)}"]`);
+
+      const values = {};
+      for (const field of template?.fields ?? []) {
+        if (field.type === 'devices') {
+          values[field.key] = [...form.querySelectorAll(`input[name="${CSS.escape(field.key)}"]:checked`)].map(
+            (input) => input.value,
+          );
+        } else {
+          const input = form.querySelector(`[name="${CSS.escape(field.key)}"]`);
+          if (!input) continue;
+          values[field.key] = field.type === 'number' ? Number(input.value) : input.value;
+        }
+      }
+
+      button.disabled = true;
+      const rule = await guard(
+        () => api(`/automations/templates/${id}`, { method: 'POST', body: { values } }),
+        { success: 'Automation angelegt.', successHint: 'Du findest sie unten in der Liste.' },
+      );
+      button.disabled = false;
+      if (!rule) return;
+
+      store.automations = await api('/automations');
+      void renderAutomations();
     });
   });
 }
@@ -942,14 +1121,45 @@ async function renderSettings() {
 
     <div class="card">
       <h2>Zugriffstoken</h2>
+      <p class="muted small">
+        Ein Token ist wie ein Schlüssel zu deinem Hub. Dieser Browser hat schon einen.
+        Einen weiteren brauchst du nur, wenn ein anderes Gerät oder Programm zugreifen soll –
+        widerrufen kannst du ihn jederzeit.
+      </p>
       <form id="form-token" class="form inline">
         <input name="name" placeholder="z. B. Handy" maxlength="80" required />
         <button type="submit" class="primary">Token erstellen</button>
       </form>
       <div class="list" id="tokens-list"></div>
-    </div>`;
+    </div>
+
+    <details class="card" data-section="glossary">
+      <summary>Begriffe kurz erklärt</summary>
+      <dl class="glossary">
+        <dt>Integration</dt>
+        <dd>Eine Verbindung zu einem Hersteller-Gerät: deine Hue Bridge oder ein einzelner
+          Shelly. Über sie kommen die Geräte in den Hub.</dd>
+        <dt>Gerät</dt>
+        <dd>Alles, was du hier siehst und schaltest – eine Lampe, eine Steckdose, ein
+          Rollladen oder ein Sensor. Ein Shelly mit zwei Kanälen ergibt zwei Geräte, damit
+          du sie verschiedenen Räumen zuordnen kannst.</dd>
+        <dt>Fähigkeit</dt>
+        <dd>Was ein Gerät kann: schaltbar, dimmbar, Farben, Rollladen, misst Temperatur …
+          Kommandos funktionieren nur mit der passenden Fähigkeit.</dd>
+        <dt>Automation</dt>
+        <dd>Eine Wenn-dann-Regel, die der Hub selbstständig ausführt. Fertige Vorlagen
+          findest du unter „Automationen“.</dd>
+        <dt>Messwerte</dt>
+        <dd>Temperatur, Feuchte und Verbrauch werden dauerhaft mitgeschrieben, damit du
+          Verläufe sehen kannst. Wie lange, steht unter „System“.</dd>
+        <dt>Abdeckung</dt>
+        <dd>Wie viel von einem Zeitraum tatsächlich mit Messwerten belegt ist. Ist sie
+          niedrig, verzichtet der Hub bewusst auf eine Hochrechnung, statt zu raten.</dd>
+      </dl>
+    </details>`;
 
   wireSettings(panel);
+  restoreOpenSections(panel);
   await renderTokens();
 }
 

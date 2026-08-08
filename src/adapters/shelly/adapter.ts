@@ -1,5 +1,5 @@
 import { badRequest, upstreamError } from '../../core/errors.js';
-import { clamp } from '../../core/color.js';
+import { clamp, hsvToRgb } from '../../core/color.js';
 import { createLogger } from '../../core/logger.js';
 import type {
   DeviceCommand,
@@ -208,12 +208,20 @@ export class ShellyAdapter implements IntegrationAdapter {
           'Farbtemperatur können nur Hue-Leuchten und Shelly-Bulbs.',
         );
 
-      case 'setColor':
-        throw badRequest(
-          'Farbsteuerung wird von diesem Shelly-Kanal nicht unterstützt',
-          undefined,
-          'Nur RGBW-Kanäle liefern die Fähigkeit "color".',
-        );
+      case 'setColor': {
+        if (kind !== 'rgb' && kind !== 'rgbw' && kind !== 'light') {
+          throw badRequest(
+            `Die Komponente "${externalId}" kann keine Farben.`,
+            undefined,
+            'Farben beherrschen nur RGB- und RGBW-Kanäle.',
+          );
+        }
+        const hue = ((command.hue % 360) + 360) % 360;
+        const saturation = clamp(command.saturation, 0, 100);
+        const rgb = hsvToRgb(hue, saturation, 100);
+        await client.setColor(channel, [rgb.r, rgb.g, rgb.b], kind);
+        return { on: true, hue, saturation };
+      }
 
       default:
         throw badRequest(`Unbekanntes Kommando: ${(command as { type: string }).type}`);

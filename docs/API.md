@@ -319,6 +319,44 @@ Zeitfensters; das Gerät startet dabei neu.
 | `PATCH` | `/automations/:id` | Ändern (z. B. `{"enabled":false}`) |
 | `DELETE` | `/automations/:id` | Löschen |
 | `POST` | `/automations/:id/run` | Aktionen sofort ausführen (Test) |
+| `GET` | `/automations/templates` | Fertige Vorlagen inkl. Vorbelegung |
+| `POST` | `/automations/templates/:templateId` | Regel aus einer Vorlage anlegen |
+
+### Vorlagen
+
+`GET /automations/templates` liefert die Vorlagen bereits auf den vorhandenen
+Gerätebestand angepasst:
+
+```json
+{
+  "templates": [{
+    "id": "motion-light", "emoji": "🚶",
+    "name": "Licht an, wenn sich jemand bewegt",
+    "summary": "Wenn der Bewegungsmelder auslöst, geht das Licht an.",
+    "explanation": "Praktisch für Flur, Keller oder Bad. …",
+    "fields": [ { "key": "sensor", "label": "Bewegungsmelder", "type": "device",
+                  "capability": "sensor.motion", "help": "Das Gerät, das die Bewegung meldet." } ],
+    "applicable": true,
+    "missing": [],
+    "defaults": { "sensor": "dev_…", "lights": ["dev_…"], "cooldownMinutes": 5 },
+    "options": { "sensor": [ { "id": "dev_…", "label": "Melder Flur (Flur)" } ] }
+  }],
+  "applicable": 6
+}
+```
+
+Sensor und Aktor werden nach Möglichkeit aus demselben Raum gepaart. Ist
+`applicable` false, nennt `missing` in Alltagssprache, was fehlt.
+
+Zum Anlegen genügt ein leerer Body – dann greifen die Vorgaben:
+
+```bash
+curl -X POST localhost:8080/api/automations/templates/motion-light \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{}'
+```
+
+Eigene Werte überschreiben einzelne Felder:
+`{"values": {"cooldownMinutes": 10, "lights": ["dev_a","dev_b"]}, "name": "Flurlicht"}`
 
 ### Auslöser
 

@@ -19,11 +19,12 @@ Shelly-Geräten, das Anlegen von Räumen und die Zuordnung der Geräte.
 | **Philips Hue** | Bridge-Discovery (mDNS + Cloud + Subnetz-Scan), Pairing über Link-Button, CLIP-API v2, Live-Updates über den Eventstream |
 | **Shelly** | Gen1 (REST, Basic-Auth) und Gen2/3/4 (JSON-RPC, Digest-Auth SHA-256), Relais, Dimmer, Rollläden, Verbrauchsmessung, H&T-Sensoren, Add-On-Fühler |
 | **Rollläden** | Auf/Zu/Stop, Position, Lamellenverstellung bei Jalousien, Fahrzustand mit animierter Anzeige, Sammelbefehle je Raum |
+| **Farbe** | Farbrad mit ziehbarem Griff für Maus, Finger und Tastatur, dazu Farb- und Weißton-Vorlagen |
 | **Geräte** | Einheitliches Modell mit Fähigkeiten (`switch`, `dimmer`, `color`, `cover`, `cover.tilt`, `sensor.*`) – herstellerunabhängig steuerbar |
 | **Messwerte** | Temperatur, Luftfeuchte, Helligkeit, Leistung, Energie, Batterie – dauerhaft archiviert, mit Verlaufsdiagramm |
 | **Stromverbrauch** | Verbrauch und Kosten je Gerät, Raum und Zeitraum, Hochrechnung auf Monat/Jahr, Erkennung von Dauerverbrauchern |
 | **Firmware-Updates** | Prüfung für Hue Bridge und Shelly, Installation auf Knopfdruck oder automatisch im gewählten Nachtfenster |
-| **Automationen** | Sensorschwellen, Gerätezustände und Zeitpläne mit Bedingungen, Sperrzeiten und Aktionen (schalten, Webhook, Meldung) |
+| **Automationen** | Sieben fertige Vorlagen mit vorausgewählten Geräten, dazu frei baubare Regeln aus Sensorschwellen, Gerätezuständen und Zeitplänen |
 | **Oberfläche** | Installierbare Web-App (PWA) mit Live-Updates (SSE), Dashboard, Raum-, Geräte-, Energie- und Verlaufsansicht |
 
 ---
@@ -129,6 +130,32 @@ anderes ändert sich.
 - **Shelly:** ein Hub-Gerät je *Komponente* (`switch:0`, `switch:1`,
   `temperature:0`, `cover:0` …). So lässt sich Kanal 1 eines Doppelrelais dem
   Wohnzimmer und Kanal 2 dem Flur zuordnen.
+
+### Warum manche Geräte früher nicht gefunden wurden
+
+Antworten auf eine mDNS-Anfrage gehen per Multicast an `224.0.0.251:5353`. Ein
+Socket auf einem zufälligen Port sieht davon nichts – er hört nur die Geräte,
+die das „unicast response“-Bit beachten, und das tun längst nicht alle (Shellys
+etwa nicht). Der Hub bindet deshalb auf Port 5353 mit `reuseAddr`, teilt ihn
+sich also mit einem laufenden Avahi/Bonjour. Klappt das nicht, fällt er auf
+einen zufälligen Port samt Unicast-Bit zurück.
+
+Zwei weitere Lücken sind geschlossen: Der Subnetz-Scan für Hue lief bisher nur,
+wenn gar keine Bridge gefunden wurde – wer zwei hat, sah die zweite nie. Und
+Gen1-Shellys wurden nur erkannt, wenn „shelly“ im mDNS-Namen stand; umbenannte
+Geräte fielen durchs Raster. Jetzt entscheidet das Gerät selbst über `/shelly`.
+
+### Fertige Automationen
+
+Sieben Vorlagen decken ab, wofür die meisten überhaupt einen Hub aufsetzen:
+Licht bei Bewegung, Heizen bei Kälte, Rollläden morgens und abends, nachts
+alles aus, Batteriewarnung und Lüften bei Feuchte.
+
+Der Hub schlägt dabei die passenden Geräte selbst vor und paart Sensor und
+Aktor aus demselben Raum – ein Bewegungsmelder im Flur schaltet das Flurlicht,
+nicht das im Schlafzimmer. Fehlt für eine Vorlage das nötige Gerät, steht das
+in Alltagssprache dabei („Es ist kein Bewegungsmelder eingebunden.“) statt sie
+kommentarlos auszugrauen.
 
 ### Aktualisierung der Zustände
 
@@ -295,7 +322,7 @@ ausgewertet – inklusive Sommerzeitwechsel.
 ## Tests
 
 ```bash
-npm test        # 181 Tests, node:test
+npm test        # 214 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
@@ -309,6 +336,10 @@ Abgedeckt sind unter anderem:
   Unterschiedliches meinen
 - Verbrauchsrechnung mit Zählerreset, Messlücken und Zeitzonengrenzen
 - Netzwerkfehler-Übersetzung: keine rohen Fehlercodes in Meldungen
+- mDNS: Anfrageaufbau, Antwort-Parser und ein Gerät, das nur per Multicast
+  antwortet – genau der Fall, der vorher übersehen wurde
+- Automations-Vorlagen: Gerätevorschläge, Vorgabewerte und Fehlermeldungen
+- Farbsteuerung: gemeldete Fähigkeit und ausführbares Kommando bleiben synchron
 - Zeitzonenlogik der Automationen (inkl. Fenster über Mitternacht)
 - Datenbank unter parallelen Schreibzugriffen
 - Der komplette Einrichtungsfluss über HTTP

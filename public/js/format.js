@@ -88,11 +88,32 @@ export const fmt = {
 export const METRIC_LABEL = {
   temperatureC: 'Temperatur',
   humidity: 'Luftfeuchte',
-  illuminanceLux: 'Helligkeit',
-  powerW: 'Leistung',
-  energyWh: 'Energie',
-  batteryPercent: 'Batterie',
-  brightness: 'Helligkeit (Lampe)',
+  illuminanceLux: 'Umgebungshelligkeit',
+  powerW: 'Stromverbrauch gerade',
+  energyWh: 'Verbrauchte Energie',
+  batteryPercent: 'Batteriestand',
+  brightness: 'Lampenhelligkeit',
+};
+
+/**
+ * Fähigkeiten in Alltagssprache. Die technischen Bezeichner (`sensor.motion`)
+ * gehören in die API, nicht auf den Bildschirm.
+ */
+export const CAPABILITY_LABEL = {
+  switch: 'schaltbar',
+  dimmer: 'dimmbar',
+  color: 'Farben',
+  color_temperature: 'Weißtöne',
+  cover: 'Rollladen',
+  'cover.tilt': 'Lamellen',
+  'sensor.temperature': 'misst Temperatur',
+  'sensor.humidity': 'misst Luftfeuchte',
+  'sensor.motion': 'erkennt Bewegung',
+  'sensor.illuminance': 'misst Helligkeit',
+  'sensor.power': 'misst Strom',
+  'sensor.energy': 'zählt Verbrauch',
+  'sensor.battery': 'zeigt Batteriestand',
+  button: 'Taster',
 };
 
 export const VENDOR_LABEL = { hue: 'Philips Hue', shelly: 'Shelly' };

@@ -16,6 +16,25 @@ setLogLevel('silent');
 
 const naming = { deviceName: 'Shelly', channelNames: new Map<string, string>() };
 
+describe('Farbkanäle', () => {
+  it('meldet die Fähigkeit "color" für RGB-Kanäle', () => {
+    const components = parseGen2Status(
+      { 'rgb:0': { id: 0, output: true, brightness: 70, rgb: [255, 140, 40] } },
+      naming,
+    );
+    assert.deepEqual(components[0]?.capabilities, ['switch', 'dimmer', 'color']);
+    assert.equal(Math.round(components[0]?.state.hue ?? 0), 28);
+  });
+
+  it('meldet sie nicht für einfache Lichtkanäle', () => {
+    const components = parseGen2Status(
+      { 'light:0': { id: 0, output: true, brightness: 40 } },
+      naming,
+    );
+    assert.deepEqual(components[0]?.capabilities, ['switch', 'dimmer']);
+  });
+});
+
 describe('Fahrzustand eines Rollladens', () => {
   it('unterscheidet die Bedeutung von "open" je Generation', () => {
     // Gen2: Endzustand. Gen1: Fahrt nach oben. Derselbe String, zwei Bedeutungen.

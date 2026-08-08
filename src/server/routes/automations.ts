@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import type { CreateRuleInput } from '../../services/automationService.js';
 import type { Container } from '../../container.js';
 import { asyncHandler, parseBody } from '../http.js';
@@ -11,6 +12,42 @@ export function automationRoutes(container: Container): Router {
     const household = container.households.require();
     res.json(container.automations.list(household.id));
   });
+
+  /**
+   * Vorgefertigte Automationen. Jede Vorlage bringt eine Vorbelegung mit,
+   * die zum vorhandenen Gerätebestand passt – oft genügt ein Klick.
+   */
+  router.get('/automations/templates', (_req, res) => {
+    const household = container.households.require();
+    const templates = container.automations.templates(household.id);
+    res.json({
+      templates,
+      applicable: templates.filter((template) => template.applicable).length,
+    });
+  });
+
+  router.post(
+    '/automations/templates/:templateId',
+    asyncHandler(async (req, res) => {
+      const household = container.households.require();
+      const body = parseBody(
+        z.object({
+          name: z.string().min(1).max(120).optional(),
+          values: z
+            .record(z.union([z.string(), z.number(), z.array(z.string())]))
+            .optional(),
+        }),
+        req,
+      );
+      const rule = await container.automations.createFromTemplate(
+        household.id,
+        req.params.templateId as string,
+        body.values ?? {},
+        body.name,
+      );
+      res.status(201).json(rule);
+    }),
+  );
 
   router.get('/automations/:id', (req, res) => {
     res.json(container.automations.get(req.params.id as string));

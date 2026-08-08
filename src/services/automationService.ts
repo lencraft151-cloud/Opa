@@ -13,6 +13,12 @@ import type {
 import { request } from '../util/http.js';
 import { createId, nowIso } from '../util/id.js';
 import type { Repositories } from '../storage/repositories.js';
+import {
+  resolveTemplates,
+  templateById,
+  type ResolvedTemplate,
+  type TemplateValues,
+} from './automationTemplates.js';
 import type { DeviceService } from './deviceService.js';
 import type { HouseholdService } from './householdService.js';
 
@@ -130,6 +136,37 @@ export class AutomationService {
     this.get(id);
     await this.repos.rules.remove(id);
     this.runtime.delete(id);
+  }
+
+  // -------------------------------------------------------------------------
+  // Vorlagen
+  // -------------------------------------------------------------------------
+
+  /** Vorlagen inklusive Vorbelegung aus dem tatsächlichen Gerätebestand. */
+  templates(householdId: string): ResolvedTemplate[] {
+    return resolveTemplates(
+      this.repos.devices.listByHousehold(householdId),
+      this.repos.rooms.listByHousehold(householdId),
+    );
+  }
+
+  /** Legt aus einer Vorlage eine fertige Regel an. */
+  async createFromTemplate(
+    householdId: string,
+    templateId: string,
+    values: TemplateValues,
+    name?: string,
+  ): Promise<AutomationRule> {
+    const template = templateById(templateId);
+
+    // Fehlende Felder aus der Vorbelegung ergänzen, damit ein Klick auf
+    // „Übernehmen“ ohne weitere Eingaben genügt.
+    const resolved = this.templates(householdId).find((entry) => entry.id === templateId);
+    const merged: TemplateValues = { ...(resolved?.defaults ?? {}), ...values };
+
+    const input = template.build(merged);
+    if (name?.trim()) input.name = name.trim();
+    return this.create(householdId, input);
   }
 
   // -------------------------------------------------------------------------

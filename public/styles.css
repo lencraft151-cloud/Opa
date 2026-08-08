@@ -334,7 +334,7 @@ legend {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  animation: rise 0.35s var(--ease) both;
+  animation: rise 0.35s var(--ease);
 }
 .tile .value {
   font-size: 1.7rem;
@@ -370,7 +370,7 @@ legend {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.7rem 0.85rem;
-  animation: rise 0.3s var(--ease) both;
+  animation: rise 0.3s var(--ease);
 }
 .item .title {
   font-weight: 650;
@@ -443,6 +443,70 @@ legend {
 .kv dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
+}
+
+/* Einleitender Satz über einer Ansicht – erklärt, worum es hier geht. */
+.intro {
+  color: var(--muted);
+  max-width: 62ch;
+  margin: 0 0 1.1rem;
+  font-size: 0.95rem;
+}
+
+.field-help {
+  font-weight: 400;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 400;
+  color: var(--text);
+  padding: 0.25rem 0;
+}
+label.check input {
+  width: 1.1rem;
+  height: 1.1rem;
+  min-height: 0;
+  flex: none;
+}
+
+.glossary {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 1.2rem;
+  margin: 0.85rem 0 0;
+  font-size: 0.92rem;
+}
+.glossary dt {
+  font-weight: 650;
+}
+.glossary dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.template-card.unavailable {
+  opacity: 0.75;
+}
+.template-card .template-fields {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+}
+.template-card .template-fields[open] {
+  padding-bottom: 0.85rem;
+}
+.color-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+}
+.color-details[open] summary {
+  margin-bottom: 0.7rem;
 }
 
 /* Hinweis-/Fehlerkasten mit Handlungsanweisung */
@@ -544,7 +608,7 @@ legend {
 }
 
 .step {
-  animation: rise 0.35s var(--ease) both;
+  animation: rise 0.35s var(--ease);
 }
 
 .token-box {
@@ -642,7 +706,7 @@ details.card summary {
   padding: 1.25rem 1rem calc(5.5rem + env(safe-area-inset-bottom));
 }
 .tab-panel {
-  animation: fade 0.28s var(--ease) both;
+  animation: fade 0.28s var(--ease);
 }
 
 .section-head {
@@ -710,7 +774,7 @@ details.card summary {
   flex-direction: column;
   gap: 0.6rem;
   transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
-  animation: rise 0.3s var(--ease) both;
+  animation: rise 0.3s var(--ease);
 }
 .device-card:hover {
   box-shadow: var(--shadow-lg);
@@ -860,6 +924,116 @@ input[type='range']:focus {
   background: var(--accent);
 }
 
+/* ------------------------------------------------------------- Farbrad */
+
+.color-picker {
+  display: flex;
+  gap: 0.9rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.color-wheel {
+  --size: 128px;
+  position: relative;
+  width: var(--size);
+  height: var(--size);
+  flex: none;
+  border-radius: 50%;
+  cursor: crosshair;
+  touch-action: none;
+  border: 2px solid var(--border);
+  box-shadow: var(--shadow);
+  /* Farbton über den Winkel, Sättigung über den Abstand zur Mitte. */
+  background:
+    radial-gradient(circle closest-side, #fff 0%, rgba(255, 255, 255, 0) 72%),
+    conic-gradient(
+      from 0deg,
+      hsl(0 100% 55%),
+      hsl(30 100% 55%),
+      hsl(60 100% 55%),
+      hsl(90 100% 55%),
+      hsl(120 100% 55%),
+      hsl(150 100% 55%),
+      hsl(180 100% 55%),
+      hsl(210 100% 55%),
+      hsl(240 100% 55%),
+      hsl(270 100% 55%),
+      hsl(300 100% 55%),
+      hsl(330 100% 55%),
+      hsl(360 100% 55%)
+    );
+}
+.color-wheel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.wheel-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  /*
+   * Vom Mittelpunkt aus um --angle drehen und nach außen schieben.
+   * --radius ist die Sättigung als Zahl (0..100); der Weg nach außen ist
+   * davon der Anteil am halben Raddurchmesser. Eine Prozentangabe wäre hier
+   * falsch: die bezöge sich auf die Größe des Griffs, nicht auf das Rad.
+   */
+  transform: rotate(var(--angle, 0deg))
+    translateY(calc(var(--radius, 0) * var(--size) / -200))
+    rotate(calc(-1 * var(--angle, 0deg)));
+  transition: transform 0.18s var(--ease);
+}
+
+.color-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+  flex: 1;
+}
+.color-current {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.color-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+  flex: none;
+  transition: background 0.25s var(--ease);
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+  gap: 0.35rem;
+}
+.swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+  background: var(--swatch);
+}
+.swatch:hover {
+  background: var(--swatch);
+  transform: scale(1.12);
+}
+
 /* ----------------------------------------------------------- Rollläden */
 
 .cover-card .cover-body {
@@ -973,7 +1147,7 @@ input[type='range']:focus {
 }
 .chart .band {
   fill: color-mix(in srgb, var(--accent) 16%, transparent);
-  animation: fade 0.7s var(--ease) both;
+  animation: fade 0.7s var(--ease);
 }
 
 .sparkline {

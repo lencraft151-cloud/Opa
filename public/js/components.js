@@ -1,7 +1,8 @@
 /** Wiederverwendbare Bausteine der Oberfläche. */
 
 import { sparkline } from './charts.js';
-import { COVER_STATE_LABEL, esc, fmt, VENDOR_LABEL } from './format.js';
+import { bindColorControls, colorWheel, hsvToCss } from './colorwheel.js';
+import { CAPABILITY_LABEL, COVER_STATE_LABEL, esc, fmt, VENDOR_LABEL } from './format.js';
 import { iconForDevice, icons } from './icons.js';
 
 const has = (device, capability) => device.capabilities.includes(capability);
@@ -65,9 +66,9 @@ export function deviceCard(device, options = {}) {
   if (has(device, 'color_temperature')) {
     controls.push(
       slider({
-        label: 'Farbtemperatur',
+        label: 'Weißton',
         value: Math.round(state.colorTemperatureK ?? 2700),
-        display: `${Math.round(state.colorTemperatureK ?? 2700)} K`,
+        display: describeKelvin(state.colorTemperatureK ?? 2700),
         attribute: 'kelvin',
         deviceId: device.id,
         min: 2000,
@@ -76,6 +77,20 @@ export function deviceCard(device, options = {}) {
       }),
     );
   }
+  if (has(device, 'color')) {
+    controls.push(`<details class="color-details" data-section="color:${esc(device.id)}">
+      <summary>Farbe wählen</summary>
+      ${colorWheel(device)}
+    </details>`);
+  }
+
+  // Ein Farbpunkt im Kopf zeigt die aktuelle Farbe, ohne dass man das Rad
+  // aufklappen muss.
+  const colorHint =
+    has(device, 'color') && typeof state.hue === 'number'
+      ? `<span class="color-dot" title="Aktuelle Farbe"
+               style="background:${hsvToCss(state.hue, state.saturation ?? 100)}"></span>`
+      : '';
 
   return `<article class="device-card ${state.on ? 'on' : ''} ${device.reachable ? '' : 'offline'}"
                    data-device="${esc(device.id)}">
@@ -84,15 +99,18 @@ export function deviceCard(device, options = {}) {
         <div class="name">${esc(device.name)}</div>
         ${options.showMeta ? metaLine(device, options.roomName) : ''}
       </div>
-      ${
-        has(device, 'switch')
-          ? `<label class="switch" title="Ein/Aus">
-               <input type="checkbox" data-power="${esc(device.id)}" ${state.on ? 'checked' : ''}
-                      ${device.reachable ? '' : 'disabled'} />
-               <span></span>
-             </label>`
-          : `<span class="badge">${device.reachable ? 'Sensor' : 'offline'}</span>`
-      }
+      <div class="row tight" style="flex-wrap:nowrap">
+        ${colorHint}
+        ${
+          has(device, 'switch')
+            ? `<label class="switch" title="Ein- und ausschalten">
+                 <input type="checkbox" data-power="${esc(device.id)}" ${state.on ? 'checked' : ''}
+                        ${device.reachable ? '' : 'disabled'} />
+                 <span></span>
+               </label>`
+            : `<span class="badge">${device.reachable ? 'misst nur' : 'offline'}</span>`
+        }
+      </div>
     </header>
     ${readings.length ? `<div class="readings">${readings.join('')}</div>` : ''}
     ${options.history?.length ? sparkline(options.history) : ''}
@@ -103,14 +121,28 @@ export function deviceCard(device, options = {}) {
 
 function metaLine(device, roomName) {
   const parts = [VENDOR_LABEL[device.vendor] ?? device.vendor];
-  if (device.model) parts.push(device.model);
   if (roomName) parts.push(roomName);
+  // Statt der Fähigkeitscodes steht hier in Alltagssprache, was das Gerät kann.
+  const abilities = device.capabilities
+    .map((capability) => CAPABILITY_LABEL[capability])
+    .filter(Boolean);
+  if (abilities.length > 0) parts.push(abilities.join(', '));
   return `<div class="meta">${esc(parts.join(' · '))}</div>`;
 }
 
 function offlineHint(device) {
-  return `<div class="meta">Zuletzt gesehen: ${esc(fmt.relative(device.lastSeenAt))}.
-    Batteriegeräte melden sich nur beim Aufwachen.</div>`;
+  return `<div class="meta">Antwortet gerade nicht – zuletzt erreicht
+    ${esc(fmt.relative(device.lastSeenAt))}. Sensoren mit Batterie melden sich
+    nur, wenn sie aufwachen; das ist normal.</div>`;
+}
+
+/** „2700 K“ sagt den wenigsten etwas – „warmweiß“ schon. */
+export function describeKelvin(kelvin) {
+  if (kelvin <= 2300) return `Kerzenlicht (${kelvin} K)`;
+  if (kelvin <= 3200) return `warmweiß (${kelvin} K)`;
+  if (kelvin <= 4500) return `neutralweiß (${kelvin} K)`;
+  if (kelvin <= 5500) return `kaltweiß (${kelvin} K)`;
+  return `Tageslicht (${kelvin} K)`;
 }
 
 function slider({ label, value, display, attribute, deviceId, min = 0, max = 100, step = 1 }) {
@@ -205,7 +237,7 @@ const RANGE_COMMANDS = {
 
 const READOUT = {
   brightness: (value) => fmt.percent(value),
-  kelvin: (value) => `${value} K`,
+  kelvin: (value) => describeKelvin(value),
   position: (value) => fmt.percent(value),
   tilt: (value) => fmt.percent(value),
 };
@@ -247,6 +279,8 @@ export function bindDeviceControls(root, onCommand) {
       });
     });
   }
+
+  bindColorControls(root, onCommand);
 }
 
 /** Icon eines Geräts – auch außerhalb der Karte nutzbar. */

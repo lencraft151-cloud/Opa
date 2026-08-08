@@ -229,6 +229,40 @@ export class ShellyClient {
     await this.sendJson(`/light/${channel}`, { query });
   }
 
+  /**
+   * Setzt die Farbe eines RGB-/RGBW-Kanals.
+   *
+   * Gen2 kennt je nach Kanaltyp `RGB.Set` oder `RGBW.Set`; Gen1-Bulbs und der
+   * RGBW2 nehmen die Kanäle direkt als Query-Parameter entgegen.
+   */
+  async setColor(
+    channel: number,
+    rgb: [number, number, number],
+    kind: 'rgb' | 'rgbw' | 'light',
+  ): Promise<void> {
+    const clamped = rgb.map((value) => Math.round(Math.min(255, Math.max(0, value)))) as [
+      number,
+      number,
+      number,
+    ];
+
+    if (this.generation === 2) {
+      const method = kind === 'rgbw' ? 'RGBW.Set' : 'RGB.Set';
+      await this.rpc(method, { id: channel, on: true, rgb: clamped });
+      return;
+    }
+
+    await this.sendJson(`/light/${channel}`, {
+      query: {
+        turn: 'on',
+        mode: 'color',
+        red: clamped[0],
+        green: clamped[1],
+        blue: clamped[2],
+      },
+    });
+  }
+
   async setCoverPosition(channel: number, position: number): Promise<void> {
     const pos = Math.round(Math.min(100, Math.max(0, position)));
     if (this.generation === 2) {

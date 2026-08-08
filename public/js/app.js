@@ -141,10 +141,30 @@ function setConnection(kind, text) {
   label.textContent = text;
 }
 
+/**
+ * Während der Nutzer etwas bedient, wird nicht neu gezeichnet – sonst
+ * springt der Regler unter dem Finger weg, wenn ein Messwert eintrifft.
+ */
+let interacting = false;
+for (const [event, value] of [
+  ['pointerdown', true],
+  ['pointerup', false],
+  ['pointercancel', false],
+]) {
+  document.addEventListener(event, (e) => {
+    if (value && !e.target.closest?.('.color-wheel, input[type="range"]')) return;
+    interacting = value;
+  });
+}
+
 function scheduleRender() {
   if (renderTimer) return;
   renderTimer = setTimeout(() => {
     renderTimer = null;
+    if (interacting) {
+      scheduleRender(); // später erneut versuchen
+      return;
+    }
     renderCurrent();
   }, 350);
 }
