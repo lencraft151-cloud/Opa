@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { CAPABILITIES, INTEGRATION_TYPES, METRICS, SETUP_STEPS } from '../core/types.js';
+import {
+  CAPABILITIES,
+  INTEGRATION_TYPES,
+  METRICS,
+  SETUP_STEPS,
+  THEME_PREFERENCES,
+} from '../core/types.js';
 
 export const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('setPower'), on: z.boolean() }),
@@ -16,6 +22,10 @@ export const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('closeCover') }),
   z.object({ type: z.literal('stopCover') }),
   z.object({ type: z.literal('setTilt'), tilt: z.number().min(0).max(100) }),
+  z.object({
+    type: z.literal('setTargetTemperature'),
+    targetTemperatureC: z.number().min(4).max(35),
+  }),
   z.object({ type: z.literal('identify') }),
 ]);
 
@@ -61,6 +71,14 @@ export const triggerSchema = z.discriminatedUnion('type', [
     type: z.literal('schedule'),
     at: timeSchema,
     days: z.array(z.number().int().min(0).max(6)).default([]),
+  }),
+  z.object({
+    type: z.literal('interval'),
+    // Unter fünf Minuten wäre der Sinn fraglich und die Last unnötig.
+    everyMinutes: z.number().int().min(5).max(1440),
+    from: timeSchema.optional(),
+    to: timeSchema.optional(),
+    days: z.array(z.number().int().min(0).max(6)).optional(),
   }),
 ]);
 
@@ -113,6 +131,30 @@ export const householdSchema = z.object({
   currency: z.string().min(1).max(8).optional(),
   basePricePerMonth: z.number().min(0).max(1000).optional(),
 });
+
+/**
+ * Darstellung. Die Farben werden hier schon auf `#rrggbb` festgenagelt –
+ * eine ungültige Farbe würde im Browser lautlos ignoriert und der Nutzer
+ * stünde vor einer Einstellung, die scheinbar nichts tut.
+ */
+export const appearanceSchema = z
+  .object({
+    fontScale: z.number().min(0.85).max(1.6).optional(),
+    // `null` heißt: mitgelieferte Farbe verwenden.
+    accentColor: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/, 'Farbe im Format #rrggbb erwartet')
+      .nullable()
+      .optional(),
+    accentColorAlt: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/, 'Farbe im Format #rrggbb erwartet')
+      .nullable()
+      .optional(),
+    theme: z.enum(THEME_PREFERENCES).optional(),
+    reduceMotion: z.boolean().optional(),
+  })
+  .strict();
 
 export const roomSchema = z.object({
   name: z.string().min(1).max(80),

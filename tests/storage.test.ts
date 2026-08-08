@@ -9,6 +9,7 @@ import { TelemetryStore, daysBetween, downsample } from '../src/storage/telemetr
 import { enumerateHosts, isIPv4, isPrivateIPv4 } from '../src/util/net.ts';
 import { nowIso } from '../src/util/id.ts';
 import type { Household } from '../src/core/types.ts';
+import { DEFAULT_APPEARANCE } from '../src/core/types.ts';
 
 let dir: string;
 
@@ -33,6 +34,7 @@ const household = (id: string): Household => ({
   autoUpdate: false,
   autoUpdateFrom: '03:00',
   autoUpdateTo: '05:00',
+  appearance: { ...DEFAULT_APPEARANCE },
   createdAt: nowIso(),
   updatedAt: nowIso(),
 });

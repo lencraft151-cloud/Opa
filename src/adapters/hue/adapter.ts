@@ -20,6 +20,16 @@ import {
   stateFor,
   type HueIndex,
 } from './mapping.js';
+import {
+  buildV1Devices,
+  degreesToHue,
+  parseV1ExternalId,
+  percentToBri,
+  percentToSat,
+  type HueV1Group,
+  type HueV1Light,
+  type HueV1Sensor,
+} from './v1mapping.js';
 import type {
   AdapterDevice,
   DiscoverOptions,
@@ -64,7 +74,19 @@ export class HueAdapter implements IntegrationAdapter {
     const secrets: HueIntegrationSecrets = { applicationKey: key.applicationKey };
     if (key.clientKey) secrets.clientKey = key.clientKey;
 
-    log.info('Hue Bridge verbunden', { host: req.host, bridgeId: config.bridgeid });
+    /*
+     * Erst mit gültigem Schlüssel lässt sich prüfen, welche API die Bridge
+     * spricht. Die alte runde BSB001 kennt nur die V1 – ohne diese Prüfung
+     * erschiene sie als „verbunden, aber ohne Geräte“.
+     */
+    const probe = new HueClient(req.host, key.applicationKey);
+    integrationConfig.protocol = (await probe.supportsV2()) ? 'v2' : 'v1';
+
+    log.info('Hue Bridge verbunden', {
+      host: req.host,
+      bridgeId: config.bridgeid,
+      protokoll: integrationConfig.protocol,
+    });
 
     return {
       name: req.name?.trim() || config.name || 'Hue Bridge',
@@ -75,12 +97,22 @@ export class HueAdapter implements IntegrationAdapter {
   }
 
   async test(ctx: IntegrationContext): Promise<void> {
-    const client = this.clientFor(ctx as HueContext);
+    const hueCtx = ctx as HueContext;
+    const client = this.clientFor(hueCtx);
+    if (usesV1(hueCtx)) {
+      const state = await client.getV1State();
+      if (Object.keys(state.lights).length === 0 && Object.keys(state.sensors).length === 0) {
+        throw upstreamError('Die Bridge liefert keine Geräte zurück');
+      }
+      return;
+    }
     const resources = await client.getResourcesOfType('bridge');
     if (resources.length === 0) throw upstreamError('Die Bridge liefert keine Daten zurück');
   }
 
   async listDevices(ctx: IntegrationContext): Promise<AdapterDevice[]> {
+    if (usesV1(ctx as HueContext)) return this.listV1Devices(ctx as HueContext);
+
     const index = await this.refreshIndex(ctx as HueContext);
     const devices: AdapterDevice[] = [];
 
@@ -110,6 +142,11 @@ export class HueAdapter implements IntegrationAdapter {
   }
 
   async readStates(ctx: IntegrationContext): Promise<Map<string, DeviceState>> {
+    if (usesV1(ctx as HueContext)) {
+      const devices = await this.listV1Devices(ctx as HueContext);
+      return new Map(devices.map((device) => [device.externalId, device.state]));
+    }
+
     const index = await this.refreshIndex(ctx as HueContext);
     const states = new Map<string, DeviceState>();
     for (const [deviceId, resource] of index.byId) {
@@ -127,6 +164,8 @@ export class HueAdapter implements IntegrationAdapter {
   ): Promise<DeviceState> {
     const hueCtx = ctx as HueContext;
     const client = this.clientFor(hueCtx);
+
+    if (usesV1(hueCtx)) return this.executeV1(hueCtx, externalId, command);
 
     if (command.type === 'identify') {
       await client.identifyDevice(externalId);
@@ -153,8 +192,48 @@ export class HueAdapter implements IntegrationAdapter {
     return { ...current, ...optimistic };
   }
 
+  // -------------------------------------------------------------------------
+  // API v1 (alte runde Bridge)
+  // -------------------------------------------------------------------------
+
+  private async listV1Devices(ctx: HueContext): Promise<AdapterDevice[]> {
+    const state = await this.clientFor(ctx).getV1State();
+    return buildV1Devices({
+      lights: state.lights as Record<string, HueV1Light>,
+      sensors: state.sensors as Record<string, HueV1Sensor>,
+      groups: state.groups as Record<string, HueV1Group>,
+    });
+  }
+
+  private async executeV1(
+    ctx: HueContext,
+    externalId: string,
+    command: DeviceCommand,
+  ): Promise<DeviceState> {
+    const parsed = parseV1ExternalId(externalId);
+    if (!parsed || parsed.kind !== 'light') {
+      throw badRequest(
+        'Dieses Hue-Gerät lässt sich nicht schalten.',
+        undefined,
+        'Sensoren und Schalter liefern nur Messwerte – steuerbar sind nur Leuchten.',
+      );
+    }
+
+    const client = this.clientFor(ctx);
+    if (command.type === 'identify') {
+      await client.alertV1Light(parsed.id);
+      return {};
+    }
+
+    const { body, optimistic } = buildV1LightUpdate(command);
+    await client.setV1LightState(parsed.id, body);
+    return optimistic;
+  }
+
   async subscribe(ctx: IntegrationContext, onUpdate: StateUpdateHandler): Promise<() => void> {
     const hueCtx = ctx as HueContext;
+    // Die V1-API hat keinen Ereignisstrom – dort bleibt es beim Abfragen.
+    if (usesV1(hueCtx)) return () => undefined;
     let stopped = false;
     let currentStream: { destroy: () => void } | null = null;
 
@@ -282,6 +361,66 @@ export class HueAdapter implements IntegrationAdapter {
 
   private async ensureIndex(ctx: HueContext): Promise<HueIndex> {
     return this.indexCache.get(ctx.integration.id) ?? (await this.refreshIndex(ctx));
+  }
+}
+
+/** Spricht diese Bridge nur die alte V1-API? */
+function usesV1(ctx: HueContext): boolean {
+  return ctx.config.protocol === 'v1';
+}
+
+/**
+ * Übersetzt ein Hub-Kommando in einen V1-Lichtzustand.
+ * Die V1 rechnet in eigenen Einheiten: Helligkeit 0..254, Farbton 0..65535.
+ */
+export function buildV1LightUpdate(command: DeviceCommand): {
+  body: Record<string, unknown>;
+  optimistic: DeviceState;
+} {
+  switch (command.type) {
+    case 'setPower':
+      return { body: { on: command.on }, optimistic: { on: command.on } };
+
+    case 'toggle':
+      // Die V1 kennt kein Umschalten; der Aufrufer kennt den Zustand.
+      throw badRequest(
+        'Umschalten wird von dieser alten Bridge nicht direkt unterstützt.',
+        undefined,
+        'Sende stattdessen Ein oder Aus.',
+      );
+
+    case 'setBrightness': {
+      const brightness = clamp(command.brightness, 0, 100);
+      if (brightness === 0) return { body: { on: false }, optimistic: { on: false, brightness: 0 } };
+      return {
+        body: { on: true, bri: percentToBri(brightness) },
+        optimistic: { on: true, brightness },
+      };
+    }
+
+    case 'setColorTemperature': {
+      const kelvin = clamp(command.kelvin, 2000, 6500);
+      return {
+        body: { on: true, ct: clampMirek(kelvinToMired(kelvin)) },
+        optimistic: { on: true, colorTemperatureK: Math.round(kelvin) },
+      };
+    }
+
+    case 'setColor': {
+      const hue = ((command.hue % 360) + 360) % 360;
+      const saturation = clamp(command.saturation, 0, 100);
+      return {
+        body: { on: true, hue: degreesToHue(hue), sat: percentToSat(saturation) },
+        optimistic: { on: true, hue, saturation },
+      };
+    }
+
+    default:
+      throw badRequest(
+        'Dieses Kommando passt nicht zu einer Hue-Leuchte.',
+        undefined,
+        'Rollläden und Heizungen werden von Shelly- und Homematic-Geräten bedient.',
+      );
   }
 }
 

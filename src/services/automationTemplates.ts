@@ -321,6 +321,88 @@ export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
   },
 
   {
+    id: 'airing-reminder',
+    emoji: '🪟',
+    name: 'Regelmäßig ans Lüften erinnern',
+    summary: 'Wiederholt sich im eingestellten Takt, nur tagsüber.',
+    explanation:
+      'Ein Beispiel für eine wiederholende Regel: Sie läuft nicht zu einer festen Uhrzeit, ' +
+      'sondern immer wieder im gewählten Abstand – und nur innerhalb des Zeitfensters. ' +
+      'Die Meldung erscheint in der App.',
+    fields: [
+      {
+        key: 'everyMinutes',
+        label: 'Abstand',
+        type: 'number',
+        unit: 'Minuten',
+        min: 5,
+        max: 1440,
+        step: 5,
+        help: 'So oft wiederholt sich die Regel, solange das Zeitfenster gilt.',
+      },
+      { key: 'from', label: 'Frühestens ab', type: 'time', help: 'Vor dieser Uhrzeit passiert nichts.' },
+      { key: 'to', label: 'Spätestens bis', type: 'time', help: 'Danach ruht die Regel bis zum nächsten Tag.' },
+    ],
+    build: (values) => ({
+      name: 'Lüften nicht vergessen',
+      trigger: {
+        type: 'interval',
+        everyMinutes: num(values, 'everyMinutes'),
+        from: time(values, 'from'),
+        to: time(values, 'to'),
+      },
+      actions: [{ type: 'notify', message: 'Zeit zum Lüften – kurz das Fenster öffnen.' }],
+      cooldownSeconds: 0,
+    }),
+  },
+
+  {
+    id: 'heating-night-setback',
+    emoji: '🌡️',
+    name: 'Heizung nachts absenken',
+    summary: 'Zur eingestellten Uhrzeit wird die Solltemperatur gesenkt.',
+    explanation:
+      'Spart Heizkosten, ohne dass jemand daran denken muss. Braucht ein Thermostat oder ' +
+      'Heizkörperventil – etwa von Homematic oder einen Shelly TRV. Fürs Hochheizen am ' +
+      'Morgen legst du dieselbe Vorlage ein zweites Mal an.',
+    fields: [
+      { key: 'at', label: 'Uhrzeit', type: 'time', help: 'Wann abgesenkt wird.' },
+      {
+        key: 'thermostats',
+        label: 'Diese Heizungen',
+        type: 'devices',
+        capability: 'thermostat',
+        help: 'Wähle mindestens ein Thermostat.',
+      },
+      {
+        key: 'targetTemperature',
+        label: 'Solltemperatur',
+        type: 'number',
+        unit: '°C',
+        min: 4,
+        max: 30,
+        step: 0.5,
+        help: '17 °C sind nachts für Wohnräume ein üblicher Wert.',
+      },
+    ],
+    build: (values) => ({
+      name: 'Heizung nachts absenken',
+      trigger: { type: 'schedule', at: time(values, 'at'), days: [] },
+      actions: [
+        {
+          type: 'command',
+          target: { deviceIds: list(values, 'thermostats') },
+          command: {
+            type: 'setTargetTemperature',
+            targetTemperatureC: num(values, 'targetTemperature'),
+          },
+        },
+      ],
+      cooldownSeconds: 0,
+    }),
+  },
+
+  {
     id: 'low-battery',
     emoji: '🔋',
     name: 'Warnen bei schwacher Batterie',
@@ -450,7 +532,12 @@ const FIELD_DEFAULTS: Record<string, Record<string, string | number>> = {
   'covers-morning': { at: '07:30', weekdaysOnly: 1 },
   'covers-evening': { at: '21:00' },
   'all-off-night': { at: '23:30' },
+  'airing-reminder': { everyMinutes: 180, from: '08:00', to: '20:00' },
+  'heating-night-setback': { at: '22:30', targetTemperature: 17 },
 };
+
+/** Zeitfelder, die nicht die Standardvorgabe bekommen sollen. */
+const MULTI_TIME_TEMPLATES = new Set(['airing-reminder']);
 
 export function templateById(id: string): AutomationTemplate {
   const template = AUTOMATION_TEMPLATES.find((entry) => entry.id === id);
@@ -502,7 +589,8 @@ export function resolveTemplates(devices: Device[], rooms: Room[]): ResolvedTemp
         continue;
       }
       if (field.type === 'time') {
-        defaults[field.key] = presets[field.key] ?? '07:00';
+        defaults[field.key] =
+          presets[field.key] ?? (MULTI_TIME_TEMPLATES.has(template.id) ? '08:00' : '07:00');
         continue;
       }
       if (!field.capability) continue;
@@ -540,6 +628,7 @@ function describeMissing(field: TemplateField): string {
     'sensor.battery': 'Kein Gerät meldet einen Batteriestand.',
     switch: 'Es ist kein schaltbares Gerät eingebunden.',
     cover: 'Es ist kein Rollladen eingebunden.',
+    thermostat: 'Es ist keine Heizung mit Solltemperatur eingebunden.',
   };
   return (
     labels[field.capability as Capability] ??

@@ -253,6 +253,7 @@ const REQUIRED_CAPABILITY: Record<DeviceCommand['type'], Capability | null> = {
   closeCover: 'cover',
   stopCover: 'cover',
   setTilt: 'cover.tilt',
+  setTargetTemperature: 'thermostat',
   identify: null,
 };
 
@@ -264,6 +265,7 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
   color_temperature: 'Farbtemperatur einstellbar',
   cover: 'Rollladen',
   'cover.tilt': 'Jalousie mit Lamellen',
+  thermostat: 'Heizung mit Solltemperatur',
   'sensor.temperature': 'Temperatursensor',
   'sensor.humidity': 'Feuchtesensor',
   'sensor.motion': 'Bewegungsmelder',

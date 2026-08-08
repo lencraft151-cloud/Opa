@@ -6,6 +6,7 @@ import { CAPABILITY_LABEL, COVER_STATE_LABEL, esc, fmt, VENDOR_LABEL } from './f
 import { iconForDevice, icons } from './icons.js';
 
 const has = (device, capability) => device.capabilities.includes(capability);
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 /** Zusammenfassende Kachel. */
 export function tile({ value, label, trend, accent = false }) {
@@ -38,6 +39,7 @@ export function skeletonGrid(count = 4) {
  */
 export function deviceCard(device, options = {}) {
   if (has(device, 'cover')) return coverCard(device, options);
+  if (has(device, 'thermostat')) return thermostatCard(device, options);
 
   const state = device.state ?? {};
   const readings = [];
@@ -225,6 +227,82 @@ export function coverCard(device, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Heizung
+// ---------------------------------------------------------------------------
+
+/** Kleinster einstellbarer Schritt – so arbeiten Heizkörperthermostate. */
+export const TARGET_STEP = 0.5;
+export const TARGET_MIN = 5;
+export const TARGET_MAX = 30;
+
+/**
+ * Heizungskarte.
+ *
+ * Oben groß die gemessene Temperatur, darunter die Solltemperatur zum
+ * Einstellen. Die beiden Werte werden bewusst unterschiedlich dargestellt:
+ * „21,5 °C“ ist, was gerade ist – „21,0 °C“ ist, was sein soll.
+ */
+export function thermostatCard(device, options = {}) {
+  const state = device.state ?? {};
+  const target = typeof state.targetTemperatureC === 'number' ? state.targetTemperatureC : null;
+  const current = typeof state.temperatureC === 'number' ? state.temperatureC : null;
+  const valve = typeof state.valvePosition === 'number' ? state.valvePosition : null;
+
+  // Heizt gerade? Ventilstellung ist die genauere Auskunft, ersatzweise der
+  // Vergleich von Soll und Ist.
+  const heating = valve !== null ? valve > 5 : target !== null && current !== null && target > current + 0.2;
+
+  const extras = [];
+  if (valve !== null) extras.push(`<span class="reading">🔧 <strong>${esc(fmt.percent(valve))}</strong></span>`);
+  if (has(device, 'sensor.humidity')) {
+    extras.push(`<span class="reading">💧 <strong>${esc(fmt.percent(state.humidity))}</strong></span>`);
+  }
+  if (has(device, 'sensor.battery')) {
+    extras.push(`<span class="reading">🔋 <strong>${esc(fmt.percent(state.batteryPercent))}</strong></span>`);
+  }
+
+  const disabled = device.reachable ? '' : 'disabled';
+
+  return `<article class="device-card thermostat-card ${heating ? 'heating' : ''} ${
+    device.reachable ? '' : 'offline'
+  }" data-device="${esc(device.id)}">
+    <header>
+      <div>
+        <div class="name">${esc(device.name)}</div>
+        ${options.showMeta ? metaLine(device, options.roomName) : ''}
+      </div>
+      <span class="badge ${heating ? 'warn' : ''}">${heating ? 'heizt' : 'aus'}</span>
+    </header>
+
+    <div class="thermo-body">
+      <div class="thermo-now">
+        <span class="thermo-current">${esc(fmt.temperature(current))}</span>
+        <span class="thermo-label">gemessen</span>
+      </div>
+
+      <div class="thermo-set">
+        <button class="icon round" data-target-step="${esc(device.id)}" data-delta="-${TARGET_STEP}"
+                aria-label="Solltemperatur senken" ${disabled}>−</button>
+        <div class="thermo-target">
+          <b data-readout="target">${esc(target === null ? '–' : fmt.temperature(target))}</b>
+          <span class="thermo-label">gewünscht</span>
+        </div>
+        <button class="icon round" data-target-step="${esc(device.id)}" data-delta="${TARGET_STEP}"
+                aria-label="Solltemperatur erhöhen" ${disabled}>+</button>
+      </div>
+    </div>
+
+    <input class="thermo-range" type="range" min="${TARGET_MIN}" max="${TARGET_MAX}" step="${TARGET_STEP}"
+           value="${target ?? 20}" data-target="${esc(device.id)}" ${disabled}
+           aria-label="Solltemperatur" />
+    <div class="thermo-scale"><span>${TARGET_MIN} °C</span><span>Sparen ab 20 °C</span><span>${TARGET_MAX} °C</span></div>
+
+    ${extras.length ? `<div class="readings">${extras.join('')}</div>` : ''}
+    ${device.reachable ? '' : offlineHint(device)}
+  </article>`;
+}
+
+// ---------------------------------------------------------------------------
 // Verdrahtung
 // ---------------------------------------------------------------------------
 
@@ -233,6 +311,7 @@ const RANGE_COMMANDS = {
   kelvin: (value) => ({ type: 'setColorTemperature', kelvin: value }),
   position: (value) => ({ type: 'setPosition', position: value }),
   tilt: (value) => ({ type: 'setTilt', tilt: value }),
+  target: (value) => ({ type: 'setTargetTemperature', targetTemperatureC: value }),
 };
 
 const READOUT = {
@@ -240,6 +319,7 @@ const READOUT = {
   kelvin: (value) => describeKelvin(value),
   position: (value) => fmt.percent(value),
   tilt: (value) => fmt.percent(value),
+  target: (value) => fmt.temperature(value),
 };
 
 /**
@@ -255,8 +335,13 @@ export function bindDeviceControls(root, onCommand) {
   });
 
   for (const [attribute, build] of Object.entries(RANGE_COMMANDS)) {
-    root.querySelectorAll(`[data-${attribute}]`).forEach((input) => {
-      const readout = input.closest('.slider-field')?.querySelector('[data-readout]');
+    root.querySelectorAll(`input[type="range"][data-${attribute}]`).forEach((input) => {
+      // Der Wert steht entweder direkt am Regler (`.slider-field`) oder – wie
+      // bei der Heizung – groß in der Karte.
+      const readout =
+        input.closest('.slider-field')?.querySelector('[data-readout]') ??
+        input.closest('.device-card')?.querySelector(`[data-readout="${attribute}"]`);
+
       // Beschriftung folgt dem Finger, gesendet wird erst beim Loslassen.
       input.addEventListener('input', () => {
         if (readout) readout.textContent = READOUT[attribute](Number(input.value));
@@ -266,6 +351,26 @@ export function bindDeviceControls(root, onCommand) {
       });
     });
   }
+
+  // Plus und Minus an der Heizung: Sie verschieben den Regler und senden den
+  // neuen Wert – auf dem Handy trifft man einen Knopf leichter als 0,5 °C
+  // auf einer Schiene.
+  root.querySelectorAll('[data-target-step]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const deviceId = button.dataset.targetStep;
+      const range = root.querySelector(`input[data-target="${CSS.escape(deviceId)}"]`);
+      if (!range) return;
+      const next = clamp(
+        Number(range.value) + Number(button.dataset.delta),
+        Number(range.min),
+        Number(range.max),
+      );
+      range.value = String(next);
+      const readout = range.closest('.device-card')?.querySelector('[data-readout="target"]');
+      if (readout) readout.textContent = fmt.temperature(next);
+      void onCommand(deviceId, { type: 'setTargetTemperature', targetTemperatureC: next });
+    });
+  });
 
   const coverButtons = [
     ['coverOpen', 'openCover'],

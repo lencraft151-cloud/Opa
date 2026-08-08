@@ -69,6 +69,24 @@ export class ShellyAdapter implements IntegrationAdapter {
     const client = this.clientFor({ config, secrets } as ShellyContext);
     await client.getStatus();
 
+    /*
+     * Der selbst vergebene Name steht bei Gen1 nur in `/settings`, nicht in
+     * `/shelly`. Ohne diesen Schritt hieße ein Gerät, das in der Shelly-App
+     * „Heizung Bad" heißt, im Hub „SHTRV-01" – und alle seine Kanäle gleich
+     * mit.
+     */
+    let configuredName: string | undefined;
+    try {
+      const deviceConfig = await client.getConfig();
+      const naming = namingFromConfig(deviceConfig, probe.generation, '');
+      if (naming.deviceName) configuredName = naming.deviceName;
+    } catch (err) {
+      log.debug('Gerätename konnte nicht gelesen werden', {
+        host: req.host,
+        error: (err as Error).message,
+      });
+    }
+
     log.info('Shelly verbunden', {
       host: req.host,
       generation: probe.generation,
@@ -76,7 +94,7 @@ export class ShellyAdapter implements IntegrationAdapter {
     });
 
     return {
-      name: req.name?.trim() || probe.name || probe.app || probe.model,
+      name: req.name?.trim() || configuredName || probe.name || probe.app || probe.model,
       externalId: probe.deviceId,
       config,
       secrets,
@@ -199,6 +217,19 @@ export class ShellyAdapter implements IntegrationAdapter {
         const tilt = clamp(command.tilt, 0, 100);
         await client.setCoverTilt(channel, tilt);
         return { tilt };
+      }
+
+      case 'setTargetTemperature': {
+        if (kind !== 'thermostat') {
+          throw badRequest(
+            `Die Komponente "${externalId}" ist keine Heizung.`,
+            undefined,
+            'Solltemperaturen nehmen nur Thermostate wie der Shelly TRV an.',
+          );
+        }
+        const target = clamp(command.targetTemperatureC, 4, 35);
+        await client.setThermostatTarget(channel, target);
+        return { targetTemperatureC: target };
       }
 
       case 'setColorTemperature':

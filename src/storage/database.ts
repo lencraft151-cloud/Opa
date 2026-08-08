@@ -9,6 +9,7 @@ import type {
   Integration,
   Room,
 } from '../core/types.js';
+import { DEFAULT_APPEARANCE } from '../core/types.js';
 
 const log = createLogger('db');
 
@@ -129,13 +130,20 @@ export class Database {
   }
 }
 
-/** Platzhalter für spätere Schemaänderungen. */
+/** Ergänzt Felder, die es beim letzten Speichern noch nicht gab. */
 function migrate(data: DatabaseShape): DatabaseShape {
   if (data.version > SCHEMA_VERSION) {
     throw new Error(
       `Die Datenbank stammt aus einer neueren Version (${data.version} > ${SCHEMA_VERSION}).`,
     );
   }
+
+  // Die Darstellung kam später dazu. Ohne diesen Schritt hätte ein
+  // bestehender Haushalt keine Schriftgröße und keine Akzentfarbe.
+  for (const household of data.households) {
+    household.appearance = { ...DEFAULT_APPEARANCE, ...(household.appearance ?? {}) };
+  }
+
   data.version = SCHEMA_VERSION;
   return data;
 }

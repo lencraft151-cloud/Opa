@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { Container } from '../../container.js';
 import { asyncHandler, parseBody } from '../http.js';
+import { appearanceSchema } from '../validation.js';
 
 export function householdRoutes(container: Container): Router {
   const router = Router();
@@ -32,6 +33,8 @@ export function householdRoutes(container: Container): Router {
             .string()
             .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Uhrzeit im Format HH:MM erwartet')
             .optional(),
+          // Darstellung: Schriftgröße, Akzentfarben, Helligkeit, Bewegung
+          appearance: appearanceSchema.optional(),
         }),
         req,
       );

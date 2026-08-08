@@ -258,6 +258,77 @@ export class HueClient {
   }
 
   // -------------------------------------------------------------------------
+  // API v1 – für die alte runde Bridge (BSB001) und sehr alte Firmware
+  // -------------------------------------------------------------------------
+
+  /**
+   * Prüft, ob diese Bridge die CLIP-API v2 beherrscht. Die runde Bridge
+   * antwortet auf `/clip/v2/...` mit einem Fehler; erst danach wissen wir
+   * verlässlich, welchen Weg wir gehen müssen.
+   */
+  async supportsV2(): Promise<boolean> {
+    try {
+      const res = await request(`${this.baseV2}/resource/bridge`, {
+        headers: this.headers(),
+        insecureTLS: true,
+        timeoutMs: this.timeoutMs,
+      });
+      if (res.status >= 400) return false;
+      const parsed = JSON.parse(res.body) as { data?: unknown[] };
+      return Array.isArray(parsed.data);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Sammelt Leuchten, Sensoren und Gruppen in einem Aufruf. */
+  async getV1State(): Promise<{
+    lights: Record<string, unknown>;
+    sensors: Record<string, unknown>;
+    groups: Record<string, unknown>;
+  }> {
+    if (!this.applicationKey) throw upstreamError('Es wurde kein Hue Application Key hinterlegt');
+    // Die alte Bridge liefert unter /api/<key> den gesamten Datenspeicher.
+    const all = await requestJson<{
+      lights?: Record<string, unknown>;
+      sensors?: Record<string, unknown>;
+      groups?: Record<string, unknown>;
+    }>(this.v1Base(), { insecureTLS: true, timeoutMs: this.timeoutMs, maxBodyBytes: 16 * 1024 * 1024 });
+
+    return {
+      lights: all.lights ?? {},
+      sensors: all.sensors ?? {},
+      groups: all.groups ?? {},
+    };
+  }
+
+  async setV1LightState(lightId: string, state: Record<string, unknown>): Promise<void> {
+    const res = await request(`${this.v1Base()}/lights/${lightId}/state`, {
+      method: 'PUT',
+      json: state,
+      insecureTLS: true,
+      timeoutMs: this.timeoutMs,
+    });
+    if (res.status >= 400) {
+      throw upstreamError(`Die Hue Bridge lehnt die Änderung ab (HTTP ${res.status}).`);
+    }
+    const parsed = JSON.parse(res.body) as Array<{ error?: { description?: string } }>;
+    const failure = parsed.find((entry) => entry.error);
+    if (failure?.error) {
+      throw upstreamError(`Hue Bridge: ${failure.error.description ?? 'unbekannter Fehler'}`);
+    }
+  }
+
+  /** Blinken lassen – das Identify der V1-API. */
+  async alertV1Light(lightId: string): Promise<void> {
+    await this.setV1LightState(lightId, { alert: 'select' });
+  }
+
+  private v1Base(): string {
+    return `https://${this.host}/api/${this.applicationKey}`;
+  }
+
+  // -------------------------------------------------------------------------
   // Firmware der Bridge (nur über die V1-API verfügbar)
   // -------------------------------------------------------------------------
 

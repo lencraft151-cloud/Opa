@@ -1,9 +1,15 @@
+import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
 import { events } from '../../core/events.js';
 import type { Container } from '../../container.js';
+import { assetVersion } from '../assetVersion.js';
+import { asyncHandler } from '../http.js';
 
 const START_TIME = Date.now();
 const VERSION = '1.0.0';
+
+/** `public/` liegt neben `src/` bzw. `dist/` – siehe `server/app.ts`. */
+const PUBLIC_DIR = fileURLToPath(new URL('../../../public', import.meta.url));
 
 export function systemRoutes(container: Container): Router {
   const router = Router();
@@ -16,27 +22,36 @@ export function systemRoutes(container: Container): Router {
     });
   });
 
-  router.get('/system/info', (_req, res) => {
-    const household = container.households.current();
-    res.json({
-      name: 'Smart-Home-Hub',
-      version: VERSION,
-      node: process.version,
-      hasHousehold: household !== undefined,
-      setupCompleted: household?.setupCompletedAt !== null && household !== undefined,
-      authRequired: !container.config.authDisabled,
-      adapters: container.registry.list().map((adapter) => ({
-        type: adapter.type,
-        displayName: adapter.displayName,
-        supportsPush: typeof adapter.subscribe === 'function',
-      })),
-      settings: {
-        pollIntervalSeconds: container.config.pollIntervalSeconds,
-        telemetryRetentionDays: container.config.telemetryRetentionDays,
-        cloudDiscovery: container.config.allowCloudDiscovery,
-      },
-    });
-  });
+  router.get(
+    '/system/info',
+    asyncHandler(async (_req, res) => {
+      const household = container.households.current();
+      res.json({
+        name: 'Smart-Home-Hub',
+        version: VERSION,
+        /*
+         * Kennung der ausgelieferten Oberfläche. Sie ändert sich mit jeder
+         * geänderten Datei unter `public/`; die Weboberfläche erkennt daran,
+         * dass eine neue Fassung bereitsteht, und lädt sich selbst neu.
+         */
+        build: await assetVersion(PUBLIC_DIR),
+        node: process.version,
+        hasHousehold: household !== undefined,
+        setupCompleted: household?.setupCompletedAt !== null && household !== undefined,
+        authRequired: !container.config.authDisabled,
+        adapters: container.registry.list().map((adapter) => ({
+          type: adapter.type,
+          displayName: adapter.displayName,
+          supportsPush: typeof adapter.subscribe === 'function',
+        })),
+        settings: {
+          pollIntervalSeconds: container.config.pollIntervalSeconds,
+          telemetryRetentionDays: container.config.telemetryRetentionDays,
+          cloudDiscovery: container.config.allowCloudDiscovery,
+        },
+      });
+    }),
+  );
 
   /**
    * Live-Updates per Server-Sent Events. Die UI hält damit Gerätezustände

@@ -170,6 +170,25 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
         break;
       }
 
+      case 'thermostat': {
+        // Wall Display und BLU TRV melden Soll- und Istwert getrennt.
+        const target = num(value['target_C']) ?? num(obj(value['target_t'])?.['value']);
+        const current = num(value['current_C']) ?? num(value['tC']);
+        if (target === undefined && current === undefined) break;
+        const state: DeviceState = {};
+        if (target !== undefined) state.targetTemperatureC = round(target, 1);
+        if (current !== undefined) state.temperatureC = round(current, 2);
+        const capabilities: Capability[] = ['thermostat'];
+        if (current !== undefined) capabilities.push('sensor.temperature');
+        components.push({
+          externalId: key,
+          name: label(naming, key, `Heizung ${channel + 1}`),
+          capabilities,
+          state,
+        });
+        break;
+      }
+
       case 'devicepower': {
         const percent = num(obj(value['battery'])?.['percent']);
         if (percent === undefined) break;
@@ -329,6 +348,37 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
       });
     });
   }
+
+  /*
+   * Shelly TRV (SHTRV-01): das Heizkörperventil meldet Soll- und Isttemperatur
+   * sowie die Ventilstellung in einem eigenen Abschnitt. Es ist Gen1 und
+   * bekommt keine neue Firmware mehr – ohne diesen Zweig bliebe es unerkannt.
+   */
+  const thermostats = arr(status['thermostats']) ?? [];
+  thermostats.forEach((rawThermostat, index) => {
+    const thermostat = obj(rawThermostat);
+    if (!thermostat) return;
+    const externalId = `thermostat:${index}`;
+    const state: DeviceState = {};
+    const capabilities: Capability[] = ['thermostat'];
+
+    const target = num(obj(thermostat['target_t'])?.['value']);
+    if (target !== undefined) state.targetTemperatureC = round(target, 1);
+    const current = num(obj(thermostat['tmp'])?.['value']);
+    if (current !== undefined) {
+      state.temperatureC = round(current, 2);
+      capabilities.push('sensor.temperature');
+    }
+    const valve = num(thermostat['pos']);
+    if (valve !== undefined) state.valvePosition = round(valve, 0);
+
+    components.push({
+      externalId,
+      name: label(naming, externalId, `Heizung ${index + 1}`),
+      capabilities,
+      state,
+    });
+  });
 
   // Shelly H&T / Flood / Door-Window
   const tmp = obj(status['tmp']);

@@ -3,7 +3,23 @@
    Aufbau: Tokens → Grundlagen → Bausteine → Ansichten → Animationen
    ========================================================================== */
 
+/*
+ * Farben und Größen stehen ausschließlich hier.
+ *
+ * Die dunkle Palette steht zweimal – einmal für „der Systemeinstellung
+ * folgen“ und einmal für die feste Auswahl in den Einstellungen. CSS kann
+ * eine Media-Query und ein Attribut nicht in einer Regel zusammenfassen;
+ * die Werte selbst kommen beide Male aus den `--d-*`-Tokens darüber, damit
+ * es nur eine Stelle zum Ändern gibt.
+ */
+
 :root {
+  color-scheme: light dark;
+
+  /* Aus den Einstellungen gesetzt (siehe public/js/appearance.js). */
+  --font-scale: 1;
+  --base-size: 15px;
+
   --bg: #eef1f6;
   --bg-glow: radial-gradient(1200px 600px at 15% -10%, #dce7ff 0%, transparent 60%);
   --surface: #ffffff;
@@ -14,12 +30,38 @@
   --text: #131b26;
   --muted: #5d6b83;
   --accent: #2f6bd8;
-  --accent-soft: #dce8ff;
+  --accent-2: #0f9aa8;
   --accent-text: #ffffff;
   --ok: #12905a;
   --warn: #b8760a;
   --error: #cc3535;
   --cover: #7a6249;
+
+  /* Dunkle Palette – zugewiesen wird sie weiter unten. */
+  --d-bg: #0d1219;
+  --d-bg-glow: radial-gradient(1200px 600px at 15% -10%, #17243a 0%, transparent 60%);
+  --d-surface: #161e29;
+  --d-surface-2: #1c2632;
+  --d-surface-3: #24303f;
+  --d-border: #2a3646;
+  --d-border-strong: #3a4859;
+  --d-text: #e9eef6;
+  --d-muted: #93a2b8;
+  --d-accent: #5f97f7;
+  --d-accent-2: #3ed0dd;
+  --d-accent-text: #08101c;
+  --d-ok: #3ecb8c;
+  --d-warn: #e2ac43;
+  --d-error: #f2786f;
+  --d-cover: #c1a487;
+  --d-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 34px rgba(0, 0, 0, 0.32);
+  --d-shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+
+  /*
+   * Aus dem Akzent abgeleitet, damit eine eigene Farbe überall durchschlägt:
+   * Wer den Akzent ändert, ändert damit auch Hinterlegungen und Ränder.
+   */
+  --accent-soft: color-mix(in srgb, var(--accent) 15%, var(--surface));
 
   --radius: 16px;
   --radius-sm: 10px;
@@ -29,27 +71,83 @@
   --tap: 44px;
 }
 
+/* Systemeinstellung folgen – außer der Nutzer hat „hell“ festgelegt. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1219;
-    --bg-glow: radial-gradient(1200px 600px at 15% -10%, #17243a 0%, transparent 60%);
-    --surface: #161e29;
-    --surface-2: #1c2632;
-    --surface-3: #24303f;
-    --border: #2a3646;
-    --border-strong: #3a4859;
-    --text: #e9eef6;
-    --muted: #93a2b8;
-    --accent: #5f97f7;
-    --accent-soft: #1c2c47;
-    --accent-text: #08101c;
-    --ok: #3ecb8c;
-    --warn: #e2ac43;
-    --error: #f2786f;
-    --cover: #c1a487;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 34px rgba(0, 0, 0, 0.32);
-    --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: var(--d-bg);
+    --bg-glow: var(--d-bg-glow);
+    --surface: var(--d-surface);
+    --surface-2: var(--d-surface-2);
+    --surface-3: var(--d-surface-3);
+    --border: var(--d-border);
+    --border-strong: var(--d-border-strong);
+    --text: var(--d-text);
+    --muted: var(--d-muted);
+    --accent: var(--d-accent);
+    --accent-2: var(--d-accent-2);
+    --accent-text: var(--d-accent-text);
+    --accent-soft: color-mix(in srgb, var(--accent) 26%, var(--surface));
+    --ok: var(--d-ok);
+    --warn: var(--d-warn);
+    --error: var(--d-error);
+    --cover: var(--d-cover);
+    --shadow: var(--d-shadow);
+    --shadow-lg: var(--d-shadow-lg);
   }
+}
+
+/* Feste Auswahl „dunkel“ – unabhängig vom System. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: var(--d-bg);
+  --bg-glow: var(--d-bg-glow);
+  --surface: var(--d-surface);
+  --surface-2: var(--d-surface-2);
+  --surface-3: var(--d-surface-3);
+  --border: var(--d-border);
+  --border-strong: var(--d-border-strong);
+  --text: var(--d-text);
+  --muted: var(--d-muted);
+  --accent: var(--d-accent);
+  --accent-2: var(--d-accent-2);
+  --accent-text: var(--d-accent-text);
+  --accent-soft: color-mix(in srgb, var(--accent) 26%, var(--surface));
+  --ok: var(--d-ok);
+  --warn: var(--d-warn);
+  --error: var(--d-error);
+  --cover: var(--d-cover);
+  --shadow: var(--d-shadow);
+  --shadow-lg: var(--d-shadow-lg);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+/*
+ * Weniger Bewegung. Entweder weil das Betriebssystem es so vorgibt oder
+ * weil es in den Einstellungen gewählt wurde. Übergänge werden nicht auf
+ * 0 gesetzt, sondern auf einen Wimpernschlag – sonst „springen“ Elemente,
+ * deren Endzustand von einer Animation abhängt.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+:root[data-motion='reduced'] *,
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 * {
@@ -66,7 +164,14 @@ body {
   background: var(--bg-glow), var(--bg);
   background-attachment: fixed;
   color: var(--text);
-  font: 15px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Alle Größen im Blatt sind relativ – die Schriftgröße skaliert damit
+     die gesamte Oberfläche mit, nicht nur den Text. */
+  font:
+    calc(var(--base-size) * var(--font-scale)) / 1.55 system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   overscroll-behavior-y: none;
 }
 
@@ -391,10 +496,103 @@ legend {
   padding: 0.4rem 0.85rem;
   font-size: 0.9rem;
 }
-.chip.active {
+/*
+ * Der Zeigerzustand darf die Auswahl nicht überdecken: `button:hover` weiter
+ * oben ist genauso spezifisch wie `.chip.active` und würde sonst gewinnen –
+ * ein gerade angeklickter Reiter sähe unter dem Mauszeiger unausgewählt aus.
+ */
+.chip.active,
+.chip.active:hover:not(:disabled) {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);
+}
+
+/* ---------------------------------------------------------- Wochentage */
+
+.weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+.weekday {
+  cursor: pointer;
+}
+/* Das Kästchen selbst stört – der Tag ist der Knopf. */
+.weekday input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.weekday span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 2.6em;
+  padding: 0.35rem 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.15s var(--ease);
+}
+.weekday input:checked + span {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.weekday input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------- Einstellungen */
+
+.setting-block {
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--border);
+}
+.setting-block:first-of-type {
+  border-top: none;
+}
+.setting-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+.accent-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+}
+.accent-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  padding: 0.32rem 0.8rem 0.32rem 0.4rem;
+  font-size: 0.9rem;
+}
+.accent-preset.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.accent-dot {
+  width: 1.3em;
+  height: 1.3em;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  flex: none;
+}
+input[type='color'] {
+  padding: 0.2rem;
+  height: var(--tap);
+  cursor: pointer;
 }
 
 .badge {
@@ -576,7 +774,7 @@ label.check input {
   width: 1.6em;
   height: 1.6em;
   border-radius: 30%;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: var(--accent-text);
   font-weight: 700;
   vertical-align: -0.35em;
@@ -760,6 +958,9 @@ details.card summary {
 .quick-actions button {
   white-space: nowrap;
   border-radius: 999px;
+  /* Ohne `flex: none` schrumpfen die Knöpfe, bis die Beschriftung abgeschnitten
+     ist – statt die Leiste seitlich scrollen zu lassen. */
+  flex: none;
 }
 
 /* --------------------------------------------------------- Gerätekarten */
@@ -1116,6 +1317,88 @@ input[type='range']:focus {
   min-width: 0;
 }
 
+/* ------------------------------------------------------------- Heizungen */
+
+/* `relative`, damit der Wärmestreifen oben in der Karte bleibt. */
+.thermostat-card {
+  position: relative;
+  overflow: hidden;
+}
+.thermostat-card .thermo-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+.thermo-now,
+.thermo-target {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.thermo-current {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.thermo-label {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.thermo-set {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.thermo-target b {
+  font-size: 1.85rem;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  transition: color 0.3s var(--ease);
+}
+button.round {
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+.thermo-range {
+  width: 100%;
+  margin-top: 0.6rem;
+}
+.thermo-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+/* Heizt gerade: ein warmer Schimmer am oberen Rand, mehr braucht es nicht. */
+.thermostat-card.heating {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+}
+.thermostat-card.heating::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--warn), color-mix(in srgb, var(--warn) 30%, transparent));
+  animation: warmth 2.4s var(--ease) infinite;
+}
+@keyframes warmth {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* ------------------------------------------------------------ Diagramme */
 
 .chart {
@@ -1229,7 +1512,7 @@ input[type='range']:focus {
 .bar-row .bar-fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8ad6b1));
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
   width: 0;
   animation: grow 0.8s var(--ease) forwards;
 }

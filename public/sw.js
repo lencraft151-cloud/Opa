@@ -9,7 +9,7 @@
  * Schaltzustand wäre schlimmer als eine ehrliche Fehlermeldung.
  */
 
-const CACHE = 'smarthome-shell-v3';
+const CACHE = 'smarthome-shell-v4';
 
 const SHELL = [
   '/',
@@ -19,6 +19,7 @@ const SHELL = [
   '/icon.svg',
   '/js/app.js',
   '/js/api.js',
+  '/js/appearance.js',
   '/js/dashboard.js',
   '/js/setup.js',
   '/js/components.js',
@@ -26,6 +27,8 @@ const SHELL = [
   '/js/colorwheel.js',
   '/js/format.js',
   '/js/icons.js',
+  '/js/integrations.js',
+  '/js/selfupdate.js',
 ];
 
 self.addEventListener('install', (event) => {

@@ -1,8 +1,10 @@
 /** Einstiegspunkt: Navigation, Live-Updates, Service Worker. */
 
 import { api, auth, showError, toast } from './api.js';
+import { applyAppearance, applyStoredAppearance } from './appearance.js';
 import { loadDashboardData, renderCurrent, renderPanel, store } from './dashboard.js';
 import { icons } from './icons.js';
+import { startSelfUpdate } from './selfupdate.js';
 import { initSetup } from './setup.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -25,6 +27,10 @@ let info = null;
 // ---------------------------------------------------------------------------
 
 async function boot() {
+  // Zuerst die zuletzt bekannte Darstellung – sonst blitzt beim Start kurz
+  // die Voreinstellung auf, bevor der Hub geantwortet hat.
+  applyStoredAppearance();
+
   try {
     info = await api('/system/info');
   } catch (err) {
@@ -33,6 +39,11 @@ async function boot() {
     setTimeout(boot, 5000);
     return;
   }
+
+  store.systemInfo = info;
+
+  // Ab hier bemerkt die Seite selbst, wenn der Hub eine neue Fassung hat.
+  startSelfUpdate(info.build);
 
   const setupState = await api('/setup/state');
   if (!setupState.hasHousehold || !setupState.completed) {
@@ -51,6 +62,8 @@ async function startDashboard() {
   buildNavigation();
   try {
     await loadDashboardData();
+    // Die Darstellung gehört zum Haushalt und gilt damit auf jedem Gerät.
+    applyAppearance(store.household?.appearance);
   } catch (err) {
     showError(err);
     // Ein abgelaufenes Token ist der häufigste Grund – zurück zur Einrichtung

@@ -35,6 +35,8 @@ interface RuleRuntimeState {
   lastTriggeredMs: number;
   /** Letzter ausgelöster Zeitplan als `YYYY-MM-DDTHH:MM`. */
   lastScheduleSlot: string | null;
+  /** Letzte Ausführung eines wiederholenden Auslösers. */
+  lastIntervalMs: number;
 }
 
 export interface CreateRuleInput {
@@ -227,12 +229,30 @@ export class AutomationService {
         continue;
       }
 
+      if (rule.trigger.type === 'interval') {
+        if (this.shouldFireInterval(rule.id, rule.trigger, now, household.timezone, weekday)) {
+          this.stateFor(rule.id).lastIntervalMs = now.getTime();
+          await this.fire(rule);
+        }
+        continue;
+      }
+
       // Haltedauern (`forSeconds`) laufen auch ohne neuen Messwert weiter.
       if (rule.trigger.type === 'sensor' && rule.trigger.forSeconds) {
         const device = this.repos.devices.find(rule.trigger.deviceId);
         if (device) await this.evaluateRule(rule, device);
       }
     }
+  }
+
+  private shouldFireInterval(
+    ruleId: string,
+    trigger: Extract<RuleTrigger, { type: 'interval' }>,
+    now: Date,
+    timezone: string,
+    weekday: number,
+  ): boolean {
+    return isIntervalDue(trigger, this.stateFor(ruleId).lastIntervalMs, now, timezone, weekday);
   }
 
   private async evaluateForDevice(device: Device): Promise<void> {
@@ -356,7 +376,8 @@ export class AutomationService {
         return typeof value === 'boolean' && value === trigger.equals;
       }
       case 'schedule':
-        return false; // wird im Takt ausgewertet
+      case 'interval':
+        return false; // beides wird im Takt ausgewertet
       default:
         return false;
     }
@@ -394,6 +415,7 @@ export class AutomationService {
         firedForEpisode: false,
         lastTriggeredMs: 0,
         lastScheduleSlot: null,
+        lastIntervalMs: 0,
       };
       this.runtime.set(ruleId, state);
     }
@@ -416,6 +438,22 @@ export class AutomationService {
     if (trigger.type === 'sensor' || trigger.type === 'deviceState') assertDevice(trigger.deviceId);
     if (trigger.type === 'schedule' && !/^\d{2}:\d{2}$/.test(trigger.at)) {
       throw badRequest('Die Uhrzeit muss im Format HH:MM angegeben werden');
+    }
+    if (trigger.type === 'interval') {
+      if (trigger.everyMinutes < 5) {
+        throw badRequest(
+          'Der Abstand muss mindestens fünf Minuten betragen.',
+          undefined,
+          'Häufiger wäre für ein Zuhause weder nötig noch schonend für die Geräte.',
+        );
+      }
+      if ((trigger.from && !trigger.to) || (!trigger.from && trigger.to)) {
+        throw badRequest(
+          'Für ein Zeitfenster werden Start- und Endzeit gebraucht.',
+          undefined,
+          'Gib beide an – oder keine, dann gilt die Regel rund um die Uhr.',
+        );
+      }
     }
 
     for (const condition of conditions) {
@@ -475,6 +513,32 @@ function localSlot(date: Date, timezone: string): { time: string; key: string } 
     day: '2-digit',
   }).format(date);
   return { time, key: `${day}T${time}` };
+}
+
+/**
+ * Ist eine wiederholende Regel wieder dran?
+ *
+ * Der Abstand wird ab der letzten Ausführung gemessen, nicht an festen
+ * Uhrzeiten. Nach einem Neustart läuft die Regel damit einmal sofort und
+ * danach im gewünschten Takt – das ist bei „alle zwei Stunden lüften
+ * erinnern" das erwartete Verhalten.
+ *
+ * Zeitfenster und Wochentage schränken zusätzlich ein: Außerhalb passiert
+ * nichts, und die verstrichene Zeit läuft trotzdem weiter. Nach dem Fenster
+ * wird also nicht alles Versäumte nachgeholt, sondern einmal ausgelöst.
+ */
+export function isIntervalDue(
+  trigger: Extract<RuleTrigger, { type: 'interval' }>,
+  lastRunMs: number,
+  now: Date,
+  timezone: string,
+  weekday: number,
+): boolean {
+  if (trigger.days && trigger.days.length > 0 && !trigger.days.includes(weekday)) return false;
+  if (trigger.from && trigger.to && !isWithinTimeRange(now, timezone, trigger.from, trigger.to)) {
+    return false;
+  }
+  return (now.getTime() - lastRunMs) / 60_000 >= trigger.everyMinutes;
 }
 
 /** Wochentag 0 = Sonntag … 6 = Samstag, in der Zeitzone des Haushalts. */

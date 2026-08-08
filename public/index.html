@@ -82,6 +82,8 @@
 
           <details class="manual">
             <summary>Gerät manuell über IP-Adresse hinzufügen</summary>
+            <!-- Aufbau und Beschriftungen kommen aus js/integrations.js,
+                 damit die Einstellungen später denselben Bogen zeigen. -->
             <form id="form-manual" class="form">
               <div class="field-row">
                 <label>
@@ -89,6 +91,7 @@
                   <select name="type">
                     <option value="hue">Philips Hue Bridge</option>
                     <option value="shelly">Shelly</option>
+                    <option value="homematic">Homematic CCU / RaspberryMatic</option>
                   </select>
                 </label>
                 <label>
@@ -101,11 +104,16 @@
                   Anzeigename (optional)
                   <input name="name" maxlength="120" placeholder="z. B. Shelly Bad" />
                 </label>
+                <label data-for-type="homematic" hidden>
+                  Benutzername
+                  <input name="username" maxlength="64" placeholder="Admin" autocomplete="username" />
+                </label>
                 <label>
-                  Passwort (nur geschützte Shellys)
+                  <span data-password-label>Passwort</span>
                   <input name="password" type="password" autocomplete="off" />
                 </label>
               </div>
+              <p class="field-help" data-type-hint></p>
               <button type="submit" class="primary">Verbinden</button>
             </form>
           </details>

@@ -3,6 +3,7 @@
 import { api, auth, errorBanner, guard, toast } from './api.js';
 import { esc, plural, VENDOR_LABEL } from './format.js';
 import { emptyState, tile } from './components.js';
+import { bindManualForm, runDiscovery } from './integrations.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -101,24 +102,9 @@ function wireOnce() {
   $('#btn-discover').addEventListener('click', () => discover(false));
   $('#btn-discover-scan').addEventListener('click', () => discover(true));
 
-  $('#form-manual').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.target);
-    const body = { type: form.get('type'), host: String(form.get('host')).trim(), importRooms: true };
-    const name = String(form.get('name') || '').trim();
-    const password = String(form.get('password') || '');
-    if (name) body.name = name;
-    if (password) body.password = password;
-
-    const result = await guard(() => api('/integrations', { method: 'POST', body }));
-    if (!result) return;
-    toast(`${result.integration.name} verbunden.`, {
-      kind: 'success',
-      hint: `${plural(result.devices.length, "Gerät", "Geräte")} übernommen.`,
-    });
-    event.target.reset();
-    await refresh();
-  });
+  // Je nach Hersteller werden andere Angaben gebraucht – der Bogen zeigt
+  // deshalb nur, was gerade zählt.
+  bindManualForm($('#form-manual'), refresh);
 
   $('#btn-to-rooms').addEventListener('click', () => goToStep('rooms'));
   $('#btn-to-assign').addEventListener('click', () => goToStep('assign'));
@@ -166,80 +152,8 @@ async function goToStep(step) {
 // Schritt 2: Geräte finden und verbinden
 // ---------------------------------------------------------------------------
 
-async function discover(scan) {
-  const target = $('#discovery-results');
-  target.innerHTML = `<div class="item"><span class="sub">Suche läuft${
-    scan ? ' – der Subnetz-Scan dauert bis zu einer Minute' : ''
-  }…</span></div>`;
-
-  const result = await guard(() => api(`/integrations/discover?scan=${scan ? 'true' : 'false'}`));
-  if (!result) {
-    target.innerHTML = '';
-    return;
-  }
-
-  if (result.found.length === 0) {
-    target.innerHTML = emptyState(
-      '🔍',
-      'Nichts gefunden.',
-      scan
-        ? 'Auch der Subnetz-Scan war leer. Läuft der Hub im selben Netz wie deine Geräte? In Docker braucht er "--network host".'
-        : 'Versuche es mit „Gründlich suchen“ – oder trage die IP-Adresse unten manuell ein.',
-    );
-    return;
-  }
-
-  target.innerHTML = result.found.map(discoveryItem).join('');
-  $$('[data-connect]', target).forEach((button) => {
-    button.addEventListener('click', () => connect(button));
-  });
-}
-
-function discoveryItem(entry) {
-  const notes = [esc(entry.host), esc(entry.model || 'Modell unbekannt'), `gefunden per ${esc(entry.source)}`];
-  if (entry.requiresLinkButton) notes.push('<strong>Knopf auf der Bridge drücken</strong>');
-  if (entry.authRequired) notes.push('passwortgeschützt');
-
-  return `<div class="item">
-    <div>
-      <div class="title">${esc(entry.name)}
-        <span class="badge">${esc(VENDOR_LABEL[entry.type] ?? entry.type)}</span>
-      </div>
-      <div class="sub">${notes.join(' · ')}</div>
-    </div>
-    ${
-      entry.alreadyLinked
-        ? '<span class="badge ok">bereits verbunden</span>'
-        : `<button class="primary" data-connect="${esc(entry.host)}" data-type="${esc(entry.type)}"
-             data-auth="${entry.authRequired ? '1' : ''}">Verbinden</button>`
-    }
-  </div>`;
-}
-
-async function connect(button) {
-  const body = { type: button.dataset.type, host: button.dataset.connect, importRooms: true };
-  if (button.dataset.auth) {
-    const password = prompt(`Passwort für das Shelly-Gerät ${button.dataset.connect}:`);
-    if (password === null) return;
-    body.password = password;
-  }
-
-  const label = button.textContent;
-  button.disabled = true;
-  button.textContent = 'Verbinde…';
-
-  const result = await guard(() => api('/integrations', { method: 'POST', body }));
-
-  button.disabled = false;
-  button.textContent = label;
-  if (!result) return;
-
-  toast(`${result.integration.name} verbunden.`, {
-    kind: 'success',
-    hint: `${plural(result.devices.length, "Gerät", "Geräte")} übernommen.`,
-  });
-  await refresh();
-}
+/** Suche und Verbindungsaufbau stecken in `integrations.js` – siehe dort. */
+const discover = (scan) => runDiscovery($('#discovery-results'), scan, refresh);
 
 async function renderIntegrations() {
   const integrations = await guard(() => api('/integrations'));

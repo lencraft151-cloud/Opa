@@ -1,14 +1,19 @@
 /** Dashboard: Übersicht, Räume, Geräte, Energie, Verlauf, Automationen, Einstellungen. */
 
 import { api, errorBanner, guard, toast } from './api.js';
+import { ACCENT_PRESETS, applyAppearance, FONT_SCALES, THEMES } from './appearance.js';
 import { barList, gauge, lineChart } from './charts.js';
 import { bindDeviceControls, deviceCard, emptyState, skeletonGrid, tile } from './components.js';
 import { esc, fmt, METRIC_LABEL, plural, VENDOR_LABEL } from './format.js';
+import { bindManualForm, manualForm, runDiscovery } from './integrations.js';
+import { applyUpdate } from './selfupdate.js';
 
 const $ = (selector) => document.querySelector(selector);
 
 /** Gemeinsamer Datenstand aller Ansichten. */
 export const store = {
+  /** Antwort von `/system/info` – Fassung, Kennung, verfügbare Adapter. */
+  systemInfo: null,
   summary: null,
   household: null,
   rooms: [],
@@ -467,8 +472,8 @@ function renderDevices() {
 
   panel.innerHTML = `
     <p class="intro">
-      Alle eingebundenen Geräte an einem Ort – egal ob von Hue oder Shelly.
-      Unter jedem Namen steht, was das Gerät kann.
+      Alle eingebundenen Geräte an einem Ort – Hue, Shelly und Homematic nebeneinander,
+      neue Geräte genauso wie alte. Unter jedem Namen steht, was das Gerät kann.
     </p>
     <div class="row">
       <input id="device-search" class="grow" placeholder="Geräte durchsuchen…"
@@ -802,26 +807,66 @@ async function renderAutomations() {
       <summary>Selbst zusammenstellen (für Fortgeschrittene)</summary>
       <form id="form-automation" class="form">
         <label>Name <input name="name" required maxlength="120" placeholder="z. B. Bad heizen" /></label>
+
         <fieldset>
           <legend>Wenn …</legend>
-          <div class="row tight" style="margin-bottom:.6rem">
-            <select name="triggerDevice" class="grow" ${sensors.length ? '' : 'disabled'}>${options(sensors)}</select>
-            <select name="triggerMetric">
-              <option value="temperatureC">Temperatur</option>
-              <option value="humidity">Luftfeuchte</option>
-              <option value="illuminanceLux">Helligkeit</option>
-              <option value="powerW">Leistung</option>
-              <option value="batteryPercent">Batterie</option>
-            </select>
-            <select name="operator">
-              <option value="&lt;">kleiner als</option>
-              <option value="&gt;">größer als</option>
-            </select>
-            <input name="value" type="number" step="0.1" value="19" required class="narrow" />
-            <input name="forMinutes" type="number" min="0" max="1440" value="5" class="narrow"
-                   title="So viele Minuten anhaltend" />
+          <div class="chips" role="group" aria-label="Auslöser">
+            <button type="button" class="chip active" data-trigger-kind="sensor">Ein Messwert</button>
+            <button type="button" class="chip" data-trigger-kind="schedule">Zu einer Uhrzeit</button>
+            <button type="button" class="chip" data-trigger-kind="interval">Immer wieder</button>
+          </div>
+
+          <div data-trigger-pane="sensor">
+            <div class="row tight">
+              <select name="triggerDevice" class="grow" ${sensors.length ? '' : 'disabled'}>${options(sensors)}</select>
+              <select name="triggerMetric">
+                <option value="temperatureC">Temperatur</option>
+                <option value="humidity">Luftfeuchte</option>
+                <option value="illuminanceLux">Helligkeit</option>
+                <option value="powerW">Leistung</option>
+                <option value="batteryPercent">Batterie</option>
+              </select>
+              <select name="operator">
+                <option value="&lt;">kleiner als</option>
+                <option value="&gt;">größer als</option>
+              </select>
+              <input name="value" type="number" step="0.1" value="19" required class="narrow" />
+              <input name="forMinutes" type="number" min="0" max="1440" value="5" class="narrow"
+                     title="So viele Minuten anhaltend" />
+            </div>
+            <p class="field-help">
+              Die letzte Zahl sind Minuten: So lange muss der Wert anhalten, damit ein
+              kurzer Ausreißer nichts auslöst.
+            </p>
+          </div>
+
+          <div data-trigger-pane="schedule" hidden>
+            <div class="row tight">
+              <label class="grow">Uhrzeit <input type="time" name="scheduleAt" value="07:30" /></label>
+            </div>
+            ${weekdayPicker('schedule')}
+          </div>
+
+          <div data-trigger-pane="interval" hidden>
+            <div class="row tight">
+              <label>Alle
+                <select name="everyMinutes">${INTERVAL_CHOICES.map(
+                  (choice) =>
+                    `<option value="${choice.minutes}" ${choice.minutes === 60 ? 'selected' : ''}>${esc(
+                      choice.label,
+                    )}</option>`,
+                ).join('')}</select>
+              </label>
+              <label>Frühestens ab <input type="time" name="intervalFrom" value="08:00" /></label>
+              <label>Spätestens bis <input type="time" name="intervalTo" value="22:00" /></label>
+            </div>
+            <p class="field-help">
+              Wiederholt sich innerhalb des Zeitfensters. Leere Zeiten heißen: rund um die Uhr.
+            </p>
+            ${weekdayPicker('interval')}
           </div>
         </fieldset>
+
         <fieldset>
           <legend>… dann</legend>
           <div class="row tight">
@@ -833,14 +878,16 @@ async function renderAutomations() {
             <input name="cooldownMinutes" type="number" min="0" max="1440" value="15" class="narrow"
                    title="Sperrzeit in Minuten" />
           </div>
+          <p class="field-help">Die letzte Zahl ist die Sperrzeit: So lange passiert danach nichts erneut.</p>
         </fieldset>
-        <button type="submit" class="primary" ${sensors.length && switchable.length ? '' : 'disabled'}>
+
+        <button type="submit" class="primary" ${switchable.length ? '' : 'disabled'}>
           Automation speichern
         </button>
         ${
-          sensors.length && switchable.length
+          switchable.length
             ? ''
-            : '<p class="muted small">Dafür werden mindestens ein Sensor und ein schaltbares Gerät gebraucht.</p>'
+            : '<p class="muted small">Dafür wird mindestens ein schaltbares Gerät gebraucht.</p>'
         }
       </form>
     </details>`;
@@ -848,19 +895,26 @@ async function renderAutomations() {
   wireTemplates(panel);
   restoreOpenSections(panel);
 
+  // Umschalter zwischen Messwert, Uhrzeit und Wiederholung.
+  let triggerKind = 'sensor';
+  panel.querySelectorAll('[data-trigger-kind]').forEach((button) => {
+    button.addEventListener('click', () => {
+      triggerKind = button.dataset.triggerKind;
+      panel.querySelectorAll('[data-trigger-kind]').forEach((other) => {
+        other.classList.toggle('active', other === button);
+      });
+      panel.querySelectorAll('[data-trigger-pane]').forEach((pane) => {
+        pane.hidden = pane.dataset.triggerPane !== triggerKind;
+      });
+    });
+  });
+
   panel.querySelector('#form-automation').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
     const body = {
       name: form.get('name'),
-      trigger: {
-        type: 'sensor',
-        deviceId: form.get('triggerDevice'),
-        metric: form.get('triggerMetric'),
-        operator: form.get('operator'),
-        value: Number(form.get('value')),
-        forSeconds: Number(form.get('forMinutes') || 0) * 60,
-      },
+      trigger: buildTrigger(triggerKind, form, event.target),
       actions: [
         {
           type: 'command',
@@ -896,6 +950,84 @@ async function renderAutomations() {
       void renderAutomations();
     });
   });
+}
+
+/**
+ * Auswahlmöglichkeiten für Wiederholungen.
+ *
+ * Kürzer als fünf Minuten lässt der Hub nicht zu – häufiger wäre nur Last
+ * ohne Nutzen, und die Messwerte selbst kommen auch nicht schneller.
+ */
+const INTERVAL_CHOICES = [
+  { minutes: 15, label: '15 Minuten' },
+  { minutes: 30, label: '30 Minuten' },
+  { minutes: 60, label: 'Stunde' },
+  { minutes: 120, label: '2 Stunden' },
+  { minutes: 240, label: '4 Stunden' },
+  { minutes: 480, label: '8 Stunden' },
+  { minutes: 720, label: '12 Stunden' },
+  { minutes: 1440, label: 'Tag' },
+];
+
+/** Wochentage nach ISO: 0 = Sonntag, wie in `Date.getDay()`. */
+const WEEKDAYS = [
+  { value: 1, short: 'Mo' },
+  { value: 2, short: 'Di' },
+  { value: 3, short: 'Mi' },
+  { value: 4, short: 'Do' },
+  { value: 5, short: 'Fr' },
+  { value: 6, short: 'Sa' },
+  { value: 0, short: 'So' },
+];
+
+function weekdayPicker(scope) {
+  return `<div class="weekdays" role="group" aria-label="Wochentage">
+    ${WEEKDAYS.map(
+      (day) => `<label class="weekday">
+        <input type="checkbox" name="${esc(scope)}Days" value="${day.value}" />
+        <span>${day.short}</span>
+      </label>`,
+    ).join('')}
+    <span class="field-help">Nichts angekreuzt heißt: an jedem Tag.</span>
+  </div>`;
+}
+
+/** Baut aus dem Formular den passenden Auslöser. */
+function buildTrigger(kind, form, element) {
+  const days = (scope) =>
+    [...element.querySelectorAll(`input[name="${scope}Days"]:checked`)].map((input) =>
+      Number(input.value),
+    );
+
+  if (kind === 'schedule') {
+    return { type: 'schedule', at: form.get('scheduleAt'), days: days('schedule') };
+  }
+
+  if (kind === 'interval') {
+    const trigger = {
+      type: 'interval',
+      everyMinutes: Number(form.get('everyMinutes')),
+      days: days('interval'),
+    };
+    // Ein halb ausgefülltes Zeitfenster weist der Hub ab – deshalb nur
+    // mitschicken, wenn beide Zeiten dastehen.
+    const from = form.get('intervalFrom');
+    const to = form.get('intervalTo');
+    if (from && to) {
+      trigger.from = from;
+      trigger.to = to;
+    }
+    return trigger;
+  }
+
+  return {
+    type: 'sensor',
+    deviceId: form.get('triggerDevice'),
+    metric: form.get('triggerMetric'),
+    operator: form.get('operator'),
+    value: Number(form.get('value')),
+    forSeconds: Number(form.get('forMinutes') || 0) * 60,
+  };
 }
 
 /** Karte einer fertigen Vorlage inklusive anpassbarer Felder. */
@@ -1030,17 +1162,41 @@ function automationItem(rule) {
   </div>`;
 }
 
-function describeTrigger(trigger) {
-  const name = (id) => deviceById(id)?.name ?? id;
+export function describeTrigger(trigger, lookup = (id) => deviceById(id)?.name ?? id) {
   if (trigger.type === 'sensor') {
     const metric = METRIC_LABEL[trigger.metric] ?? trigger.metric;
     const hold = trigger.forSeconds ? ` für ${Math.round(trigger.forSeconds / 60)} min` : '';
-    return `${name(trigger.deviceId)}: ${metric} ${trigger.operator} ${trigger.value}${hold}`;
+    return `${lookup(trigger.deviceId)}: ${metric} ${trigger.operator} ${trigger.value}${hold}`;
   }
   if (trigger.type === 'deviceState') {
-    return `${name(trigger.deviceId)}: ${trigger.property} = ${trigger.equals ? 'ja' : 'nein'}`;
+    const property = trigger.property === 'motion' ? 'Bewegung' : 'eingeschaltet';
+    return `${lookup(trigger.deviceId)}: ${property} = ${trigger.equals ? 'ja' : 'nein'}`;
   }
-  return `Täglich um ${trigger.at} Uhr`;
+  if (trigger.type === 'interval') {
+    const every = describeEvery(trigger.everyMinutes);
+    const window = trigger.from && trigger.to ? ` zwischen ${trigger.from} und ${trigger.to} Uhr` : '';
+    return `Alle ${every}${window}${describeDays(trigger.days)}`;
+  }
+  return `Um ${trigger.at} Uhr${describeDays(trigger.days)}`;
+}
+
+/** „90 Minuten“ ist schwerer zu lesen als „1,5 Stunden“ – aber nur knapp. */
+function describeEvery(minutes) {
+  if (!minutes || minutes < 60) return `${minutes} Minuten`;
+  if (minutes === 60) return 'Stunde';
+  if (minutes === 1440) return 'Tag';
+  if (minutes % 60 === 0) return `${minutes / 60} Stunden`;
+  return `${minutes} Minuten`;
+}
+
+/** Aus [1,2,3,4,5] wird „werktags“, aus [0,6] „am Wochenende“. */
+function describeDays(days) {
+  if (!Array.isArray(days) || days.length === 0 || days.length === 7) return ' – täglich';
+  const set = [...days].sort((a, b) => a - b).join(',');
+  if (set === '1,2,3,4,5') return ' – werktags';
+  if (set === '0,6') return ' – am Wochenende';
+  const names = WEEKDAYS.filter((day) => days.includes(day.value)).map((day) => day.short);
+  return ` – ${names.join(', ')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1063,6 +1219,19 @@ async function renderSettings() {
         (updates?.integrations ?? []).map(updateItem).join('') ||
         emptyState('📦', 'Keine Integrationen vorhanden.')
       }</div>
+
+      <details data-section="device-firmware">
+        <summary>Alle Geräte und ihre Firmware (${(updates?.devices ?? []).length})</summary>
+        <p class="muted small">
+          Shelly-Geräte aktualisieren sich einzeln. Bei Hue und Homematic verteilt die
+          Zentrale die Firmware an ihre Geräte – dort läuft das Update über die Bridge.
+        </p>
+        <div class="list">${
+          (updates?.devices ?? []).map(deviceUpdateItem).join('') ||
+          emptyState('📭', 'Noch keine Geräte eingebunden.')
+        }</div>
+      </details>
+
       <form id="form-autoupdate" class="form">
         <label class="row tight" style="flex-direction:row;align-items:center;gap:.6rem">
           <span class="switch">
@@ -1100,6 +1269,8 @@ async function renderSettings() {
       </form>
     </div>
 
+    ${appearanceCard()}
+
     <div class="card">
       <h2>Integrationen</h2>
       <div class="row">
@@ -1108,6 +1279,21 @@ async function renderSettings() {
       <div class="list" id="settings-integrations">${store.integrations
         .map(integrationItem)
         .join('')}</div>
+
+      <details data-section="add-integration">
+        <summary>Weitere Bridge oder weiteres Gerät hinzufügen</summary>
+        <div class="callout">
+          <strong>Bei einer Hue Bridge zuerst den runden Knopf drücken</strong>
+          <span>Danach hast du etwa 30 Sekunden Zeit für „Verbinden“.</span>
+        </div>
+        <div class="row">
+          <button class="primary" id="btn-settings-discover">Netzwerk durchsuchen</button>
+          <button class="ghost" id="btn-settings-scan">Gründlich suchen</button>
+        </div>
+        <div class="list" id="settings-discovery"></div>
+        <h3>Von Hand eintragen</h3>
+        ${manualForm('form-settings-manual')}
+      </details>
     </div>
 
     <div class="card">
@@ -1131,6 +1317,25 @@ async function renderSettings() {
         <button type="submit" class="primary">Token erstellen</button>
       </form>
       <div class="list" id="tokens-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>Diese Oberfläche</h2>
+      <p class="muted small">
+        Die Seite prüft von selbst, ob der Hub eine neuere Fassung ausliefert, und lädt sich
+        dann nach – meist unbemerkt, während sie im Hintergrund liegt. Der Knopf hier erzwingt
+        das sofort, falls doch einmal etwas hängen bleibt.
+      </p>
+      <div class="list">
+        <div class="item">
+          <div>
+            <div class="title">Fassung ${esc(store.systemInfo?.version ?? '–')}</div>
+            <div class="sub">Kennung ${esc(store.systemInfo?.build ?? 'unbekannt')} ·
+              Node ${esc(store.systemInfo?.node ?? '–')}</div>
+          </div>
+          <button class="small" id="btn-reload-ui">Jetzt neu laden</button>
+        </div>
+      </div>
     </div>
 
     <details class="card" data-section="glossary">
@@ -1163,6 +1368,89 @@ async function renderSettings() {
   await renderTokens();
 }
 
+/**
+ * Darstellung: Schriftgröße, Helligkeit, Akzentfarbe, Bewegung.
+ *
+ * Jede Änderung wirkt sofort – man sieht am Bildschirm, was man einstellt,
+ * statt hinterher zu prüfen, ob es das war, was man wollte.
+ */
+function appearanceCard() {
+  const current = { ...store.household?.appearance };
+  const scale = Number(current.fontScale ?? 1);
+  const theme = current.theme ?? 'auto';
+  const accent = current.accentColor ?? null;
+
+  const scaleButtons = FONT_SCALES.map(
+    (option) => `<button type="button" class="chip ${
+      Math.abs(option.value - scale) < 0.001 ? 'active' : ''
+    }" data-font-scale="${option.value}"
+        style="font-size:${Math.min(option.value, 1.25)}rem">${esc(option.label)}</button>`,
+  ).join('');
+
+  const themeButtons = THEMES.map(
+    (option) =>
+      `<button type="button" class="chip ${option.value === theme ? 'active' : ''}"
+               data-theme-choice="${esc(option.value)}">${esc(option.label)}</button>`,
+  ).join('');
+
+  const presets = ACCENT_PRESETS.map((preset) => {
+    const selected = (preset.color ?? null) === accent;
+    const swatch = preset.color
+      ? `background:linear-gradient(135deg, ${preset.color}, ${preset.alt})`
+      : 'background:linear-gradient(135deg, var(--accent), var(--accent-2))';
+    return `<button type="button" class="accent-preset ${selected ? 'active' : ''}"
+                    data-accent="${esc(preset.color ?? '')}" data-accent-alt="${esc(preset.alt ?? '')}"
+                    title="${esc(preset.label)}" aria-label="${esc(preset.label)}">
+      <span class="accent-dot" style="${swatch}"></span>
+      <span>${esc(preset.label)}</span>
+    </button>`;
+  }).join('');
+
+  return `<div class="card">
+    <h2>Darstellung</h2>
+    <p class="muted small">
+      Gilt für alle Geräte, auf denen du den Hub öffnest – Handy, Tablet und Rechner.
+    </p>
+
+    <div class="setting-block">
+      <div class="setting-head"><strong>Schriftgröße</strong>
+        <span class="muted small">Alles wird mitskaliert, nicht nur der Text</span></div>
+      <div class="chips">${scaleButtons}</div>
+    </div>
+
+    <div class="setting-block">
+      <div class="setting-head"><strong>Helligkeit</strong>
+        <span class="muted small">Hell, dunkel oder wie im Betriebssystem eingestellt</span></div>
+      <div class="chips">${themeButtons}</div>
+    </div>
+
+    <div class="setting-block">
+      <div class="setting-head"><strong>Akzentfarbe</strong>
+        <span class="muted small">Färbt Knöpfe, Regler und Diagramme</span></div>
+      <div class="accent-presets">${presets}</div>
+      <div class="field-row">
+        <label>Eigene Farbe
+          <input type="color" id="accent-custom" value="${esc(accent ?? '#2f6bd8')}" />
+        </label>
+        <label>Zweite Farbe (Verläufe)
+          <input type="color" id="accent-custom-alt" value="${esc(
+            current.accentColorAlt ?? '#0f9aa8',
+          )}" />
+        </label>
+      </div>
+    </div>
+
+    <label class="check">
+      <input type="checkbox" id="reduce-motion" ${current.reduceMotion ? 'checked' : ''} />
+      <span>Bewegung reduzieren – Animationen laufen dann nicht mehr</span>
+    </label>
+
+    <div class="row tight">
+      <button class="ghost small" id="btn-appearance-reset">Auf Standard zurücksetzen</button>
+    </div>
+  </div>`;
+}
+
 function updateItem(entry) {
   const info = entry.updateInfo;
   const badge = !entry.supported
@@ -1190,6 +1478,48 @@ function updateItem(entry) {
         : entry.supported
           ? `<button class="small" data-check="${esc(entry.integrationId)}">Prüfen</button>`
           : ''
+    }
+  </div>`;
+}
+
+/**
+ * Ein Gerät in der Firmware-Übersicht.
+ *
+ * Der Knopf sitzt bewusst an der Stelle, an der das Update tatsächlich
+ * ausgelöst wird: beim Gerät, wenn es sich selbst aktualisiert, und bei der
+ * Zentrale, wenn sie es für ihre Geräte tut.
+ */
+function deviceUpdateItem(entry) {
+  const badge = entry.updateAvailable
+    ? '<span class="badge warn">Update verfügbar</span>'
+    : entry.reachable
+      ? ''
+      : '<span class="badge">offline</span>';
+
+  const parts = [
+    VENDOR_LABEL[entry.vendor] ?? entry.vendor,
+    entry.model || 'Modell unbekannt',
+    `Firmware ${entry.firmware || 'unbekannt'}`,
+  ];
+
+  return `<div class="item">
+    <div>
+      <div class="title">${esc(entry.name)} ${badge}</div>
+      <div class="sub">${esc(parts.join(' · '))}</div>
+      <div class="sub">${
+        !entry.supported
+          ? `Firmware läuft über „${esc(entry.integrationName)}“ – dort, nicht hier.`
+          : entry.updatedBy === 'device'
+            ? 'Aktualisiert sich selbst.'
+            : `Wird über „${esc(entry.integrationName)}“ aktualisiert.`
+      }</div>
+    </div>
+    ${
+      !entry.supported
+        ? ''
+        : entry.updateAvailable
+          ? `<button class="primary small" data-install="${esc(entry.integrationId)}">Jetzt installieren</button>`
+          : `<button class="small" data-check="${esc(entry.integrationId)}">Prüfen</button>`
     }
   </div>`;
 }
@@ -1304,6 +1634,21 @@ function wireSettings(panel) {
     store.energy = null;
   });
 
+  wireAppearance(panel);
+
+  // Nach dem Verbinden alles neu laden: Geräte, Räume, Kennzahlen.
+  const afterConnect = async () => {
+    await loadDashboardData();
+    void renderSettings();
+  };
+  bindManualForm(panel.querySelector('#form-settings-manual'), afterConnect);
+  panel.querySelector('#btn-settings-discover').addEventListener('click', () => {
+    void runDiscovery(panel.querySelector('#settings-discovery'), false, afterConnect);
+  });
+  panel.querySelector('#btn-settings-scan').addEventListener('click', () => {
+    void runDiscovery(panel.querySelector('#settings-discovery'), true, afterConnect);
+  });
+
   panel.querySelector('#btn-sync-all').addEventListener('click', async (event) => {
     event.target.disabled = true;
     for (const integration of store.integrations) {
@@ -1373,6 +1718,10 @@ function wireSettings(panel) {
     });
   });
 
+  panel.querySelector('#btn-reload-ui').addEventListener('click', () => {
+    void applyUpdate({ silent: false });
+  });
+
   panel.querySelector('#form-token').addEventListener('submit', async (event) => {
     event.preventDefault();
     const name = new FormData(event.target).get('name');
@@ -1382,6 +1731,77 @@ function wireSettings(panel) {
     prompt('Neues Token – wird nur einmal angezeigt:', result.accessToken);
     await renderTokens();
   });
+}
+
+/**
+ * Bedienung der Darstellung.
+ *
+ * Reihenfolge mit Absicht: erst anwenden, dann speichern. Wer eine Farbe
+ * ausprobiert, soll sie sofort sehen; scheitert das Speichern, sagt die
+ * Fehlermeldung Bescheid und der letzte gespeicherte Stand kommt zurück.
+ */
+function wireAppearance(panel) {
+  const change = async (changes) => {
+    const merged = applyAppearance({ ...store.household?.appearance, ...changes });
+    const updated = await guard(() =>
+      api('/household', { method: 'PATCH', body: { appearance: changes } }),
+    );
+    if (!updated) {
+      applyAppearance(store.household?.appearance);
+      return;
+    }
+    store.household = updated;
+    store.summary = { ...store.summary, household: updated };
+    applyAppearance(updated.appearance ?? merged);
+    void renderSettings();
+  };
+
+  panel.querySelectorAll('[data-font-scale]').forEach((button) => {
+    button.addEventListener('click', () => void change({ fontScale: Number(button.dataset.fontScale) }));
+  });
+
+  panel.querySelectorAll('[data-theme-choice]').forEach((button) => {
+    button.addEventListener('click', () => void change({ theme: button.dataset.themeChoice }));
+  });
+
+  panel.querySelectorAll('[data-accent]').forEach((button) => {
+    button.addEventListener('click', () =>
+      void change({
+        // Leerer Wert = mitgelieferte Farbe. Die ist auf hell und dunkel
+        // getrennt abgestimmt, das kann eine feste Farbe nicht.
+        accentColor: button.dataset.accent || null,
+        accentColorAlt: button.dataset.accentAlt || null,
+      }),
+    );
+  });
+
+  // Beim Farbwähler zählt erst das Loslassen – sonst würde jede
+  // Zwischenfarbe des Schiebers zum Hub geschickt.
+  const custom = panel.querySelector('#accent-custom');
+  const customAlt = panel.querySelector('#accent-custom-alt');
+  custom.addEventListener('input', () => {
+    applyAppearance({ ...store.household?.appearance, accentColor: custom.value });
+  });
+  custom.addEventListener('change', () =>
+    void change({ accentColor: custom.value, accentColorAlt: customAlt.value }),
+  );
+  customAlt.addEventListener('change', () =>
+    void change({ accentColor: custom.value, accentColorAlt: customAlt.value }),
+  );
+
+  panel
+    .querySelector('#reduce-motion')
+    .addEventListener('change', (event) => void change({ reduceMotion: event.target.checked }));
+
+  panel.querySelector('#btn-appearance-reset').addEventListener('click', () =>
+    void change({
+      fontScale: 1,
+      accentColor: null,
+      accentColorAlt: null,
+      theme: 'auto',
+      reduceMotion: false,
+    }),
+  );
 }
 
 async function renderTokens() {

@@ -1,6 +1,6 @@
 import { badRequest, conflict } from '../core/errors.js';
-import type { AccessToken, Household, SetupStep } from '../core/types.js';
-import { SETUP_STEPS } from '../core/types.js';
+import type { Appearance, AccessToken, Household, SetupStep } from '../core/types.js';
+import { DEFAULT_APPEARANCE, SETUP_STEPS } from '../core/types.js';
 import { sha256Hex } from '../util/crypto.js';
 import { createId, createToken, nowIso } from '../util/id.js';
 import type { Repositories } from '../storage/repositories.js';
@@ -28,7 +28,7 @@ export type HouseholdUpdate = Partial<
     | 'autoUpdateFrom'
     | 'autoUpdateTo'
   >
->;
+> & { appearance?: Partial<Appearance> };
 
 /**
  * Der Hub verwaltet bewusst genau einen Haushalt: Er läuft typischerweise auf
@@ -77,6 +77,7 @@ export class HouseholdService {
       autoUpdate: false,
       autoUpdateFrom: '03:00',
       autoUpdateTo: '05:00',
+      appearance: { ...DEFAULT_APPEARANCE },
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -111,7 +112,17 @@ export class HouseholdService {
         'Start- und Endzeit müssen sich unterscheiden, z. B. 03:00 bis 05:00.',
       );
     }
-    return this.repos.households.patch(household.id, changes, 'Haushalt');
+    // Die Darstellung wird feldweise zusammengeführt: Wer nur die Schriftgröße
+    // ändert, soll nicht seine Farben verlieren.
+    const patch: Partial<Household> = { ...changes, appearance: undefined };
+    delete patch.appearance;
+    if (changes.appearance) {
+      patch.appearance = normalizeAppearance({
+        ...appearanceOf(household),
+        ...changes.appearance,
+      });
+    }
+    return this.repos.households.patch(household.id, patch, 'Haushalt');
   }
 
   async setStep(step: SetupStep): Promise<Household> {
@@ -161,6 +172,35 @@ export class HouseholdService {
     const removed = await this.repos.tokens.remove(id);
     if (!removed) throw badRequest(`Token ${id} existiert nicht`);
   }
+}
+
+/**
+ * Haushalte aus älteren Datenständen kennen die Darstellung noch nicht.
+ * Statt überall auf `undefined` zu prüfen, gibt es hier immer einen Wert.
+ */
+export function appearanceOf(household: Household | undefined): Appearance {
+  return normalizeAppearance({ ...DEFAULT_APPEARANCE, ...(household?.appearance ?? {}) });
+}
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+/**
+ * Grenzen einhalten: Eine Schrift jenseits der 200 % sprengt jedes Layout,
+ * und eine Farbe, die keine ist, würde als ungültiges CSS still verpuffen.
+ */
+export function normalizeAppearance(appearance: Appearance): Appearance {
+  // Alles, was keine Farbe ist, wird zur mitgelieferten Farbe – lieber die
+  // Voreinstellung als ein unsichtbarer Knopf.
+  const color = (value: string | null): string | null =>
+    typeof value === 'string' && HEX_COLOR.test(value) ? value.toLowerCase() : null;
+
+  return {
+    fontScale: Math.min(1.6, Math.max(0.85, Number(appearance.fontScale) || 1)),
+    accentColor: color(appearance.accentColor),
+    accentColorAlt: color(appearance.accentColorAlt),
+    theme: appearance.theme === 'dark' || appearance.theme === 'light' ? appearance.theme : 'auto',
+    reduceMotion: appearance.reduceMotion === true,
+  };
 }
 
 function assertValidTimezone(timezone: string): void {

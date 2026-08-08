@@ -9,7 +9,7 @@
 // Integrationen
 // ---------------------------------------------------------------------------
 
-export const INTEGRATION_TYPES = ['hue', 'shelly'] as const;
+export const INTEGRATION_TYPES = ['hue', 'shelly', 'homematic'] as const;
 export type IntegrationType = (typeof INTEGRATION_TYPES)[number];
 
 export const INTEGRATION_STATUS = ['pending', 'linked', 'error', 'disabled'] as const;
@@ -22,6 +22,11 @@ export interface HueIntegrationConfig {
   modelId?: string;
   apiVersion?: string;
   swVersion?: string;
+  /**
+   * Welche API diese Bridge versteht. Die alte runde Bridge (BSB001) kennt
+   * nur `v1`; sie wird beim Verbinden erkannt und hier festgehalten.
+   */
+  protocol?: 'v1' | 'v2';
 }
 
 /** Öffentlich sichtbare Konfiguration eines Shelly-Geräts. */
@@ -37,7 +42,22 @@ export interface ShellyIntegrationConfig {
   username?: string;
 }
 
-export type IntegrationConfig = HueIntegrationConfig | ShellyIntegrationConfig;
+/**
+ * Homematic CCU bzw. RaspberryMatic. Angesprochen wird die JSON-RPC-
+ * Schnittstelle unter `/api/homematic.cgi`, die auch alte CCU2 beherrschen.
+ */
+export interface HomematicIntegrationConfig {
+  host: string;
+  /** Anzeigename der Zentrale, wie sie sich selbst nennt. */
+  serial?: string;
+  version?: string;
+  username: string;
+}
+
+export type IntegrationConfig =
+  | HueIntegrationConfig
+  | ShellyIntegrationConfig
+  | HomematicIntegrationConfig;
 
 /** Verschlüsselt abgelegte Zugangsdaten einer Integration. */
 export interface HueIntegrationSecrets {
@@ -49,7 +69,14 @@ export interface ShellyIntegrationSecrets {
   password?: string;
 }
 
-export type IntegrationSecrets = HueIntegrationSecrets | ShellyIntegrationSecrets;
+export interface HomematicIntegrationSecrets {
+  password: string;
+}
+
+export type IntegrationSecrets =
+  | HueIntegrationSecrets
+  | ShellyIntegrationSecrets
+  | HomematicIntegrationSecrets;
 
 /** Ergebnis einer Firmware-Prüfung. */
 export interface UpdateInfo {
@@ -109,9 +136,44 @@ export interface Household {
   /** Zeitfenster für automatische Updates, lokale Zeit `HH:MM`. */
   autoUpdateFrom: string;
   autoUpdateTo: string;
+  /**
+   * Darstellung. Absichtlich am Haushalt und nicht im Browser gespeichert:
+   * Wer die Schrift größer stellt, will das auf dem Tablet in der Küche
+   * genauso wie auf dem Handy.
+   */
+  appearance: Appearance;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Anzeigeeinstellungen der Oberfläche. */
+export interface Appearance {
+  /** Skalierung der Grundschriftgröße, 1 = Normalgröße. */
+  fontScale: number;
+  /**
+   * Akzentfarbe als `#rrggbb`. `null` bedeutet „mitgelieferte Farbe“ – die
+   * ist auf hellen und dunklen Hintergrund getrennt abgestimmt, eine feste
+   * Farbe kann das nicht leisten.
+   */
+  accentColor: string | null;
+  /** Zweite Akzentfarbe für Verläufe. Ebenfalls `null` = mitgeliefert. */
+  accentColorAlt: string | null;
+  /** `auto` folgt der Systemeinstellung. */
+  theme: ThemePreference;
+  /** Bewegung reduzieren – für empfindliche Augen und schwache Geräte. */
+  reduceMotion: boolean;
+}
+
+export const THEME_PREFERENCES = ['auto', 'dark', 'light'] as const;
+export type ThemePreference = (typeof THEME_PREFERENCES)[number];
+
+export const DEFAULT_APPEARANCE: Appearance = {
+  fontScale: 1,
+  accentColor: null,
+  accentColorAlt: null,
+  theme: 'auto',
+  reduceMotion: false,
+};
 
 export interface Room {
   id: string;
@@ -138,6 +200,8 @@ export const CAPABILITIES = [
   'cover',
   /** Jalousie mit verstellbaren Lamellen. */
   'cover.tilt',
+  /** Heizung mit einstellbarer Solltemperatur (Thermostat, Heizkörperventil). */
+  'thermostat',
   'sensor.temperature',
   'sensor.humidity',
   'sensor.motion',
@@ -158,6 +222,8 @@ export const METRICS = [
   'energyWh',
   'batteryPercent',
   'brightness',
+  'targetTemperatureC',
+  'valvePosition',
 ] as const;
 export type Metric = (typeof METRICS)[number];
 
@@ -180,6 +246,10 @@ export interface DeviceState {
   tilt?: number;
   /** Fahrzustand des Rollladens – für Animation und Stop-Knopf in der UI. */
   coverState?: CoverState;
+  /** Solltemperatur einer Heizung in °C. */
+  targetTemperatureC?: number;
+  /** Ventilstellung eines Heizkörperthermostats in Prozent. */
+  valvePosition?: number;
   temperatureC?: number;
   humidity?: number;
   motion?: boolean;
@@ -227,6 +297,7 @@ export type DeviceCommand =
   | { type: 'closeCover' }
   | { type: 'stopCover' }
   | { type: 'setTilt'; tilt: number }
+  | { type: 'setTargetTemperature'; targetTemperatureC: number }
   | { type: 'identify' };
 
 // ---------------------------------------------------------------------------
@@ -246,7 +317,18 @@ export type RuleTrigger =
       forSeconds?: number;
     }
   | { type: 'deviceState'; deviceId: string; property: 'on' | 'motion'; equals: boolean }
-  | { type: 'schedule'; at: string; days: number[] };
+  | { type: 'schedule'; at: string; days: number[] }
+  /**
+   * Wiederholend: alle `everyMinutes` Minuten, optional nur innerhalb eines
+   * Zeitfensters und an bestimmten Wochentagen.
+   */
+  | {
+      type: 'interval';
+      everyMinutes: number;
+      from?: string;
+      to?: string;
+      days?: number[];
+    };
 
 export type RuleCondition =
   | { type: 'timeRange'; from: string; to: string }

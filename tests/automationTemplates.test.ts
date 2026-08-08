@@ -158,7 +158,9 @@ describe('Vorbelegung aus dem Gerätebestand', () => {
   it('kommt mit einem leeren Haushalt zurecht', () => {
     const empty = resolveTemplates([], []);
     assert.equal(empty.length, AUTOMATION_TEMPLATES.length);
-    assert.equal(empty.filter((template) => template.applicable).length, 1, 'nur "alles aus"');
+    // Anwendbar bleiben nur die Vorlagen, die kein bestimmtes Gerät brauchen.
+    const withoutDevices = empty.filter((template) => template.applicable).map((t) => t.id).sort();
+    assert.deepEqual(withoutDevices, ['airing-reminder', 'all-off-night']);
   });
 
   it('ignoriert ausgeblendete Geräte', () => {

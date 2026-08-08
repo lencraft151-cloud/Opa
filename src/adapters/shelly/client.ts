@@ -284,6 +284,24 @@ export class ShellyClient {
     await this.rpc('Cover.GoToPosition', { id: channel, slat_pos: slatPos });
   }
 
+  /**
+   * Solltemperatur einer Heizung. Der Gen1-TRV nimmt sie als Query-Parameter,
+   * Gen2-Thermostate über die RPC-Schnittstelle.
+   */
+  async setThermostatTarget(channel: number, targetC: number): Promise<void> {
+    const target = Math.round(targetC * 10) / 10;
+    if (this.generation === 2) {
+      await this.rpc('Thermostat.SetConfig', {
+        id: channel,
+        config: { target_C: target },
+      });
+      return;
+    }
+    await this.sendJson(`/thermostat/${channel}`, {
+      query: { target_t_enabled: 1, target_t: target },
+    });
+  }
+
   async openCover(channel: number): Promise<void> {
     if (this.generation === 2) {
       await this.rpc('Cover.Open', { id: channel });

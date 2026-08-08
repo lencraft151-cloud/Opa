@@ -85,8 +85,16 @@ describe('Einrichtung über die API', () => {
     assert.equal(status, 200);
     assert.deepEqual(
       data.adapters.map((adapter: { type: string }) => adapter.type).sort(),
-      ['hue', 'shelly'],
+      ['homematic', 'hue', 'shelly'],
     );
+  });
+
+  it('nennt eine Kennung der ausgelieferten Oberfläche', async () => {
+    // Daran erkennt die Weboberfläche, dass sie sich neu laden sollte.
+    const first = await call('GET', '/api/system/info', undefined, false);
+    assert.match(first.data.build, /^[0-9a-f]{12}$/);
+    const second = await call('GET', '/api/system/info', undefined, false);
+    assert.equal(second.data.build, first.data.build, 'gleicher Stand, gleiche Kennung');
   });
 
   it('legt den Haushalt an und gibt genau einmal ein Token aus', async () => {
@@ -273,6 +281,99 @@ describe('Automationen', () => {
       actions: [{ type: 'notify', message: 'x' }],
     });
     assert.equal(status, 400);
+  });
+
+  it('legt eine wiederkehrende Regel mit Zeitfenster an', async () => {
+    const created = await call('POST', '/api/automations', {
+      name: 'Stündlich lüften erinnern',
+      trigger: {
+        type: 'interval',
+        everyMinutes: 120,
+        from: '08:00',
+        to: '20:00',
+        days: [1, 2, 3, 4, 5],
+      },
+      actions: [{ type: 'notify', message: 'Fenster auf' }],
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.data.trigger.everyMinutes, 120);
+    assert.equal(created.data.trigger.from, '08:00');
+
+    await call('DELETE', `/api/automations/${created.data.id}`);
+  });
+
+  it('lehnt einen zu kurzen Takt ab', async () => {
+    // Unter fünf Minuten wäre nur Last ohne Nutzen.
+    const { status } = await call('POST', '/api/automations', {
+      name: 'Zu hektisch',
+      trigger: { type: 'interval', everyMinutes: 1 },
+      actions: [{ type: 'notify', message: 'x' }],
+    });
+    assert.equal(status, 400);
+  });
+});
+
+describe('Darstellung', () => {
+  it('liefert Voreinstellungen, solange nichts gewählt wurde', async () => {
+    const { data } = await call('GET', '/api/household');
+    assert.deepEqual(data.appearance, {
+      fontScale: 1,
+      accentColor: null,
+      accentColorAlt: null,
+      theme: 'auto',
+      reduceMotion: false,
+    });
+  });
+
+  it('speichert Schriftgröße und Akzentfarbe', async () => {
+    const { status, data } = await call('PATCH', '/api/household', {
+      appearance: { fontScale: 1.3, accentColor: '#1F8A4C' },
+    });
+    assert.equal(status, 200);
+    assert.equal(data.appearance.fontScale, 1.3);
+    assert.equal(data.appearance.accentColor, '#1f8a4c', 'Farben werden vereinheitlicht');
+  });
+
+  it('lässt bereits gesetzte Werte stehen, wenn nur eines geändert wird', async () => {
+    const { data } = await call('PATCH', '/api/household', { appearance: { theme: 'dark' } });
+    assert.equal(data.appearance.theme, 'dark');
+    assert.equal(data.appearance.fontScale, 1.3, 'die Schriftgröße bleibt erhalten');
+    assert.equal(data.appearance.accentColor, '#1f8a4c');
+  });
+
+  it('nimmt „keine eigene Farbe" als bewusste Wahl an', async () => {
+    const { data } = await call('PATCH', '/api/household', {
+      appearance: { accentColor: null },
+    });
+    assert.equal(data.appearance.accentColor, null);
+  });
+
+  it('weist unmögliche Werte mit einer verständlichen Meldung ab', async () => {
+    const tooBig = await call('PATCH', '/api/household', { appearance: { fontScale: 4 } });
+    assert.equal(tooBig.status, 400);
+
+    const noColor = await call('PATCH', '/api/household', {
+      appearance: { accentColor: 'knallrot' },
+    });
+    assert.equal(noColor.status, 400);
+    assert.match(JSON.stringify(noColor.data), /rrggbb/);
+
+    const unknown = await call('PATCH', '/api/household', { appearance: { glitzer: true } });
+    assert.equal(unknown.status, 400);
+  });
+
+  it('setzt die Darstellung wieder zurück', async () => {
+    const { data } = await call('PATCH', '/api/household', {
+      appearance: {
+        fontScale: 1,
+        accentColor: null,
+        accentColorAlt: null,
+        theme: 'auto',
+        reduceMotion: false,
+      },
+    });
+    assert.equal(data.appearance.fontScale, 1);
+    assert.equal(data.appearance.theme, 'auto');
   });
 });
 

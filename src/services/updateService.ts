@@ -1,7 +1,7 @@
 import { badRequest, errorSummary } from '../core/errors.js';
 import { events } from '../core/events.js';
 import { createLogger } from '../core/logger.js';
-import type { Integration, UpdateInfo } from '../core/types.js';
+import type { Device, Integration, UpdateInfo } from '../core/types.js';
 import { nowIso } from '../util/id.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import type { Repositories } from '../storage/repositories.js';
@@ -30,6 +30,25 @@ export interface UpdateOverview {
     status: Integration['status'];
     updateInfo: UpdateInfo | null;
     /** Unterstützt der Adapter überhaupt Firmware-Updates? */
+    supported: boolean;
+  }>;
+  /**
+   * Alle Geräte mit ihrer Firmware. Bei Hue und Homematic pflegt die Zentrale
+   * die Geräte-Firmware; dann steht hier, über welche Integration das läuft.
+   */
+  devices: Array<{
+    deviceId: string;
+    name: string;
+    vendor: Device['vendor'];
+    model: string | null;
+    firmware: string | null;
+    reachable: boolean;
+    integrationId: string;
+    integrationName: string;
+    /** Wer die Aktualisierung ausführt. */
+    updatedBy: 'device' | 'bridge';
+    updateAvailable: boolean;
+    /** Kann der Hub für dieses Gerät überhaupt nach Firmware sehen? */
     supported: boolean;
   }>;
   updatesAvailable: number;
@@ -98,6 +117,34 @@ export class UpdateService {
   overview(householdId: string): UpdateOverview {
     const household = this.households.require();
     const integrations = this.integrations.list(householdId);
+    const byIntegration = new Map(integrations.map((item) => [item.id, item]));
+
+    /*
+     * Bei Shelly ist ein Gerät gleich eine Integration – es aktualisiert sich
+     * selbst. Hue und Homematic verwalten ihre Geräte dagegen über die
+     * Zentrale; dort führt der Weg über die Bridge.
+     */
+    const devices = this.repos.devices
+      .listByHousehold(householdId)
+      .filter((device) => !device.hidden)
+      .map((device) => {
+        const integration = byIntegration.get(device.integrationId);
+        const updatedBy: 'device' | 'bridge' = device.vendor === 'shelly' ? 'device' : 'bridge';
+        return {
+          deviceId: device.id,
+          name: device.name,
+          vendor: device.vendor,
+          model: device.model,
+          firmware: device.firmware,
+          reachable: device.reachable,
+          integrationId: device.integrationId,
+          integrationName: integration?.name ?? 'unbekannt',
+          updatedBy,
+          updateAvailable: integration?.updateInfo?.updateAvailable ?? false,
+          supported: integration ? this.supportsUpdates(integration) : false,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'de'));
 
     return {
       integrations: integrations.map((integration) => ({
@@ -108,6 +155,7 @@ export class UpdateService {
         updateInfo: integration.updateInfo,
         supported: this.supportsUpdates(integration),
       })),
+      devices,
       updatesAvailable: integrations.filter((item) => item.updateInfo?.updateAvailable).length,
       autoUpdate: {
         enabled: household.autoUpdate,

@@ -93,6 +93,8 @@ export const METRIC_LABEL = {
   energyWh: 'Verbrauchte Energie',
   batteryPercent: 'Batteriestand',
   brightness: 'Lampenhelligkeit',
+  targetTemperatureC: 'Solltemperatur',
+  valvePosition: 'Ventilstellung',
 };
 
 /**
@@ -106,6 +108,7 @@ export const CAPABILITY_LABEL = {
   color_temperature: 'Weißtöne',
   cover: 'Rollladen',
   'cover.tilt': 'Lamellen',
+  thermostat: 'Heizung',
   'sensor.temperature': 'misst Temperatur',
   'sensor.humidity': 'misst Luftfeuchte',
   'sensor.motion': 'erkennt Bewegung',
@@ -116,7 +119,11 @@ export const CAPABILITY_LABEL = {
   button: 'Taster',
 };
 
-export const VENDOR_LABEL = { hue: 'Philips Hue', shelly: 'Shelly' };
+export const VENDOR_LABEL = {
+  hue: 'Philips Hue',
+  shelly: 'Shelly',
+  homematic: 'Homematic',
+};
 
 export const COVER_STATE_LABEL = {
   open: 'offen',
@@ -126,7 +133,7 @@ export const COVER_STATE_LABEL = {
   stopped: 'angehalten',
 };
 
-/** „1 Automation" statt „1 Automationen". */
+/** „1 Automation“ statt „1 Automationen“. */
 export function plural(count, one, many) {
   return `${count} ${count === 1 ? one : many}`;
 }

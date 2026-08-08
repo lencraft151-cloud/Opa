@@ -53,7 +53,20 @@ allenfalls unter `details`.
 Ohne Token. `{ status, uptimeSeconds, polling }`
 
 ### `GET /system/info`
-Ohne Token. Version, Node-Version, verfügbare Adapter, aktive Einstellungen.
+Ohne Token. Version, Node-Version, verfügbare Adapter, aktive Einstellungen –
+und `build`: eine Kennung aller ausgelieferten Dateien unter `public/`.
+
+Die Weboberfläche fragt sie regelmäßig ab; ändert sie sich, verwirft sie ihren
+Zwischenspeicher und lädt sich neu. Gleicher Stand ⇒ gleiche Kennung, jede
+Änderung ⇒ neue Kennung. Der Wert wird 15 Sekunden lang zwischengespeichert.
+
+```json
+{ "name": "Smart-Home-Hub", "version": "1.0.0", "build": "9617df2505a1",
+  "node": "v22.22.0", "hasHousehold": true, "setupCompleted": true,
+  "authRequired": true,
+  "adapters": [ { "type": "homematic", "displayName": "Homematic",
+                  "supportsPush": false } ] }
+```
 
 ### `GET /events`
 Server-Sent-Events-Strom. Ereignisse: `device.added`, `device.updated`,
@@ -106,17 +119,41 @@ Schließt die Einrichtung ab. `400`, solange keine Integration verbunden ist.
 | Methode | Pfad | Beschreibung |
 | --- | --- | --- |
 | `GET` | `/household` | Stammdaten |
-| `PATCH` | `/household` | `name`, `timezone`, `locale`, `pricePerKwh`, `currency`, `basePricePerMonth`, `autoUpdate`, `autoUpdateFrom`, `autoUpdateTo` |
+| `PATCH` | `/household` | `name`, `timezone`, `locale`, `pricePerKwh`, `currency`, `basePricePerMonth`, `autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`, `appearance` |
 | `GET` | `/household/summary` | Kennzahlen fürs Dashboard inkl. gestörter Integrationen |
 | `GET` | `/household/tokens` | Tokens (ohne Hash) |
 | `POST` | `/household/tokens` | `{ "name": "Handy" }` → neues Token |
 | `DELETE` | `/household/tokens/:id` | Token widerrufen (das letzte nicht) |
 
+### Darstellung
+
+`appearance` gehört zum Haushalt und gilt damit auf jedem Gerät, auf dem der
+Hub geöffnet wird. Übergebene Felder werden mit den gespeicherten
+zusammengeführt – wer nur die Schriftgröße ändert, verliert seine Farben nicht.
+
+```json
+{ "appearance": { "fontScale": 1.3, "accentColor": "#1f8a4c",
+                  "accentColorAlt": "#7cc242", "theme": "dark",
+                  "reduceMotion": false } }
+```
+
+| Feld | Werte | Bedeutung |
+| --- | --- | --- |
+| `fontScale` | `0.85` – `1.6` | Skalierung der gesamten Oberfläche, nicht nur des Textes |
+| `accentColor` | `#rrggbb` oder `null` | `null` = mitgelieferte Farbe (getrennt für hell und dunkel abgestimmt) |
+| `accentColorAlt` | `#rrggbb` oder `null` | Zweite Farbe für Verläufe |
+| `theme` | `auto`, `light`, `dark` | `auto` folgt der Systemeinstellung |
+| `reduceMotion` | `true`/`false` | Animationen abschalten |
+
+Werte außerhalb der Grenzen und Farben, die keine sind, werden mit `400`
+abgewiesen – eine ungültige Farbe würde der Browser stillschweigend verwerfen
+und die Einstellung sähe aus, als täte sie nichts.
+
 ---
 
 ## Integrationen
 
-### `GET /integrations/discover?type=hue|shelly&scan=true`
+### `GET /integrations/discover?type=hue|shelly|homematic&scan=true`
 Sucht im Netzwerk. `scan=true` scannt zusätzlich das Subnetz (langsamer, findet
 aber schlafende Geräte). Antwort:
 
@@ -201,6 +238,7 @@ Filter: `roomId`, `unassigned=true`, `integrationId`, `capability`, `search`,
 | Zufahren | `{"type":"closeCover"}` | `cover` |
 | Anhalten | `{"type":"stopCover"}` | `cover` |
 | Lamellen | `{"type":"setTilt","tilt":0…100}` | `cover.tilt` |
+| Solltemperatur | `{"type":"setTargetTemperature","targetTemperatureC":4…35}` | `thermostat` |
 | Identifizieren | `{"type":"identify"}` | – |
 
 Bei Rollläden gilt **100 = ganz offen, 0 = ganz zu**. Der Zustand enthält
@@ -209,6 +247,12 @@ darauf beruht die Bewegungsanzeige in der Oberfläche.
 
 `setBrightness` mit `0` schaltet aus; alle anderen Helligkeits-, Farb- und
 Farbtemperatur-Kommandos schalten das Gerät automatisch ein.
+
+Geräte mit `thermostat` melden im Zustand `targetTemperatureC` (Sollwert),
+`temperatureC` (gemessen, falls das Gerät misst) und `valvePosition` (0–100 %,
+falls es die Ventilstellung kennt). Alte Bauformen sind eingeschlossen: das
+Shelly TRV, Homematic-Heizkörperthermostate (BidCos wie HmIP) und
+Wandthermostate.
 
 ### Sammelkommando
 
@@ -297,11 +341,24 @@ geraten. Die Oberfläche zeigt in dem Fall einen Hinweis statt einer Zahl.
                                       "availableVersion": "bereit zur Installation",
                                       "updateAvailable": true, "installable": true,
                                       "checkedAt": "…" } } ],
+  "devices": [ { "deviceId": "dev_…", "name": "Stehlampe", "vendor": "hue",
+                 "model": "LCT001", "firmware": "5.50.1", "reachable": true,
+                 "integrationId": "int_…", "integrationName": "Hue Bridge",
+                 "updatedBy": "bridge", "updateAvailable": true,
+                 "supported": true } ],
   "updatesAvailable": 1,
   "autoUpdate": { "enabled": false, "from": "03:00", "to": "05:00", "timezone": "Europe/Berlin" },
   "lastCheckedAt": "…"
 }
 ```
+
+`devices` listet **jedes sichtbare Gerät** mit seinem Firmwarestand, alphabetisch.
+`updatedBy` sagt, wo die Aktualisierung tatsächlich passiert: `device` bei
+Shellys, die sich selbst aktualisieren, `bridge` bei Hue-Lampen und
+Homematic-Aktoren, deren Zentrale die Firmware verteilt. `supported` ist
+`false`, wenn der Adapter gar nicht nach Firmware sehen kann – die Oberfläche
+bietet dann keinen Knopf an, der ins Leere liefe (Homematic aktualisiert sich
+über die eigene Weboberfläche der CCU).
 
 Die automatische Installation wird über `PATCH /household` gesteuert
 (`autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`). Sie greift nur innerhalb des
@@ -367,9 +424,20 @@ Eigene Werte überschreiben einzelne Felder:
 { "type": "deviceState", "deviceId": "dev_…", "property": "motion", "equals": true }
 
 { "type": "schedule", "at": "07:30", "days": [1,2,3,4,5] }
+
+{ "type": "interval", "everyMinutes": 120,
+  "from": "08:00", "to": "20:00", "days": [1,2,3,4,5] }
 ```
 `days`: 0 = Sonntag … 6 = Samstag, leer = täglich. Operatoren: `<`, `<=`, `>`,
 `>=`, `==`, `!=`.
+
+`interval` wiederholt sich im angegebenen Takt (`everyMinutes`, mindestens 5,
+höchstens 1440). `from`/`to` sind optional, müssen aber gemeinsam angegeben
+werden; ohne sie läuft die Regel rund um die Uhr. Gemessen wird der Abstand ab
+der letzten Ausführung, nicht an festen Uhrzeiten: Nach einem Neustart des Hubs
+läuft die Regel einmal sofort und danach im gewünschten Takt. Außerhalb des
+Zeitfensters passiert nichts, und beim nächsten Eintritt wird einmal ausgelöst
+statt alles Versäumte nachgeholt.
 
 ### Bedingungen (alle müssen zutreffen)
 
