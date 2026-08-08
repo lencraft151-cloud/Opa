@@ -51,6 +51,19 @@ export interface ShellyIntegrationSecrets {
 
 export type IntegrationSecrets = HueIntegrationSecrets | ShellyIntegrationSecrets;
 
+/** Ergebnis einer Firmware-Prüfung. */
+export interface UpdateInfo {
+  currentVersion: string | null;
+  availableVersion: string | null;
+  updateAvailable: boolean;
+  /** Kann der Hub die Installation selbst anstoßen? */
+  installable: boolean;
+  checkedAt: string;
+  /** Zeitpunkt der letzten vom Hub angestoßenen Installation. */
+  lastInstallStartedAt?: string | null;
+  note?: string;
+}
+
 export interface Integration {
   id: string;
   householdId: string;
@@ -62,6 +75,8 @@ export interface Integration {
   secretsEnc: string | null;
   lastSeenAt: string | null;
   lastError: string | null;
+  /** Letzte Firmware-Prüfung; `null`, solange noch nicht geprüft wurde. */
+  updateInfo: UpdateInfo | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -84,6 +99,16 @@ export interface Household {
   locale: string;
   setupStep: SetupStep;
   setupCompletedAt: string | null;
+  /** Strompreis in Währungseinheiten je kWh – Basis der Kostenrechnung. */
+  pricePerKwh: number;
+  currency: string;
+  /** Grundgebühr pro Monat, fließt in die Hochrechnung ein. */
+  basePricePerMonth: number;
+  /** Firmware-Updates automatisch installieren. */
+  autoUpdate: boolean;
+  /** Zeitfenster für automatische Updates, lokale Zeit `HH:MM`. */
+  autoUpdateFrom: string;
+  autoUpdateTo: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -111,6 +136,8 @@ export const CAPABILITIES = [
   'color',
   'color_temperature',
   'cover',
+  /** Jalousie mit verstellbaren Lamellen. */
+  'cover.tilt',
   'sensor.temperature',
   'sensor.humidity',
   'sensor.motion',
@@ -134,6 +161,9 @@ export const METRICS = [
 ] as const;
 export type Metric = (typeof METRICS)[number];
 
+export const COVER_STATES = ['open', 'closed', 'opening', 'closing', 'stopped'] as const;
+export type CoverState = (typeof COVER_STATES)[number];
+
 export interface DeviceState {
   on?: boolean;
   /** 0..100 */
@@ -146,6 +176,10 @@ export interface DeviceState {
   saturation?: number;
   /** Rollladen-/Jalousie-Position 0 (zu) .. 100 (offen) */
   position?: number;
+  /** Lamellenstellung 0..100 (nur bei Jalousien) */
+  tilt?: number;
+  /** Fahrzustand des Rollladens – für Animation und Stop-Knopf in der UI. */
+  coverState?: CoverState;
   temperatureC?: number;
   humidity?: number;
   motion?: boolean;
@@ -189,6 +223,10 @@ export type DeviceCommand =
   | { type: 'setColorTemperature'; kelvin: number }
   | { type: 'setColor'; hue: number; saturation: number }
   | { type: 'setPosition'; position: number }
+  | { type: 'openCover' }
+  | { type: 'closeCover' }
+  | { type: 'stopCover' }
+  | { type: 'setTilt'; tilt: number }
   | { type: 'identify' };
 
 // ---------------------------------------------------------------------------

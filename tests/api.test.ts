@@ -93,12 +93,21 @@ describe('Einrichtung über die API', () => {
     const { status, data } = await call('POST', '/api/setup/household', {
       name: 'Testhaushalt',
       timezone: 'Europe/Berlin',
+      pricePerKwh: 0.42,
     });
     assert.equal(status, 201);
     assert.ok(data.accessToken?.startsWith('sh_'));
     assert.equal(data.household.name, 'Testhaushalt');
     assert.equal(data.state.currentStep, 'integrations');
+    assert.equal(data.household.pricePerKwh, 0.42, 'der eingegebene Strompreis wird übernommen');
     token = data.accessToken;
+  });
+
+  it('setzt sinnvolle Voreinstellungen', async () => {
+    const { data } = await call('GET', '/api/household');
+    assert.equal(data.currency, 'EUR');
+    assert.equal(data.autoUpdate, false);
+    assert.equal(data.autoUpdateFrom, '03:00');
   });
 
   it('lehnt einen zweiten Haushalt ab', async () => {
@@ -289,6 +298,118 @@ describe('Zugriffstoken', () => {
   });
 });
 
+describe('Stromverbrauch', () => {
+  it('liefert eine Auswertung auch ohne Messwerte', async () => {
+    const { status, data } = await call('GET', '/api/energy/summary?period=today');
+    assert.equal(status, 200);
+    assert.equal(data.totalKwh, 0);
+    assert.equal(data.currency, 'EUR');
+    assert.equal(data.period.label, 'Heute');
+    assert.deepEqual(data.devices, []);
+    assert.equal(data.projection, null, 'ohne Messwerte wird nichts hochgerechnet');
+    assert.equal(data.coverage, 0);
+  });
+
+  it('kennt alle Zeiträume', async () => {
+    for (const period of ['today', 'yesterday', 'week', 'month', 'year']) {
+      const { status, data } = await call('GET', `/api/energy/summary?period=${period}`);
+      assert.equal(status, 200, period);
+      assert.equal(data.period.key, period);
+    }
+  });
+
+  it('weist unbekannte Zeiträume ab', async () => {
+    const { status, data } = await call('GET', '/api/energy/summary?period=jahrhundert');
+    assert.equal(status, 400);
+    assert.ok(data.error.hint, 'auch Parameterfehler bekommen einen Hinweis');
+  });
+
+  it('übernimmt einen geänderten Strompreis in die Kostenrechnung', async () => {
+    const patched = await call('PATCH', '/api/household', { pricePerKwh: 0.5, currency: 'CHF' });
+    assert.equal(patched.status, 200);
+    assert.equal(patched.data.pricePerKwh, 0.5);
+
+    const { data } = await call('GET', '/api/energy/summary?period=today');
+    assert.equal(data.pricePerKwh, 0.5);
+    assert.equal(data.currency, 'CHF');
+
+    await call('PATCH', '/api/household', { pricePerKwh: 0.35, currency: 'EUR' });
+  });
+
+  it('lehnt negative Strompreise mit einem Hinweis ab', async () => {
+    const { status, data } = await call('PATCH', '/api/household', { pricePerKwh: -1 });
+    assert.equal(status, 400);
+    assert.ok(data.error.message.length > 0);
+  });
+});
+
+describe('Firmware-Updates', () => {
+  it('liefert eine Übersicht mit den Auto-Update-Einstellungen', async () => {
+    const { status, data } = await call('GET', '/api/updates');
+    assert.equal(status, 200);
+    assert.equal(data.updatesAvailable, 0);
+    assert.equal(data.autoUpdate.enabled, false);
+    assert.equal(data.autoUpdate.from, '03:00');
+    assert.deepEqual(data.integrations, []);
+  });
+
+  it('schaltet die automatische Installation ein', async () => {
+    const { status, data } = await call('PATCH', '/api/household', {
+      autoUpdate: true,
+      autoUpdateFrom: '02:30',
+      autoUpdateTo: '04:30',
+    });
+    assert.equal(status, 200);
+    assert.equal(data.autoUpdate, true);
+
+    const overview = await call('GET', '/api/updates');
+    assert.equal(overview.data.autoUpdate.enabled, true);
+    assert.equal(overview.data.autoUpdate.from, '02:30');
+  });
+
+  it('lehnt ein leeres Zeitfenster ab', async () => {
+    const { status, data } = await call('PATCH', '/api/household', {
+      autoUpdateFrom: '03:00',
+      autoUpdateTo: '03:00',
+    });
+    assert.equal(status, 400);
+    assert.match(data.error.hint ?? '', /unterscheiden/);
+  });
+
+  it('prüft das Uhrzeitformat', async () => {
+    const { status } = await call('PATCH', '/api/household', { autoUpdateFrom: '25:99' });
+    assert.equal(status, 400);
+  });
+
+  it('meldet unbekannte Integrationen mit 404', async () => {
+    const { status } = await call('POST', '/api/updates/int_gibtesnicht/check');
+    assert.equal(status, 404);
+  });
+});
+
+describe('Rollladen-Kommandos', () => {
+  it('akzeptiert die neuen Kommandotypen im Schema', async () => {
+    // Ohne Gerät scheitert es an der ID, nicht an der Validierung.
+    for (const command of [
+      { type: 'openCover' },
+      { type: 'closeCover' },
+      { type: 'stopCover' },
+      { type: 'setTilt', tilt: 40 },
+      { type: 'setPosition', position: 80 },
+    ]) {
+      const { status } = await call('POST', '/api/devices/dev_unbekannt/command', command);
+      assert.equal(status, 404, `${command.type} muss die Validierung passieren`);
+    }
+  });
+
+  it('weist ungültige Werte ab', async () => {
+    const tooHigh = await call('POST', '/api/devices/dev_x/command', { type: 'setTilt', tilt: 300 });
+    assert.equal(tooHigh.status, 400);
+    const missing = await call('POST', '/api/devices/dev_x/command', { type: 'setPosition' });
+    assert.equal(missing.status, 400);
+  });
+});
+
 describe('Fehlerbehandlung', () => {
   it('meldet unbekannte API-Routen mit 404', async () => {
     const { status, data } = await call('GET', '/api/gibtesnicht');
@@ -303,7 +424,8 @@ describe('Fehlerbehandlung', () => {
       body: '{kein json',
     });
     assert.equal(response.status, 400);
-    const data = await response.json();
+    const data = (await response.json()) as { error: { message: string; hint?: string } };
     assert.match(data.error.message, /JSON/);
+    assert.ok(data.error.hint, 'auch der JSON-Fehler bekommt einen Hinweis');
   });
 });

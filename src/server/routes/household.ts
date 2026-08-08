@@ -18,6 +18,20 @@ export function householdRoutes(container: Container): Router {
           name: z.string().min(1).max(120).optional(),
           timezone: z.string().min(1).max(64).optional(),
           locale: z.string().min(2).max(16).optional(),
+          // Grundlage der Stromkostenrechnung
+          pricePerKwh: z.number().min(0).max(10).optional(),
+          currency: z.string().min(1).max(8).optional(),
+          basePricePerMonth: z.number().min(0).max(1000).optional(),
+          // Firmware-Auto-Updates
+          autoUpdate: z.boolean().optional(),
+          autoUpdateFrom: z
+            .string()
+            .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Uhrzeit im Format HH:MM erwartet')
+            .optional(),
+          autoUpdateTo: z
+            .string()
+            .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Uhrzeit im Format HH:MM erwartet')
+            .optional(),
         }),
         req,
       );
@@ -40,7 +54,12 @@ export function householdRoutes(container: Container): Router {
         total: integrations.length,
         linked: integrations.filter((item) => item.status === 'linked').length,
         error: integrations.filter((item) => item.status === 'error').length,
+        // Fehlermeldungen gehören ins Dashboard, nicht nur in die Einstellungen.
+        problems: integrations
+          .filter((item) => item.status === 'error')
+          .map((item) => ({ id: item.id, name: item.name, error: item.lastError })),
       },
+      updatesAvailable: integrations.filter((item) => item.updateInfo?.updateAvailable).length,
       automations: container.automations.list(household.id).length,
     });
   });

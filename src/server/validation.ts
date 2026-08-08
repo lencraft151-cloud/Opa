@@ -12,6 +12,10 @@ export const commandSchema = z.discriminatedUnion('type', [
     saturation: z.number().min(0).max(100),
   }),
   z.object({ type: z.literal('setPosition'), position: z.number().min(0).max(100) }),
+  z.object({ type: z.literal('openCover') }),
+  z.object({ type: z.literal('closeCover') }),
+  z.object({ type: z.literal('stopCover') }),
+  z.object({ type: z.literal('setTilt'), tilt: z.number().min(0).max(100) }),
   z.object({ type: z.literal('identify') }),
 ]);
 
@@ -103,6 +107,11 @@ export const householdSchema = z.object({
   name: z.string().min(1).max(120),
   timezone: z.string().min(1).max(64).optional(),
   locale: z.string().min(2).max(16).optional(),
+  // Der Assistent fragt den Strompreis gleich mit ab – ohne diese Felder
+  // würde die Eingabe beim Anlegen stillschweigend verworfen.
+  pricePerKwh: z.number().min(0).max(10).optional(),
+  currency: z.string().min(1).max(8).optional(),
+  basePricePerMonth: z.number().min(0).max(1000).optional(),
 });
 
 export const roomSchema = z.object({

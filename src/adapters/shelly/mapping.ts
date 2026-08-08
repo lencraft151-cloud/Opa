@@ -1,5 +1,5 @@
 import { rgbToHsv, round } from '../../core/color.js';
-import type { Capability, DeviceState } from '../../core/types.js';
+import type { Capability, CoverState, DeviceState } from '../../core/types.js';
 
 /**
  * Ein Shelly ist ein physisches Gerät mit mehreren Komponenten (Relais,
@@ -123,6 +123,15 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
         const capabilities: Capability[] = ['cover'];
         const position = num(value['current_pos']);
         if (position !== undefined) state.position = position;
+        state.coverState = normalizeCoverState(str(value['state']), position, 2);
+
+        // Jalousien melden zusätzlich die Lamellenstellung.
+        const tilt = num(value['slat_pos']) ?? num(obj(value['slat'])?.['pos']);
+        if (tilt !== undefined) {
+          state.tilt = tilt;
+          capabilities.push('cover.tilt');
+        }
+
         const power = num(value['apower']);
         if (power !== undefined) {
           state.powerW = round(power, 2);
@@ -282,10 +291,17 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
     const state: DeviceState = {};
     const position = num(roller['current_pos']);
     if (position !== undefined) state.position = position;
+    state.coverState = normalizeCoverState(str(roller['state']), position, 1);
+    const power = num(roller['power']);
+    const capabilities: Capability[] = ['cover'];
+    if (power !== undefined) {
+      state.powerW = round(power, 2);
+      capabilities.push('sensor.power');
+    }
     components.push({
       externalId,
       name: label(naming, externalId, `Rollladen ${index + 1}`),
-      capabilities: ['cover'],
+      capabilities,
       state,
     });
   });
@@ -425,6 +441,53 @@ export function namingFromConfig(
   }
 
   return { deviceName, channelNames };
+}
+
+/**
+ * Vereinheitlicht den Fahrzustand eines Rollladens.
+ *
+ * Die beiden Generationen benennen dasselbe unterschiedlich: Gen2 meldet mit
+ * `open` den Endzustand „ganz offen“, Gen1 dagegen die Fahrt nach oben. Ohne
+ * diese Unterscheidung würde die UI einen stehenden Rollladen als fahrend
+ * anzeigen.
+ */
+export function normalizeCoverState(
+  raw: string | undefined,
+  position: number | undefined,
+  generation: 1 | 2,
+): CoverState {
+  const fromPosition = (): CoverState => {
+    if (position === undefined) return 'stopped';
+    if (position <= 0) return 'closed';
+    if (position >= 100) return 'open';
+    return 'stopped';
+  };
+
+  if (!raw) return fromPosition();
+
+  if (generation === 1) {
+    switch (raw) {
+      case 'open':
+        return 'opening';
+      case 'close':
+        return 'closing';
+      default:
+        return fromPosition();
+    }
+  }
+
+  switch (raw) {
+    case 'opening':
+      return 'opening';
+    case 'closing':
+      return 'closing';
+    case 'open':
+      return 'open';
+    case 'closed':
+      return 'closed';
+    default:
+      return fromPosition();
+  }
 }
 
 /** Zerlegt `switch:2` in Typ und Kanalnummer. */

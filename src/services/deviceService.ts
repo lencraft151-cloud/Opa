@@ -249,7 +249,29 @@ const REQUIRED_CAPABILITY: Record<DeviceCommand['type'], Capability | null> = {
   setColorTemperature: 'color_temperature',
   setColor: 'color',
   setPosition: 'cover',
+  openCover: 'cover',
+  closeCover: 'cover',
+  stopCover: 'cover',
+  setTilt: 'cover.tilt',
   identify: null,
+};
+
+/** Verständliche Bezeichnungen für Fehlermeldungen. */
+const CAPABILITY_LABEL: Record<Capability, string> = {
+  switch: 'schaltbar',
+  dimmer: 'dimmbar',
+  color: 'farbfähig',
+  color_temperature: 'Farbtemperatur einstellbar',
+  cover: 'Rollladen',
+  'cover.tilt': 'Jalousie mit Lamellen',
+  'sensor.temperature': 'Temperatursensor',
+  'sensor.humidity': 'Feuchtesensor',
+  'sensor.motion': 'Bewegungsmelder',
+  'sensor.illuminance': 'Helligkeitssensor',
+  'sensor.power': 'Leistungsmessung',
+  'sensor.energy': 'Energiezähler',
+  'sensor.battery': 'Batterieanzeige',
+  button: 'Taster',
 };
 
 export function supports(device: Device, command: DeviceCommand): boolean {
@@ -259,10 +281,16 @@ export function supports(device: Device, command: DeviceCommand): boolean {
 
 function assertSupported(device: Device, command: DeviceCommand): void {
   if (supports(device, command)) return;
-  const required = REQUIRED_CAPABILITY[command.type];
+  const required = REQUIRED_CAPABILITY[command.type] as Capability;
+  const own =
+    device.capabilities.map((capability) => CAPABILITY_LABEL[capability]).join(', ') || 'keine';
+
   throw badRequest(
-    `"${device.name}" unterstützt "${command.type}" nicht (benötigt: ${required}). ` +
-      `Vorhanden: ${device.capabilities.join(', ') || 'keine'}`,
+    `"${device.name}" kann das nicht: dafür wäre "${CAPABILITY_LABEL[required]}" nötig.`,
+    { required, capabilities: device.capabilities },
+    required === 'cover.tilt'
+      ? 'Nur Jalousien mit verstellbaren Lamellen unterstützen das; ein normaler Rollladen kennt nur die Position.'
+      : `Dieses Gerät ist: ${own}.`,
   );
 }
 

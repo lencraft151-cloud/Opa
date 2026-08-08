@@ -67,6 +67,22 @@ export interface HueBridgeConfig {
   mac?: string;
 }
 
+/** Ausschnitt aus `GET /api/<key>/config` – nur die Firmware-Felder. */
+export interface HueFullConfig {
+  name?: string;
+  swversion?: string;
+  apiversion?: string;
+  bridgeid?: string;
+  swupdate2?: {
+    /** `noupdates` | `transferring` | `anyreadytoinstall` | `allreadytoinstall` */
+    state?: string;
+    checkforupdate?: boolean;
+    lastchange?: string;
+    autoinstall?: { on?: boolean; updatetime?: string };
+    bridge?: { state?: string; lastinstall?: string };
+  };
+}
+
 export interface HueLightUpdate {
   on?: { on: boolean };
   dimming?: { brightness: number };
@@ -239,6 +255,36 @@ export class HueClient {
       insecureTLS: true,
       timeoutMs: this.timeoutMs,
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Firmware der Bridge (nur über die V1-API verfügbar)
+  // -------------------------------------------------------------------------
+
+  /** Vollständige Bridge-Konfiguration inklusive `swupdate2`. */
+  async getFullConfig(): Promise<HueFullConfig> {
+    if (!this.applicationKey) throw upstreamError('Es wurde kein Hue Application Key hinterlegt');
+    return requestJson<HueFullConfig>(
+      `https://${this.host}/api/${this.applicationKey}/config`,
+      { insecureTLS: true, timeoutMs: this.timeoutMs },
+    );
+  }
+
+  /**
+   * Weist die Bridge an, nach Updates zu suchen bzw. das bereitliegende
+   * Update zu installieren.
+   */
+  async setSoftwareUpdate(payload: { checkforupdate?: boolean; install?: boolean }): Promise<void> {
+    if (!this.applicationKey) throw upstreamError('Es wurde kein Hue Application Key hinterlegt');
+    const res = await request(`https://${this.host}/api/${this.applicationKey}/config`, {
+      method: 'PUT',
+      json: { swupdate2: payload },
+      insecureTLS: true,
+      timeoutMs: this.timeoutMs,
+    });
+    if (res.status >= 400) {
+      throw upstreamError(`Die Hue Bridge lehnt die Update-Anfrage ab (HTTP ${res.status}).`);
+    }
   }
 
   // -------------------------------------------------------------------------

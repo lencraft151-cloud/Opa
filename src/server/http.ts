@@ -15,7 +15,11 @@ export function asyncHandler(
 export function parseBody<T extends ZodTypeAny>(schema: T, req: Request): z.infer<T> {
   const result = schema.safeParse(req.body);
   if (!result.success) {
-    throw badRequest('Die übergebenen Daten sind ungültig', formatIssues(result.error));
+    throw badRequest(
+      summarize(result.error, 'Die gesendeten Daten sind unvollständig oder falsch.'),
+      formatIssues(result.error),
+      'Die Liste unter "details" nennt jedes beanstandete Feld einzeln.',
+    );
   }
   return result.data;
 }
@@ -24,7 +28,11 @@ export function parseBody<T extends ZodTypeAny>(schema: T, req: Request): z.infe
 export function parseQuery<T extends ZodTypeAny>(schema: T, req: Request): z.infer<T> {
   const result = schema.safeParse(req.query);
   if (!result.success) {
-    throw badRequest('Die Abfrageparameter sind ungültig', formatIssues(result.error));
+    throw badRequest(
+      summarize(result.error, 'Die Abfrageparameter sind ungültig.'),
+      formatIssues(result.error),
+      'Prüfe Schreibweise und erlaubte Werte der Parameter in der URL.',
+    );
   }
   return result.data;
 }
@@ -34,6 +42,16 @@ function formatIssues(error: z.ZodError): Array<{ path: string; message: string 
     path: issue.path.join('.') || '(root)',
     message: issue.message,
   }));
+}
+
+/** Nennt die betroffenen Felder direkt in der Hauptmeldung. */
+function summarize(error: z.ZodError, fallback: string): string {
+  const fields = [
+    ...new Set(error.issues.map((issue) => issue.path.join('.')).filter(Boolean)),
+  ];
+  if (fields.length === 0) return fallback;
+  if (fields.length === 1) return `Das Feld "${fields[0]}" ist ungültig.`;
+  return `Diese Felder sind ungültig: ${fields.join(', ')}.`;
 }
 
 /** Query-Parameter, die als Wahrheitswert gemeint sind ("1", "true", "yes"). */

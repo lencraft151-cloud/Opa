@@ -7,12 +7,14 @@ import { createAuthMiddleware } from './auth.js';
 import { errorHandler, notFoundHandler } from './errorHandler.js';
 import { automationRoutes } from './routes/automations.js';
 import { deviceRoutes } from './routes/devices.js';
+import { energyRoutes } from './routes/energy.js';
 import { householdRoutes } from './routes/household.js';
 import { integrationRoutes } from './routes/integrations.js';
 import { roomRoutes } from './routes/rooms.js';
 import { setupRoutes } from './routes/setup.js';
 import { systemRoutes } from './routes/system.js';
 import { telemetryRoutes } from './routes/telemetry.js';
+import { updateRoutes } from './routes/updates.js';
 
 const log = createLogger('http');
 
@@ -51,6 +53,8 @@ export function createApp(container: Container): express.Express {
   api.use(deviceRoutes(container));
   api.use(telemetryRoutes(container));
   api.use(automationRoutes(container));
+  api.use(energyRoutes(container));
+  api.use(updateRoutes(container));
   app.use('/api', api);
 
   app.use(express.static(PUBLIC_DIR, { index: 'index.html', maxAge: '1h' }));

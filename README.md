@@ -18,10 +18,13 @@ Shelly-Geräten, das Anlegen von Räumen und die Zuordnung der Geräte.
 | **Haushalt** | Ersteinrichtung per Assistent, Räume, Zugriffstoken |
 | **Philips Hue** | Bridge-Discovery (mDNS + Cloud + Subnetz-Scan), Pairing über Link-Button, CLIP-API v2, Live-Updates über den Eventstream |
 | **Shelly** | Gen1 (REST, Basic-Auth) und Gen2/3/4 (JSON-RPC, Digest-Auth SHA-256), Relais, Dimmer, Rollläden, Verbrauchsmessung, H&T-Sensoren, Add-On-Fühler |
-| **Geräte** | Einheitliches Modell mit Fähigkeiten (`switch`, `dimmer`, `color`, `cover`, `sensor.*`) – herstellerunabhängig steuerbar |
+| **Rollläden** | Auf/Zu/Stop, Position, Lamellenverstellung bei Jalousien, Fahrzustand mit animierter Anzeige, Sammelbefehle je Raum |
+| **Geräte** | Einheitliches Modell mit Fähigkeiten (`switch`, `dimmer`, `color`, `cover`, `cover.tilt`, `sensor.*`) – herstellerunabhängig steuerbar |
 | **Messwerte** | Temperatur, Luftfeuchte, Helligkeit, Leistung, Energie, Batterie – dauerhaft archiviert, mit Verlaufsdiagramm |
+| **Stromverbrauch** | Verbrauch und Kosten je Gerät, Raum und Zeitraum, Hochrechnung auf Monat/Jahr, Erkennung von Dauerverbrauchern |
+| **Firmware-Updates** | Prüfung für Hue Bridge und Shelly, Installation auf Knopfdruck oder automatisch im gewählten Nachtfenster |
 | **Automationen** | Sensorschwellen, Gerätezustände und Zeitpläne mit Bedingungen, Sperrzeiten und Aktionen (schalten, Webhook, Meldung) |
-| **Oberfläche** | Dashboard mit Live-Updates (SSE), Raum- und Geräteansicht, Verlauf, Einstellungen |
+| **Oberfläche** | Installierbare Web-App (PWA) mit Live-Updates (SSE), Dashboard, Raum-, Geräte-, Energie- und Verlaufsansicht |
 
 ---
 
@@ -142,6 +145,57 @@ Geschrieben wird nur bei relevanter Änderung (z. B. 0,3 °C), mindestens aber a
 15 Minuten – das hält die Dateien klein, ohne Lücken im Diagramm zu erzeugen.
 Dateien älter als `TELEMETRY_RETENTION_DAYS` werden automatisch gelöscht.
 
+### Stromverbrauch: woher die Zahlen kommen
+
+Der Hub rechnet auf zwei Wegen, je nachdem was das Gerät liefert:
+
+- **Energiezähler** (`sensor.energy`, z. B. Shelly PM): Es werden die Zuwächse
+  zwischen den Messpunkten summiert. Läuft ein Zähler nach einem Stromausfall
+  wieder bei null los, wird der Rückwärtssprung als Reset gewertet statt als
+  negativer Verbrauch.
+- **Leistungskurve** (`sensor.power`): Die Kurve wird nach der Trapezregel
+  integriert. Lücken über 30 Minuten – dort lief der Hub nicht – werden
+  übersprungen statt hochgerechnet.
+
+Damit die Anzeige ehrlich bleibt, weist jede Auswertung eine **Abdeckung** aus:
+den Anteil des Zeitraums, für den überhaupt Messwerte vorliegen. Liegt sie unter
+20 %, gibt es **keine** Hochrechnung auf Monat oder Jahr – aus fünf Minuten
+Messdaten eine Jahresprognose zu bilden hieße, die Zahl um das
+Hunderttausendfache zu strecken.
+
+Kosten ergeben sich aus `pricePerKwh` plus anteiliger `basePricePerMonth`; beides
+lässt sich in den Einstellungen ändern.
+
+### Firmware-Updates
+
+Der Hub prüft zweimal täglich, ob für Bridge oder Gerät eine neue Firmware
+bereitliegt:
+
+- **Hue**: über `swupdate2` der V1-API. Die Bridge sucht nur auf Aufforderung,
+  deshalb stößt der Hub die Suche an und liest das Ergebnis aus.
+- **Shelly**: `Shelly.CheckForUpdate` (Gen2+) bzw. `/status` → `has_update` (Gen1).
+
+Ist die automatische Installation aktiv, werden bereitstehende Updates nur im
+eingestellten Zeitfenster installiert – standardmäßig nachts zwischen 03:00 und
+05:00, damit ein Neustart der Bridge niemanden im Dunkeln stehen lässt. Nach
+einer angestoßenen Installation bleibt dieselbe Integration eine Stunde
+unangetastet, weil das Gerät währenddessen neu startet und noch die alte Version
+meldet.
+
+### Als App auf dem Handy
+
+Die Oberfläche ist eine installierbare Web-App: Im Browser auf dem Handy über
+„Zum Startbildschirm hinzufügen“ landet sie mit eigenem Icon im App-Raster und
+startet ohne Browserleiste. Ein Service Worker hält HTML, CSS und JavaScript
+vor, damit die App auch bei hakendem WLAN sofort erscheint.
+
+**Gerätedaten werden bewusst nicht zwischengespeichert.** Ein veralteter
+Schaltzustand wäre schlimmer als eine ehrliche Fehlermeldung – deshalb gehen
+alle `/api/`-Anfragen immer ans Netz.
+
+Auf kleinen Bildschirmen wechselt die Navigation auf eine untere Leiste mit
+großen Bedienflächen; die selteneren Bereiche liegen hinter „Mehr“.
+
 ---
 
 ## Sicherheit
@@ -241,8 +295,8 @@ ausgewertet – inklusive Sommerzeitwechsel.
 ## Tests
 
 ```bash
-npm test        # 117 Tests, node:test
-npm run typecheck
+npm test        # 181 Tests, node:test
+npm run typecheck   # prüft Quellen und Tests
 ```
 
 Abgedeckt sind unter anderem:
@@ -251,11 +305,15 @@ Abgedeckt sind unter anderem:
 - Verschlüsselung inklusive Manipulationserkennung
 - HTTP-Digest-Auth gegen eine unabhängig nachgerechnete Referenz
 - Auswertung echter Hue- und Shelly-Statusantworten (Gen1 und Gen2)
+- Rollladen-Fahrzustände – inklusive der Falle, dass Gen1 und Gen2 mit `open`
+  Unterschiedliches meinen
+- Verbrauchsrechnung mit Zählerreset, Messlücken und Zeitzonengrenzen
+- Netzwerkfehler-Übersetzung: keine rohen Fehlercodes in Meldungen
 - Zeitzonenlogik der Automationen (inkl. Fenster über Mitternacht)
 - Datenbank unter parallelen Schreibzugriffen
 - Der komplette Einrichtungsfluss über HTTP
-- Hue- und Shelly-Adapter gegen simulierte Geräte – inklusive Link-Button-Ablauf
-  und Digest-Authentifizierung
+- Hue- und Shelly-Adapter gegen simulierte Geräte – inklusive Link-Button-Ablauf,
+  Digest-Authentifizierung, Rollladenfahrten und Update-Erkennung
 
 ---
 

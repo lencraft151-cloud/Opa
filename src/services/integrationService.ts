@@ -147,6 +147,7 @@ export class IntegrationService {
       secretsEnc: result.secrets ? encryptJson(result.secrets, this.config.secretKey) : null,
       lastSeenAt: nowIso(),
       lastError: null,
+      updateInfo: null,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };

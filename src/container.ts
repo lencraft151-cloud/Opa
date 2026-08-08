@@ -6,12 +6,14 @@ import { TelemetryStore } from './storage/telemetryStore.js';
 import { createRepositories, type Repositories } from './storage/repositories.js';
 import { AutomationService } from './services/automationService.js';
 import { DeviceService } from './services/deviceService.js';
+import { EnergyService } from './services/energyService.js';
 import { HouseholdService } from './services/householdService.js';
 import { IntegrationService } from './services/integrationService.js';
 import { PollingService } from './services/pollingService.js';
 import { RoomService } from './services/roomService.js';
 import { SetupService } from './services/setupService.js';
 import { TelemetryService } from './services/telemetryService.js';
+import { UpdateService } from './services/updateService.js';
 
 const log = createLogger('container');
 
@@ -28,6 +30,8 @@ export interface Container {
   automations: AutomationService;
   polling: PollingService;
   setup: SetupService;
+  energy: EnergyService;
+  updates: UpdateService;
   /** Startet Hintergrunddienste, sobald ein Haushalt existiert. */
   startBackgroundServices: () => Promise<void>;
   shutdown: () => Promise<void>;
@@ -58,6 +62,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const automations = new AutomationService(repos, devices, households);
   const polling = new PollingService(repos, registry, integrations, devices, telemetry, config);
   const setup = new SetupService(repos, households, rooms, devices);
+  const energy = new EnergyService(repos, telemetry, households);
+  const updates = new UpdateService(repos, registry, integrations, households);
 
   const startBackgroundServices = async (): Promise<void> => {
     const household = households.current();
@@ -67,10 +73,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     }
     await polling.start(household.id);
     automations.start(household.id);
+    updates.start(household.id);
   };
 
   const shutdown = async (): Promise<void> => {
     automations.stop();
+    updates.stop();
     await polling.stop();
     await telemetry.flush();
     await db.flush();
@@ -90,6 +98,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automations,
     polling,
     setup,
+    energy,
+    updates,
     startBackgroundServices,
     shutdown,
   };

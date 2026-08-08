@@ -20,8 +20,19 @@ beim Anlegen des Haushalts und wird **einmalig** zurückgegeben.
 ## Fehlerformat
 
 ```json
-{ "error": { "code": "bad_request", "message": "…", "details": [ … ] } }
+{
+  "error": {
+    "code": "upstream_error",
+    "message": "192.168.1.42 ist im Netzwerk nicht erreichbar.",
+    "hint": "Prüfe, ob Hub und Gerät im selben Netz hängen. In Docker braucht der Hub \"--network host\".",
+    "details": { "code": "EHOSTUNREACH" }
+  }
+}
 ```
+
+`message` sagt, **was** nicht geht, `hint` sagt, **was jetzt zu tun ist**. Rohe
+Fehlercodes wie `ECONNREFUSED` tauchen nie in der Meldung auf – sie stehen
+allenfalls unter `details`.
 
 | Code | Status | Bedeutung |
 | --- | --- | --- |
@@ -63,7 +74,8 @@ Ohne Token. Aktueller Schritt, Fortschritt, Kennzahlen und Hinweise.
 
 ### `POST /setup/household`
 ```json
-{ "name": "Wohnung Musterstraße", "timezone": "Europe/Berlin", "locale": "de-DE" }
+{ "name": "Wohnung Musterstraße", "timezone": "Europe/Berlin", "locale": "de-DE",
+  "pricePerKwh": 0.35, "currency": "EUR", "basePricePerMonth": 12.9 }
 ```
 → `201` mit `{ household, state, accessToken }`. **Das Token wird nur hier
 ausgegeben.** Ein zweiter Haushalt wird mit `409` abgelehnt.
@@ -94,8 +106,8 @@ Schließt die Einrichtung ab. `400`, solange keine Integration verbunden ist.
 | Methode | Pfad | Beschreibung |
 | --- | --- | --- |
 | `GET` | `/household` | Stammdaten |
-| `PATCH` | `/household` | `name`, `timezone`, `locale` ändern |
-| `GET` | `/household/summary` | Kennzahlen fürs Dashboard |
+| `PATCH` | `/household` | `name`, `timezone`, `locale`, `pricePerKwh`, `currency`, `basePricePerMonth`, `autoUpdate`, `autoUpdateFrom`, `autoUpdateTo` |
+| `GET` | `/household/summary` | Kennzahlen fürs Dashboard inkl. gestörter Integrationen |
 | `GET` | `/household/tokens` | Tokens (ohne Hash) |
 | `POST` | `/household/tokens` | `{ "name": "Handy" }` → neues Token |
 | `DELETE` | `/household/tokens/:id` | Token widerrufen (das letzte nicht) |
@@ -185,7 +197,15 @@ Filter: `roomId`, `unassigned=true`, `integrationId`, `capability`, `search`,
 | Farbtemperatur | `{"type":"setColorTemperature","kelvin":1500…10000}` | `color_temperature` |
 | Farbe | `{"type":"setColor","hue":0…360,"saturation":0…100}` | `color` |
 | Position | `{"type":"setPosition","position":0…100}` | `cover` |
+| Auffahren | `{"type":"openCover"}` | `cover` |
+| Zufahren | `{"type":"closeCover"}` | `cover` |
+| Anhalten | `{"type":"stopCover"}` | `cover` |
+| Lamellen | `{"type":"setTilt","tilt":0…100}` | `cover.tilt` |
 | Identifizieren | `{"type":"identify"}` | – |
+
+Bei Rollläden gilt **100 = ganz offen, 0 = ganz zu**. Der Zustand enthält
+zusätzlich `coverState` (`open`, `closed`, `opening`, `closing`, `stopped`) –
+darauf beruht die Bewegungsanzeige in der Oberfläche.
 
 `setBrightness` mit `0` schaltet aus; alle anderen Helligkeits-, Farb- und
 Farbtemperatur-Kommandos schalten das Gerät automatisch ein.
@@ -218,6 +238,74 @@ Messgrößen: `temperatureC`, `humidity`, `illuminanceLux`, `powerW`, `energyWh`
 | `GET` | `/telemetry/series` | Verdichtet zu Zeitfenstern (`bucketMinutes`, Standard 15) mit `min`/`max`/`avg` |
 | `GET` | `/telemetry/aggregate` | `min`, `max`, `avg`, `count` je Gerät und Messgröße |
 | `GET` | `/telemetry/climate` | Aktuelles Klima je Raum inkl. einzelner Sensoren |
+
+---
+
+## Stromverbrauch
+
+Gemeinsame Parameter: `period` (`today`, `yesterday`, `week`, `month`, `year`,
+`custom`), bei `custom` zusätzlich `from` und `to` (ISO 8601).
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/energy/summary` | Vollständige Auswertung (siehe unten) |
+| `GET` | `/energy/devices` | Nur die Geräteliste – für Ranglisten |
+| `GET` | `/energy/rooms` | Verbrauch je Raum |
+
+```json
+{
+  "period": { "key": "today", "label": "Heute", "hours": 8.2, "from": "…", "to": "…" },
+  "currency": "EUR", "pricePerKwh": 0.42,
+  "totalKwh": 2.14, "energyCost": 0.9, "baseCost": 0.16, "totalCost": 1.06,
+  "currentPowerW": 142.5,
+  "coverage": 0.87,
+  "devices": [ { "deviceId": "dev_…", "name": "Waschmaschine", "roomName": "Bad",
+                 "energyKwh": 1.8, "cost": 0.76, "share": 84.1,
+                 "averagePowerW": 220.4, "currentPowerW": 0,
+                 "method": "counter", "coverage": 0.87 } ],
+  "rooms": [ { "roomId": "room_…", "roomName": "Bad", "energyKwh": 1.8, "share": 84.1 } ],
+  "projection": { "perDayKwh": 5.9, "perMonthKwh": 177, "perMonthCost": 88.9,
+                  "perYearKwh": 2153, "perYearCost": 1078 },
+  "standby": { "devices": [ … ], "totalPowerW": 12.4, "costPerYear": 45.6 },
+  "unmeteredDeviceCount": 3
+}
+```
+
+`method` sagt, woraus der Wert stammt: `counter` (Energiezähler des Geräts),
+`power` (integrierte Leistungskurve) oder `none` (keine Daten).
+
+`coverage` ist der Anteil des Zeitraums mit Messwerten. **`projection` ist
+`null`, solange die Abdeckung unter 20 % liegt** – dann wäre jede Hochrechnung
+geraten. Die Oberfläche zeigt in dem Fall einen Hinweis statt einer Zahl.
+
+---
+
+## Firmware-Updates
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/updates` | Übersicht inklusive Auto-Update-Einstellungen |
+| `POST` | `/updates/check` | Alle Integrationen sofort prüfen |
+| `POST` | `/updates/:integrationId/check` | Eine Integration prüfen |
+| `POST` | `/updates/:integrationId/install` | Installation starten (`202`) |
+
+```json
+{
+  "integrations": [ { "integrationId": "int_…", "name": "Hue Bridge", "type": "hue",
+                      "supported": true,
+                      "updateInfo": { "currentVersion": "1965111030",
+                                      "availableVersion": "bereit zur Installation",
+                                      "updateAvailable": true, "installable": true,
+                                      "checkedAt": "…" } } ],
+  "updatesAvailable": 1,
+  "autoUpdate": { "enabled": false, "from": "03:00", "to": "05:00", "timezone": "Europe/Berlin" },
+  "lastCheckedAt": "…"
+}
+```
+
+Die automatische Installation wird über `PATCH /household` gesteuert
+(`autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`). Sie greift nur innerhalb des
+Zeitfensters; das Gerät startet dabei neu.
 
 ---
 

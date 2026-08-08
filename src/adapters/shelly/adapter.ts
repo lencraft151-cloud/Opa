@@ -6,6 +6,7 @@ import type {
   DeviceState,
   ShellyIntegrationConfig,
   ShellyIntegrationSecrets,
+  UpdateInfo,
 } from '../../core/types.js';
 import { ShellyClient, type ShellyCredentials } from './client.js';
 import { discoverShellyDevices } from './discovery.js';
@@ -135,7 +136,13 @@ export class ShellyAdapter implements IntegrationAdapter {
       case 'toggle': {
         const isLight = kind === 'light' || kind === 'rgbw' || kind === 'rgb';
         if (!isLight && kind !== 'switch') {
-          throw badRequest(`Komponente ${externalId} lässt sich nicht schalten`);
+          throw badRequest(
+            `Die Komponente "${externalId}" lässt sich nicht schalten.`,
+            undefined,
+            kind === 'cover'
+              ? 'Rollläden werden über Auf/Zu/Stop oder eine Position gesteuert, nicht über Ein/Aus.'
+              : 'Sensoren liefern nur Messwerte und lassen sich nicht schalten.',
+          );
         }
         // Nur zum Umschalten muss der aktuelle Zustand bekannt sein.
         const on =
@@ -149,7 +156,11 @@ export class ShellyAdapter implements IntegrationAdapter {
 
       case 'setBrightness': {
         if (kind !== 'light' && kind !== 'rgbw' && kind !== 'rgb') {
-          throw badRequest(`Komponente ${externalId} ist nicht dimmbar`);
+          throw badRequest(
+            `Die Komponente "${externalId}" ist nicht dimmbar.`,
+            undefined,
+            'Nur Dimmer- und Lichtkanäle unterstützen Helligkeit; ein Relais kennt nur Ein und Aus.',
+          );
         }
         const brightness = clamp(command.brightness, 0, 100);
         const on = brightness > 0;
@@ -158,21 +169,87 @@ export class ShellyAdapter implements IntegrationAdapter {
       }
 
       case 'setPosition': {
-        if (kind !== 'cover') throw badRequest(`Komponente ${externalId} ist kein Rollladen`);
+        ShellyAdapter.assertCoverComponent(kind, externalId);
         const position = clamp(command.position, 0, 100);
         await client.setCoverPosition(channel, position);
-        return { position };
+        return { position, coverState: position >= 50 ? 'opening' : 'closing' };
+      }
+
+      case 'openCover': {
+        ShellyAdapter.assertCoverComponent(kind, externalId);
+        await client.openCover(channel);
+        return { coverState: 'opening' };
+      }
+
+      case 'closeCover': {
+        ShellyAdapter.assertCoverComponent(kind, externalId);
+        await client.closeCover(channel);
+        return { coverState: 'closing' };
+      }
+
+      case 'stopCover': {
+        ShellyAdapter.assertCoverComponent(kind, externalId);
+        await client.stopCover(channel);
+        // Die Endposition kennt erst das Gerät – der nächste Poll liefert sie.
+        return { coverState: 'stopped' };
+      }
+
+      case 'setTilt': {
+        ShellyAdapter.assertCoverComponent(kind, externalId);
+        const tilt = clamp(command.tilt, 0, 100);
+        await client.setCoverTilt(channel, tilt);
+        return { tilt };
       }
 
       case 'setColorTemperature':
-        throw badRequest('Farbtemperatur wird von diesem Shelly-Kanal nicht unterstützt');
+        throw badRequest(
+          'Farbtemperatur wird von diesem Shelly-Kanal nicht unterstützt',
+          undefined,
+          'Farbtemperatur können nur Hue-Leuchten und Shelly-Bulbs.',
+        );
 
       case 'setColor':
-        throw badRequest('Farbsteuerung wird von diesem Shelly-Kanal nicht unterstützt');
+        throw badRequest(
+          'Farbsteuerung wird von diesem Shelly-Kanal nicht unterstützt',
+          undefined,
+          'Nur RGBW-Kanäle liefern die Fähigkeit "color".',
+        );
 
       default:
         throw badRequest(`Unbekanntes Kommando: ${(command as { type: string }).type}`);
     }
+  }
+
+  /** Wirft, wenn die Komponente kein Rollladen ist. */
+  private static assertCoverComponent(kind: string, externalId: string): void {
+    if (kind === 'cover') return;
+    throw badRequest(
+      `Die Komponente "${externalId}" ist kein Rollladen.`,
+      undefined,
+      'Rollladen-Kommandos funktionieren nur mit Geräten, die die Fähigkeit "cover" haben.',
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Firmware
+  // -------------------------------------------------------------------------
+
+  async checkForUpdate(ctx: IntegrationContext): Promise<UpdateInfo> {
+    const shellyCtx = ctx as ShellyContext;
+    const { current, available } = await this.clientFor(shellyCtx).checkForUpdate();
+    return {
+      currentVersion: current ?? shellyCtx.config.firmware ?? null,
+      availableVersion: available,
+      updateAvailable: available !== null && available !== current,
+      installable: true,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  async installUpdate(ctx: IntegrationContext): Promise<void> {
+    const shellyCtx = ctx as ShellyContext;
+    await this.clientFor(shellyCtx).installUpdate();
+    log.info('Firmware-Update angestoßen', { host: shellyCtx.config.host });
   }
 
   // -------------------------------------------------------------------------

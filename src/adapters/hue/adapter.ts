@@ -6,6 +6,7 @@ import type {
   DeviceState,
   HueIntegrationConfig,
   HueIntegrationSecrets,
+  UpdateInfo,
 } from '../../core/types.js';
 import { sleep } from '../../util/http.js';
 import { HueClient, parseEventStreamChunk, type HueLightUpdate } from './client.js';
@@ -136,7 +137,11 @@ export class HueAdapter implements IntegrationAdapter {
     const services = index.services.get(externalId);
     const lightId = services?.light;
     if (!lightId) {
-      throw badRequest('Dieses Hue-Gerät ist nicht schaltbar (z. B. ein Sensor)');
+      throw badRequest(
+        'Dieses Hue-Gerät lässt sich nicht schalten.',
+        undefined,
+        'Bewegungsmelder und Schalter liefern nur Messwerte – steuerbar sind nur Leuchten.',
+      );
     }
 
     const current = stateFor(externalId, index);
@@ -215,6 +220,48 @@ export class HueAdapter implements IntegrationAdapter {
   }
 
   // -------------------------------------------------------------------------
+  // Firmware der Bridge
+  // -------------------------------------------------------------------------
+
+  async checkForUpdate(ctx: IntegrationContext): Promise<UpdateInfo> {
+    const hueCtx = ctx as HueContext;
+    const client = this.clientFor(hueCtx);
+
+    // Die Bridge sucht nur auf Aufforderung nach Updates; das Ergebnis steht
+    // erst beim nächsten Auslesen der Konfiguration bereit.
+    try {
+      await client.setSoftwareUpdate({ checkforupdate: true });
+    } catch (err) {
+      log.debug('Update-Suche konnte nicht angestoßen werden', {
+        error: (err as Error).message,
+      });
+    }
+
+    const config = await client.getFullConfig();
+    const state = config.swupdate2?.state ?? 'noupdates';
+    const ready = state === 'allreadytoinstall' || state === 'anyreadytoinstall';
+
+    const info: UpdateInfo = {
+      currentVersion: config.swversion ?? hueCtx.config.swVersion ?? null,
+      // Hue nennt keine Zielversion – bekannt ist nur, dass etwas bereitliegt.
+      availableVersion: ready ? 'bereit zur Installation' : null,
+      updateAvailable: ready,
+      installable: ready,
+      checkedAt: new Date().toISOString(),
+    };
+    if (state === 'transferring') {
+      info.note = 'Die Bridge lädt gerade ein Update herunter.';
+    }
+    return info;
+  }
+
+  async installUpdate(ctx: IntegrationContext): Promise<void> {
+    const hueCtx = ctx as HueContext;
+    await this.clientFor(hueCtx).setSoftwareUpdate({ install: true });
+    log.info('Bridge-Update angestoßen', { host: hueCtx.config.host });
+  }
+
+  // -------------------------------------------------------------------------
 
   private clientFor(ctx: HueContext): HueClient {
     const key = ctx.secrets?.applicationKey;
@@ -281,7 +328,15 @@ export function buildLightUpdate(
     }
 
     case 'setPosition':
-      throw badRequest('Hue-Leuchten unterstützen keine Positionierung');
+    case 'openCover':
+    case 'closeCover':
+    case 'stopCover':
+    case 'setTilt':
+      throw badRequest(
+        'Hue-Leuchten lassen sich nicht wie ein Rollladen fahren.',
+        undefined,
+        'Rollladen-Kommandos funktionieren mit Shelly-Rollladenaktoren (Fähigkeit "cover").',
+      );
 
     default:
       throw badRequest(`Unbekanntes Kommando: ${(command as { type: string }).type}`);

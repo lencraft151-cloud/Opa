@@ -9,7 +9,26 @@ export interface CreateHouseholdInput {
   name: string;
   timezone?: string;
   locale?: string;
+  pricePerKwh?: number;
+  currency?: string;
+  basePricePerMonth?: number;
 }
+
+/** In den Einstellungen änderbare Felder. */
+export type HouseholdUpdate = Partial<
+  Pick<
+    Household,
+    | 'name'
+    | 'timezone'
+    | 'locale'
+    | 'pricePerKwh'
+    | 'currency'
+    | 'basePricePerMonth'
+    | 'autoUpdate'
+    | 'autoUpdateFrom'
+    | 'autoUpdateTo'
+  >
+>;
 
 /**
  * Der Hub verwaltet bewusst genau einen Haushalt: Er läuft typischerweise auf
@@ -50,6 +69,14 @@ export class HouseholdService {
       locale: input.locale?.trim() || 'de-DE',
       setupStep: 'integrations',
       setupCompletedAt: null,
+      // Voreinstellung: grober Durchschnittspreis in Deutschland. Lässt sich
+      // in den Einstellungen auf den eigenen Tarif ändern.
+      pricePerKwh: input.pricePerKwh ?? 0.35,
+      currency: input.currency?.trim() || 'EUR',
+      basePricePerMonth: input.basePricePerMonth ?? 0,
+      autoUpdate: false,
+      autoUpdateFrom: '03:00',
+      autoUpdateTo: '05:00',
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -60,11 +87,29 @@ export class HouseholdService {
     return { household, token };
   }
 
-  async update(changes: Partial<Pick<Household, 'name' | 'timezone' | 'locale'>>): Promise<Household> {
+  async update(changes: HouseholdUpdate): Promise<Household> {
     const household = this.require();
     if (changes.timezone) assertValidTimezone(changes.timezone);
     if (changes.name !== undefined && !changes.name.trim()) {
       throw badRequest('Der Name darf nicht leer sein');
+    }
+    if (changes.pricePerKwh !== undefined && changes.pricePerKwh < 0) {
+      throw badRequest(
+        'Der Strompreis darf nicht negativ sein.',
+        undefined,
+        'Trage den Arbeitspreis deines Tarifs ein, z. B. 0.35 für 35 Cent pro kWh.',
+      );
+    }
+    if (
+      changes.autoUpdateFrom !== undefined &&
+      changes.autoUpdateTo !== undefined &&
+      changes.autoUpdateFrom === changes.autoUpdateTo
+    ) {
+      throw badRequest(
+        'Das Update-Zeitfenster ist leer.',
+        undefined,
+        'Start- und Endzeit müssen sich unterscheiden, z. B. 03:00 bis 05:00.',
+      );
     }
     return this.repos.households.patch(household.id, changes, 'Haushalt');
   }

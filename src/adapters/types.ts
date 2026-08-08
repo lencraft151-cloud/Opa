@@ -7,6 +7,7 @@ import type {
   IntegrationConfig,
   IntegrationSecrets,
   IntegrationType,
+  UpdateInfo,
 } from '../core/types.js';
 
 /** Ein im Netzwerk gefundenes, noch nicht eingebundenes Gerät bzw. Bridge. */
@@ -103,6 +104,15 @@ export interface IntegrationAdapter {
 
   /** Optionaler Push-Kanal (Hue Eventstream). Gibt eine Stop-Funktion zurück. */
   subscribe?(ctx: IntegrationContext, onUpdate: StateUpdateHandler): Promise<() => void>;
+
+  /** Prüft, ob für Bridge bzw. Gerät eine neue Firmware bereitsteht. */
+  checkForUpdate?(ctx: IntegrationContext): Promise<UpdateInfo>;
+
+  /**
+   * Stößt die Installation an. Das Gerät startet dabei neu und ist einige
+   * Minuten nicht erreichbar.
+   */
+  installUpdate?(ctx: IntegrationContext): Promise<void>;
 }
 
 /** Der Nutzer muss den Link-Button der Hue Bridge drücken. */

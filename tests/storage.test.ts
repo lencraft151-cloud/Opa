@@ -27,6 +27,12 @@ const household = (id: string): Household => ({
   locale: 'de-DE',
   setupStep: 'integrations',
   setupCompletedAt: null,
+  pricePerKwh: 0.35,
+  currency: 'EUR',
+  basePricePerMonth: 0,
+  autoUpdate: false,
+  autoUpdateFrom: '03:00',
+  autoUpdateTo: '05:00',
   createdAt: nowIso(),
   updatedAt: nowIso(),
 });

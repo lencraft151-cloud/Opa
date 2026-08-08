@@ -2,14 +2,20 @@
 <html lang="de">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#10151d" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)" />
+    <meta name="description" content="Hue und Shelly an einem Ort steuern" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Zuhause" />
     <title>Smart-Home-Hub</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/styles.css" />
-    <link
-      rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>"
-    />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-180.png" />
   </head>
   <body>
     <div id="toasts" class="toasts" aria-live="polite"></div>
@@ -18,36 +24,44 @@
     <main id="view-setup" class="view hidden">
       <div class="wizard">
         <header class="wizard-header">
-          <h1>🏠 Smart-Home-Hub einrichten</h1>
+          <h1><span class="logo-mark">⌂</span> Smart-Home-Hub einrichten</h1>
           <p class="muted">
-            Hue und Shelly an einem Ort – Licht, Steckdosen, Rollläden und Temperaturmessung.
+            Hue und Shelly an einem Ort – Licht, Steckdosen, Rollläden, Temperatur und Stromverbrauch.
           </p>
         </header>
 
         <ol id="wizard-steps" class="wizard-steps"></ol>
+        <div id="setup-banner"></div>
 
         <!-- Schritt 1: Haushalt -->
         <section id="step-household" class="card step hidden">
-          <h2>1 · Haushalt anlegen</h2>
-          <p class="muted">
-            Der Haushalt ist die Klammer um alle Räume, Geräte und Messwerte.
-          </p>
+          <h2>Haushalt anlegen</h2>
+          <p class="muted">Die Klammer um alle Räume, Geräte und Messwerte.</p>
           <form id="form-household" class="form">
             <label>
               Name des Haushalts
               <input name="name" required maxlength="120" placeholder="z. B. Wohnung Musterstraße" />
             </label>
-            <label>
-              Zeitzone
-              <select name="timezone" id="timezone-select"></select>
-            </label>
-            <button type="submit" class="primary">Haushalt anlegen</button>
+            <div class="field-row">
+              <label>
+                Zeitzone
+                <select name="timezone" id="timezone-select"></select>
+              </label>
+              <label>
+                Strompreis pro kWh
+                <input name="pricePerKwh" type="number" step="0.01" min="0" max="10" value="0.35" />
+              </label>
+            </div>
+            <p class="muted small">
+              Der Strompreis lässt sich später ändern – er ist die Grundlage der Kostenrechnung.
+            </p>
+            <button type="submit" class="primary lg">Haushalt anlegen</button>
           </form>
           <div id="token-box" class="token-box hidden">
-            <strong>Zugriffstoken (wird nur einmal angezeigt):</strong>
+            <strong>Zugriffstoken – wird nur einmal angezeigt</strong>
             <code id="token-value"></code>
             <p class="muted small">
-              Es ist bereits in diesem Browser gespeichert. Für externe Zugriffe als
+              Bereits in diesem Browser gespeichert. Für externe Zugriffe als
               <code>Authorization: Bearer &lt;token&gt;</code> mitsenden.
             </p>
           </div>
@@ -55,39 +69,43 @@
 
         <!-- Schritt 2: Integrationen -->
         <section id="step-integrations" class="card step hidden">
-          <h2>2 · Hue Bridge &amp; Shelly verbinden</h2>
-          <p class="muted">
-            Der Hub sucht im lokalen Netzwerk. Für die Hue Bridge muss der runde Knopf auf der
-            Bridge gedrückt werden, bevor du auf „Verbinden“ klickst.
-          </p>
+          <h2>Hue Bridge &amp; Shelly verbinden</h2>
+          <div class="callout">
+            <strong>Bei der Hue Bridge zuerst den runden Knopf drücken</strong>
+            <span>Danach hast du etwa 30 Sekunden Zeit für „Verbinden“.</span>
+          </div>
           <div class="row">
             <button id="btn-discover" class="primary">Netzwerk durchsuchen</button>
-            <button id="btn-discover-scan" class="ghost">Gründlich suchen (Subnetz-Scan)</button>
+            <button id="btn-discover-scan" class="ghost">Gründlich suchen</button>
           </div>
           <div id="discovery-results" class="list"></div>
 
           <details class="manual">
             <summary>Gerät manuell über IP-Adresse hinzufügen</summary>
             <form id="form-manual" class="form">
-              <label>
-                Typ
-                <select name="type">
-                  <option value="hue">Philips Hue Bridge</option>
-                  <option value="shelly">Shelly</option>
-                </select>
-              </label>
-              <label>
-                IP-Adresse oder Hostname
-                <input name="host" required placeholder="192.168.1.42" />
-              </label>
-              <label>
-                Anzeigename (optional)
-                <input name="name" maxlength="120" placeholder="z. B. Shelly Bad" />
-              </label>
-              <label>
-                Passwort (nur bei geschützten Shellys)
-                <input name="password" type="password" autocomplete="off" />
-              </label>
+              <div class="field-row">
+                <label>
+                  Typ
+                  <select name="type">
+                    <option value="hue">Philips Hue Bridge</option>
+                    <option value="shelly">Shelly</option>
+                  </select>
+                </label>
+                <label>
+                  IP-Adresse
+                  <input name="host" required placeholder="192.168.1.42" inputmode="decimal" />
+                </label>
+              </div>
+              <div class="field-row">
+                <label>
+                  Anzeigename (optional)
+                  <input name="name" maxlength="120" placeholder="z. B. Shelly Bad" />
+                </label>
+                <label>
+                  Passwort (nur geschützte Shellys)
+                  <input name="password" type="password" autocomplete="off" />
+                </label>
+              </div>
               <button type="submit" class="primary">Verbinden</button>
             </form>
           </details>
@@ -101,8 +119,8 @@
 
         <!-- Schritt 3: Räume -->
         <section id="step-rooms" class="card step hidden">
-          <h2>3 · Räume anlegen</h2>
-          <p class="muted">Räume gruppieren Geräte und Messwerte. Vorschläge zum Anklicken:</p>
+          <h2>Räume anlegen</h2>
+          <p class="muted">Zum Anklicken – oder eigene Namen eintragen.</p>
           <div id="room-suggestions" class="chips"></div>
           <form id="form-room" class="form inline">
             <input name="name" placeholder="Eigener Raumname" maxlength="80" required />
@@ -116,11 +134,8 @@
 
         <!-- Schritt 4: Zuordnen -->
         <section id="step-assign" class="card step hidden">
-          <h2>4 · Geräte den Räumen zuordnen</h2>
-          <p class="muted">
-            Aus Hue übernommene Räume sind bereits vorausgewählt. Der Rest lässt sich hier
-            zuweisen.
-          </p>
+          <h2>Geräte den Räumen zuordnen</h2>
+          <p class="muted">Aus Hue übernommene Räume sind bereits vorausgewählt.</p>
           <div id="assign-list" class="list"></div>
           <div class="row end">
             <button id="btn-save-assign" class="primary">Zuordnung speichern</button>
@@ -129,14 +144,11 @@
 
         <!-- Schritt 5: Fertig -->
         <section id="step-done" class="card step hidden">
-          <h2>5 · Fertig</h2>
+          <h2>Fast geschafft</h2>
+          <div id="setup-summary" class="tiles"></div>
           <div id="setup-warnings" class="list"></div>
-          <p class="muted">
-            Der Hub fragt die Geräte ab jetzt regelmäßig ab, speichert Temperaturverläufe und führt
-            Automationen aus.
-          </p>
           <div class="row end">
-            <button id="btn-complete" class="primary">Einrichtung abschließen</button>
+            <button id="btn-complete" class="primary lg">Einrichtung abschließen</button>
           </div>
         </section>
       </div>
@@ -145,141 +157,29 @@
     <!-- ==================== Dashboard ==================== -->
     <div id="view-app" class="view hidden">
       <header class="topbar">
-        <div class="brand">🏠 <span id="household-name">Smart-Home-Hub</span></div>
-        <nav class="tabs">
-          <button data-tab="overview" class="tab active">Übersicht</button>
-          <button data-tab="rooms" class="tab">Räume</button>
-          <button data-tab="devices" class="tab">Geräte</button>
-          <button data-tab="history" class="tab">Verlauf</button>
-          <button data-tab="automations" class="tab">Automationen</button>
-          <button data-tab="settings" class="tab">Einstellungen</button>
-        </nav>
-        <div class="status"><span id="live-dot" class="dot"></span><span id="live-text">verbinde…</span></div>
+        <div class="brand"><span class="logo-mark">⌂</span> <span id="household-name">Zuhause</span></div>
+        <nav class="tabs" id="tabs-desktop"></nav>
+        <div class="status" id="connection-status" title="Verbindung zum Hub">
+          <span id="live-dot" class="dot"></span><span id="live-text" class="hide-sm">verbinde…</span>
+        </div>
       </header>
 
-      <main class="content">
-        <section id="tab-overview" class="tab-panel">
-          <div id="summary-tiles" class="tiles"></div>
-          <h2>Klima nach Raum</h2>
-          <div id="climate-grid" class="grid"></div>
-        </section>
-
-        <section id="tab-rooms" class="tab-panel hidden">
-          <div id="rooms-grid" class="grid"></div>
-        </section>
-
-        <section id="tab-devices" class="tab-panel hidden">
-          <div class="row">
-            <input id="device-search" placeholder="Geräte durchsuchen…" class="grow" />
-            <select id="device-filter">
-              <option value="">Alle Fähigkeiten</option>
-              <option value="switch">Schaltbar</option>
-              <option value="dimmer">Dimmbar</option>
-              <option value="cover">Rollladen</option>
-              <option value="sensor.temperature">Temperatur</option>
-              <option value="sensor.humidity">Luftfeuchte</option>
-              <option value="sensor.power">Verbrauch</option>
-            </select>
-          </div>
-          <div id="devices-list" class="grid"></div>
-        </section>
-
-        <section id="tab-history" class="tab-panel hidden">
-          <div class="row">
-            <select id="history-device"></select>
-            <select id="history-metric">
-              <option value="temperatureC">Temperatur (°C)</option>
-              <option value="humidity">Luftfeuchte (%)</option>
-              <option value="powerW">Leistung (W)</option>
-              <option value="illuminanceLux">Helligkeit (lx)</option>
-              <option value="batteryPercent">Batterie (%)</option>
-            </select>
-            <select id="history-range">
-              <option value="6">6 Stunden</option>
-              <option value="24" selected>24 Stunden</option>
-              <option value="168">7 Tage</option>
-              <option value="720">30 Tage</option>
-            </select>
-          </div>
-          <div id="chart" class="card chart"></div>
-          <div id="history-stats" class="tiles"></div>
-        </section>
-
-        <section id="tab-automations" class="tab-panel hidden">
-          <details class="card">
-            <summary><strong>Neue Automation anlegen</strong></summary>
-            <form id="form-automation" class="form">
-              <label>Name <input name="name" required maxlength="120" placeholder="z. B. Bad heizen" /></label>
-              <fieldset>
-                <legend>Wenn …</legend>
-                <div class="row">
-                  <select name="triggerDevice" id="trigger-device" class="grow"></select>
-                  <select name="triggerMetric">
-                    <option value="temperatureC">Temperatur (°C)</option>
-                    <option value="humidity">Luftfeuchte (%)</option>
-                    <option value="illuminanceLux">Helligkeit (lx)</option>
-                    <option value="powerW">Leistung (W)</option>
-                    <option value="batteryPercent">Batterie (%)</option>
-                  </select>
-                  <select name="operator">
-                    <option value="&lt;">kleiner als</option>
-                    <option value="&gt;">größer als</option>
-                  </select>
-                  <input name="value" type="number" step="0.1" value="19" required class="narrow" />
-                  <input name="forMinutes" type="number" min="0" max="1440" value="5" class="narrow" title="Minuten anhaltend" />
-                </div>
-              </fieldset>
-              <fieldset>
-                <legend>… dann</legend>
-                <div class="row">
-                  <select name="actionDevice" id="action-device" class="grow"></select>
-                  <select name="actionCommand">
-                    <option value="on">einschalten</option>
-                    <option value="off">ausschalten</option>
-                  </select>
-                  <input name="cooldownMinutes" type="number" min="0" max="1440" value="15" class="narrow" title="Sperrzeit in Minuten" />
-                </div>
-              </fieldset>
-              <button type="submit" class="primary">Automation speichern</button>
-            </form>
-          </details>
-          <div id="automations-list" class="list"></div>
-        </section>
-
-        <section id="tab-settings" class="tab-panel hidden">
-          <div class="card">
-            <h2>Integrationen</h2>
-            <div class="row">
-              <button id="btn-settings-discover" class="ghost">Netzwerk durchsuchen</button>
-              <button id="btn-sync-all" class="ghost">Alle synchronisieren</button>
-            </div>
-            <div id="settings-discovery" class="list"></div>
-            <div id="settings-integrations" class="list"></div>
-          </div>
-          <div class="card">
-            <h2>Räume</h2>
-            <form id="form-settings-room" class="form inline">
-              <input name="name" placeholder="Neuer Raum" maxlength="80" required />
-              <button type="submit" class="primary">Anlegen</button>
-            </form>
-            <div id="settings-rooms" class="list"></div>
-          </div>
-          <div class="card">
-            <h2>Zugriffstoken</h2>
-            <form id="form-token" class="form inline">
-              <input name="name" placeholder="z. B. Handy" maxlength="80" required />
-              <button type="submit" class="primary">Token erstellen</button>
-            </form>
-            <div id="tokens-list" class="list"></div>
-          </div>
-          <div class="card">
-            <h2>System</h2>
-            <div id="system-info" class="kv"></div>
-          </div>
-        </section>
+      <main class="content" id="content">
+        <section id="panel-overview" class="tab-panel"></section>
+        <section id="panel-rooms" class="tab-panel hidden"></section>
+        <section id="panel-devices" class="tab-panel hidden"></section>
+        <section id="panel-energy" class="tab-panel hidden"></section>
+        <section id="panel-history" class="tab-panel hidden"></section>
+        <section id="panel-automations" class="tab-panel hidden"></section>
+        <section id="panel-settings" class="tab-panel hidden"></section>
       </main>
+
+      <nav class="bottom-nav" id="tabs-mobile"></nav>
+      <div class="sheet-backdrop hidden" id="sheet-backdrop">
+        <div class="sheet" id="sheet" role="dialog" aria-label="Weitere Bereiche"></div>
+      </div>
     </div>
 
-    <script src="/app.js" type="module"></script>
+    <script src="/js/app.js" type="module"></script>
   </body>
 </html>

@@ -239,6 +239,81 @@ export class ShellyClient {
   }
 
   /**
+   * Lamellenstellung einer Jalousie. Nur Gen2+ kennt `slat_pos`; Gen1-Roller
+   * haben keine Lamellensteuerung.
+   */
+  async setCoverTilt(channel: number, tilt: number): Promise<void> {
+    if (this.generation !== 2) {
+      throw upstreamError('Dieses Gerät unterstützt keine Lamellenverstellung');
+    }
+    const slatPos = Math.round(Math.min(100, Math.max(0, tilt)));
+    await this.rpc('Cover.GoToPosition', { id: channel, slat_pos: slatPos });
+  }
+
+  async openCover(channel: number): Promise<void> {
+    if (this.generation === 2) {
+      await this.rpc('Cover.Open', { id: channel });
+      return;
+    }
+    await this.sendJson(`/roller/${channel}`, { query: { go: 'open' } });
+  }
+
+  async closeCover(channel: number): Promise<void> {
+    if (this.generation === 2) {
+      await this.rpc('Cover.Close', { id: channel });
+      return;
+    }
+    await this.sendJson(`/roller/${channel}`, { query: { go: 'close' } });
+  }
+
+  async stopCover(channel: number): Promise<void> {
+    if (this.generation === 2) {
+      await this.rpc('Cover.Stop', { id: channel });
+      return;
+    }
+    await this.sendJson(`/roller/${channel}`, { query: { go: 'stop' } });
+  }
+
+  // -------------------------------------------------------------------------
+  // Firmware
+  // -------------------------------------------------------------------------
+
+  /**
+   * Fragt beim Gerät nach neuer Firmware.
+   *
+   * Gen2+ beantwortet `Shelly.CheckForUpdate` mit den verfügbaren Kanälen,
+   * Gen1 meldet den Stand in `/status` (`has_update`, `update.new_version`).
+   */
+  async checkForUpdate(): Promise<{ current: string | null; available: string | null }> {
+    if (this.generation === 2) {
+      const info = await this.rpc<{
+        stable?: { version?: string };
+        beta?: { version?: string };
+      }>('Shelly.CheckForUpdate');
+      const device = await this.rpc<{ ver?: string }>('Shelly.GetDeviceInfo');
+      return { current: device.ver ?? null, available: info?.stable?.version ?? null };
+    }
+
+    const status = await this.sendJson<{
+      update?: { has_update?: boolean; new_version?: string; old_version?: string };
+    }>('/status');
+    const update = status.update;
+    return {
+      current: update?.old_version ?? null,
+      available: update?.has_update ? (update.new_version ?? null) : null,
+    };
+  }
+
+  /** Stößt die Installation der stabilen Firmware an; das Gerät startet neu. */
+  async installUpdate(): Promise<void> {
+    if (this.generation === 2) {
+      await this.rpc('Shelly.Update', { stage: 'stable' });
+      return;
+    }
+    await this.sendJson('/ota', { query: { update: 'true' } });
+  }
+
+  /**
    * Shelly kennt kein herstellerweites "Identify". Für schaltbare Kanäle wird
    * deshalb zweimal umgeschaltet – das Klicken des Relais ist am Gerät hörbar.
    */
