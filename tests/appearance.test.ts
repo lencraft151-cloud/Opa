@@ -155,8 +155,8 @@ describe('Firmware-Übersicht über alle Geräte', () => {
     const integrations = new IntegrationService(repos, registry, rooms, telemetry, config);
     updates = new UpdateService(repos, registry, integrations, households);
 
-    const created = await households.create({ name: 'Updates' });
-    householdId = created.household.id;
+    const household = await households.create({ name: 'Updates' });
+    householdId = household.id;
 
     // Eine Hue Bridge mit einem Update und ein Shelly ohne.
     await repos.integrations.insert({

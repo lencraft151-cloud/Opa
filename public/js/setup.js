@@ -1,6 +1,6 @@
 /** Einrichtungsassistent: Haushalt → Geräte → Räume → Zuordnung → Fertig. */
 
-import { api, auth, errorBanner, guard, toast } from './api.js';
+import { api, errorBanner, guard, toast } from './api.js';
 import { esc, plural, VENDOR_LABEL } from './format.js';
 import { emptyState, tile } from './components.js';
 import { bindManualForm, runDiscovery } from './integrations.js';
@@ -78,6 +78,18 @@ function wireOnce() {
   $('#form-household').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
+
+    // Zwei Passwortfelder, damit ein Tippfehler nicht erst beim nächsten
+    // Anmelden auffällt – dann wäre niemand mehr hineingekommen.
+    const password = String(form.get('password'));
+    if (password !== String(form.get('passwordRepeat'))) {
+      toast('Die beiden Passwörter stimmen nicht überein.', {
+        kind: 'error',
+        hint: 'Tippe beide noch einmal – sie müssen Zeichen für Zeichen gleich sein.',
+      });
+      return;
+    }
+
     const result = await guard(() =>
       api('/setup/household', {
         method: 'POST',
@@ -85,17 +97,22 @@ function wireOnce() {
           name: form.get('name'),
           timezone: form.get('timezone'),
           pricePerKwh: Number(form.get('pricePerKwh')) || 0.35,
+          username: String(form.get('username')).trim(),
+          password,
+          displayName: String(form.get('displayName') || '').trim() || undefined,
         },
       }),
     );
     if (!result) return;
 
-    auth.token = result.accessToken;
-    $('#token-value').textContent = result.accessToken;
-    $('#token-box').classList.remove('hidden');
+    // Die Anmeldung liegt ab jetzt als Cookie im Browser.
     state = result.state;
+    event.target.reset();
 
-    toast('Haushalt angelegt.', { kind: 'success', hint: 'Weiter geht es mit deinen Geräten.' });
+    toast(`Haushalt angelegt – angemeldet als „${result.user.username}".`, {
+      kind: 'success',
+      hint: 'Weiter geht es mit deinen Geräten.',
+    });
     setTimeout(render, 1400);
   });
 

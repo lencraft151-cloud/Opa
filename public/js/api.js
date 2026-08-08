@@ -8,9 +8,16 @@
 
 import { esc } from './format.js';
 
+/**
+ * Die Anmeldung reist als HttpOnly-Cookie mit und ist für JavaScript
+ * unsichtbar – genau das ist der Punkt. Hier bleibt nur der Fall übrig, dass
+ * jemand von außen mit einem Zugriffstoken arbeitet (Skripte, andere
+ * Programme); der Browser braucht keines mehr.
+ */
 const TOKEN_KEY = 'smarthome.token';
 
 export const auth = {
+  /** Nur noch für Programme, die kein Cookie setzen können. */
   get token() {
     return localStorage.getItem(TOKEN_KEY) || '';
   },
@@ -19,6 +26,13 @@ export const auth = {
     else localStorage.removeItem(TOKEN_KEY);
   },
 };
+
+/** Wird gerufen, wenn der Hub eine Anmeldung verlangt. */
+let onUnauthorized = null;
+
+export function setUnauthorizedHandler(handler) {
+  onUnauthorized = handler;
+}
 
 export class ApiError extends Error {
   constructor(message, { code, status, hint, details } = {}) {
@@ -48,6 +62,9 @@ export async function api(path, options = {}) {
       headers,
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
+      // Ohne Cookie keine Anmeldung – auch beim Neuladen der Seite.
+      credentials: 'same-origin',
+      cache: options.cache,
     });
   } catch (err) {
     if (err?.name === 'AbortError') throw err;
@@ -71,6 +88,10 @@ export async function api(path, options = {}) {
 
   if (!response.ok) {
     const error = data?.error ?? {};
+    // Eine abgelaufene Anmeldung ist kein Fehler, den der Nutzer beheben
+    // kann – sie führt zurück zur Anmeldemaske.
+    if (response.status === 401 && !options.silent401) onUnauthorized?.();
+
     throw new ApiError(error.message || `Der Hub hat mit HTTP ${response.status} geantwortet.`, {
       code: error.code,
       status: response.status,

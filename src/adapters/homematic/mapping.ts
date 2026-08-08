@@ -20,25 +20,87 @@ export type ChannelKind =
   | 'maintenance';
 
 const KIND_BY_TYPE: Array<{ match: RegExp; kind: ChannelKind }> = [
-  // Rollläden und Jalousien
-  { match: /^(BLIND|JALOUSIE)(_VIRTUAL_RECEIVER)?$/, kind: 'cover' },
-  { match: /^BLIND_TRANSMITTER$/, kind: 'cover' },
+  /*
+   * Fensterkontakte heißen bei Homematic `SHUTTER_CONTACT` – „Shutter" wie
+   * Fensterladen, gemeint ist aber der Kontakt. Er muss vor den Rollläden
+   * stehen, sonst würde er als Antrieb durchgehen.
+   */
+  { match: /^(SHUTTER_CONTACT|ROTARY_HANDLE_SENSOR|CONTACT)$/, kind: 'contact' },
+
+  /*
+   * Rollläden und Jalousien.
+   *
+   * BidCos nennt den Kanal `BLIND` oder `JALOUSIE`, HmIP dagegen
+   * `SHUTTER_VIRTUAL_RECEIVER` (Rollladen) bzw. `BLIND_VIRTUAL_RECEIVER`
+   * (Jalousie mit Lamellen). Ohne die SHUTTER-Zeile bliebe jeder
+   * HmIP-Rollladenaktor – HmIP-BROLL, HmIP-FROLL – unsichtbar.
+   */
+  { match: /^(BLIND|JALOUSIE|SHUTTER)(_VIRTUAL_RECEIVER)?$/, kind: 'cover' },
+  { match: /^(BLIND|SHUTTER)_TRANSMITTER$/, kind: 'cover' },
+
   // Heizung: Wandthermostat und Heizkörperventil
   { match: /^(HEATING_CLIMATECONTROL_TRANSCEIVER|CLIMATECONTROL_RT_TRANSCEIVER)$/, kind: 'thermostat' },
   { match: /^(THERMALCONTROL_TRANSMIT|CLIMATECONTROL_REGULATOR)$/, kind: 'thermostat' },
+  { match: /^HEATING_CLIMATECONTROL_TRANSMITTER$/, kind: 'thermostat' },
   // Reine Klimasensoren
   { match: /^(CLIMATE_TRANSCEIVER|WEATHER|WEATHER_TRANSMIT|CLIMATE_SENSOR)$/, kind: 'climate' },
   { match: /^HEATING_CLIMATECONTROL_RECEIVER$/, kind: 'climate' },
   // Schalten und Dimmen
-  { match: /^DIMMER(_VIRTUAL_RECEIVER)?$/, kind: 'dimmer' },
-  { match: /^SWITCH(_VIRTUAL_RECEIVER)?$/, kind: 'switch' },
+  { match: /^DIMMER(_VIRTUAL_RECEIVER|_TRANSMITTER)?$/, kind: 'dimmer' },
+  { match: /^SWITCH(_VIRTUAL_RECEIVER|_TRANSMITTER)?$/, kind: 'switch' },
   // Melder
   { match: /^(MOTION_DETECTOR|MOTIONDETECTOR_TRANSCEIVER|PRESENCEDETECTOR_TRANSCEIVER)$/, kind: 'motion' },
-  { match: /^(SHUTTER_CONTACT|ROTARY_HANDLE_SENSOR|CONTACT)$/, kind: 'contact' },
   // Messen und Gerätezustand
   { match: /^(POWERMETER|ENERGIE_METER_TRANSMITTER)$/, kind: 'power' },
   { match: /^MAINTENANCE$/, kind: 'maintenance' },
 ];
+
+/**
+ * Kanäle, von denen ein Gerät mehrere gleichartige hat.
+ *
+ * HmIP-Aktoren führen für jede Gruppenzuordnung einen eigenen
+ * „virtual receiver“ – ein HmIP-BROLL hat davon fünf. Alle fünf steuern
+ * denselben Motor. Ohne diese Liste stünde ein Rollladen fünfmal in der
+ * Geräteliste, und niemand wüsste, welcher der richtige ist.
+ */
+const SINGLE_PER_DEVICE = new Set<ChannelKind>(['cover', 'switch', 'dimmer', 'thermostat']);
+
+/**
+ * Reduziert mehrfach vorhandene Aktorkanäle auf einen je Gerät.
+ *
+ * Bevorzugt wird der Empfängerkanal (`*_VIRTUAL_RECEIVER`) mit der
+ * kleinsten Nummer: Er ist derjenige, den auch die CCU-Oberfläche anzeigt.
+ * Sender- und Tastkanäle (`*_TRANSMITTER`) treten nur an, wenn es keinen
+ * Empfänger gibt – bei rein sendenden Geräten.
+ */
+export function pickPrimaryChannels<T extends { channel: HomematicChannel; kind: ChannelKind }>(
+  entries: T[],
+): T[] {
+  const best = new Map<string, T>();
+  const result: T[] = [];
+
+  for (const entry of entries) {
+    if (!SINGLE_PER_DEVICE.has(entry.kind)) {
+      result.push(entry);
+      continue;
+    }
+    const key = `${entry.channel.deviceAddress}::${entry.kind}`;
+    const current = best.get(key);
+    if (!current || rank(entry.channel) < rank(current.channel)) best.set(key, entry);
+  }
+
+  return [...result, ...best.values()];
+}
+
+/** Kleinere Zahl = besserer Kanal. */
+function rank(channel: HomematicChannel): number {
+  const index = Number(channel.address.split(':')[1] ?? 0);
+  const isReceiver = /_VIRTUAL_RECEIVER$/i.test(channel.channelType);
+  const isTransmitter = /_TRANSMITTER$/i.test(channel.channelType);
+  // Empfänger zuerst, dann normale Kanäle, Sender zuletzt.
+  const group = isReceiver ? 0 : isTransmitter ? 2 : 1;
+  return group * 1000 + (Number.isFinite(index) ? index : 999);
+}
 
 export function classifyChannel(channel: HomematicChannel): ChannelKind | null {
   const type = channel.channelType.toUpperCase();

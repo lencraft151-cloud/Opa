@@ -5,6 +5,7 @@ import {
   METRICS,
   SETUP_STEPS,
   THEME_PREFERENCES,
+  USER_ROLES,
 } from '../core/types.js';
 
 export const commandSchema = z.discriminatedUnion('type', [
@@ -153,6 +154,69 @@ export const appearanceSchema = z
       .optional(),
     theme: z.enum(THEME_PREFERENCES).optional(),
     reduceMotion: z.boolean().optional(),
+  })
+  .strict();
+
+// ---------------------------------------------------------------------------
+// Benutzer und Anmeldung
+// ---------------------------------------------------------------------------
+
+export const usernameSchema = z
+  .string()
+  .min(3, 'Der Anmeldename braucht mindestens drei Zeichen')
+  .max(32);
+
+export const passwordSchema = z.string().min(1).max(200);
+
+/** Der erste Benutzer entsteht zusammen mit dem Haushalt. */
+export const firstUserSchema = z.object({
+  username: usernameSchema,
+  password: passwordSchema,
+  displayName: z.string().max(80).optional(),
+});
+
+export const loginSchema = z.object({
+  username: usernameSchema,
+  password: passwordSchema,
+});
+
+export const createUserSchema = z.object({
+  username: usernameSchema,
+  password: passwordSchema,
+  displayName: z.string().max(80).optional(),
+  role: z.enum(USER_ROLES).optional(),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: passwordSchema,
+  newPassword: passwordSchema,
+});
+
+// ---------------------------------------------------------------------------
+// Szenen und Urlaubsmodus
+// ---------------------------------------------------------------------------
+
+export const sceneSchema = z.object({
+  name: z.string().min(1).max(80),
+  emoji: z.string().max(8).optional(),
+  roomId: z.string().nullable().optional(),
+  deviceIds: z.array(z.string()).max(200).optional(),
+});
+
+export const sceneUpdateSchema = z.object({
+  name: z.string().min(1).max(80).optional(),
+  emoji: z.string().max(8).optional(),
+  roomId: z.string().nullable().optional(),
+});
+
+export const presenceSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    from: timeSchema.optional(),
+    to: timeSchema.optional(),
+    roomIds: z.array(z.string()).max(50).optional(),
+    // Unter zehn Minuten wäre das Geflacker auffälliger als eine dunkle Wohnung.
+    averageIntervalMinutes: z.number().int().min(10).max(120).optional(),
   })
   .strict();
 

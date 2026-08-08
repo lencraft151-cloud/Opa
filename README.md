@@ -22,7 +22,10 @@ Geräte.
 
 | Bereich | Funktion |
 | --- | --- |
-| **Haushalt** | Ersteinrichtung per Assistent, Räume, Zugriffstoken |
+| **Haushalt** | Ersteinrichtung per Assistent, Räume, mehrere Personen mit eigenem Zugang |
+| **Anmeldung** | Benutzername und Passwort statt Zugriffstoken; Sitzungen als HttpOnly-Cookie, Rollen (Administrator/Mitbewohner), Sperre gegen Durchprobieren |
+| **Szenen** | Den jetzigen Zustand als Szene sichern und mit einem Tipp wiederherstellen – Licht, Farbe, Rollläden, Heizung |
+| **Urlaubsmodus** | Im gewählten Zeitfenster gehen unregelmäßig Lichter an und aus, damit die Wohnung bewohnt wirkt |
 | **Philips Hue** | Bridge-Discovery (mDNS + Cloud + Subnetz-Scan), Pairing über Link-Button, CLIP-API v2 – und automatischer Rückfall auf die API v1 für die runde Bridge (BSB001) |
 | **Shelly** | Gen1 (REST, Basic-Auth) und Gen2/3/4 (JSON-RPC, Digest-Auth SHA-256), Relais, Dimmer, Rollläden, Heizkörperventil (TRV), Verbrauchsmessung, H&T-Sensoren, Add-On-Fühler |
 | **Homematic** | CCU2, CCU3 und RaspberryMatic über die JSON-API: Rollläden mit Lamellen, Heizkörperthermostate, Wandthermostate, Klima- und Bewegungsmelder, BidCos wie HmIP |
@@ -73,9 +76,10 @@ automatisch.
 
 ## Die Einrichtung Schritt für Schritt
 
-1. **Haushalt anlegen** – Name und Zeitzone. Danach zeigt der Hub **einmalig**
-   ein Zugriffstoken an. Die Oberfläche speichert es im Browser; für externe
-   Zugriffe wird es als `Authorization: Bearer <token>` mitgesendet.
+1. **Haushalt anlegen** – Name, Zeitzone und dein Zugang: Anmeldename und
+   Passwort. Damit meldest du dich künftig an, auf jedem Gerät. Der erste
+   Zugang ist immer Administrator; weitere Personen kommen später in den
+   Einstellungen dazu.
 2. **Geräte verbinden** –
    *Netzwerk durchsuchen* findet Hue Bridges (mDNS/Cloud), Shellys (mDNS) und
    Homematic-Zentralen (mDNS).
@@ -291,6 +295,34 @@ Zwischenspeicher und lädt neu: still, während sie im Hintergrund liegt, mit
 acht Sekunden Vorwarnung, wenn jemand davorsitzt – und gar nicht, solange
 gerade getippt wird.
 
+### Szenen
+
+Eine Szene merkt sich, wie das Zuhause gerade ist. Der Kniff steckt in der
+Aufnahme: Statt Kommandos zusammenzuklicken, stellt man sein Zuhause so ein,
+wie man es haben will, und drückt auf sichern – der Hub liest die Zustände aus
+und leitet daraus die Kommandos ab, die sie wiederherstellen.
+
+Zwei Kleinigkeiten machen den Unterschied zwischen „funktioniert“ und „fühlt
+sich richtig an“:
+
+- **Reihenfolge.** Erst Farbe und Helligkeit, dann einschalten. Umgekehrt sähe
+  man beim Herstellen der Szene kurz die alte Farbe.
+- **Ausgeschaltet heißt ausgeschaltet.** Von einer dunklen Lampe wird nur
+  „aus“ gesichert; ihre Helligkeit mitzuschreiben würde sie beim Abrufen der
+  Szene aufblitzen lassen.
+
+Ein Gerät, das gerade nicht antwortet, hält die anderen nicht auf – die
+Antwort sagt, welcher Teil angekommen ist.
+
+### Urlaubsmodus
+
+Eine Wohnung, in der zwei Wochen lang abends kein Licht angeht, ist von der
+Straße aus als leer zu erkennen. Im gewählten Zeitfenster schaltet der Hub
+deshalb einzelne Lampen an und aus. Die Abstände streuen zufällig um den
+eingestellten Mittelwert – ein festes Muster („alle 30 Minuten“) wäre von
+außen schneller zu erkennen als gar kein Licht. Beim Abschalten bleibt kein
+Licht an, das die Simulation eingeschaltet hat.
+
 ### Darstellung
 
 Schriftgröße (85 – 160 %), Akzentfarbe, hell/dunkel und „Bewegung reduzieren“
@@ -306,6 +338,37 @@ WCAG-Leuchtdichteformel aus, damit die Beschriftung lesbar bleibt.
 
 ---
 
+## Anmeldung
+
+Angemeldet wird sich mit **Anmeldename und Passwort**. Ein Zugriffstoken war
+dafür der falsche Schlüssel: einmal angezeigt, nicht zu merken, nicht zu
+ändern, und für mehrere Personen im Haushalt gar nicht gedacht.
+
+- **Passwörter** liegen als scrypt-Ableitung in der Datenbank – nie im
+  Klartext. Die Parameter stehen mit im Hash, damit sie später erhöht werden
+  können, ohne alte Passwörter ungültig zu machen. Mindestlänge sind zehn
+  Zeichen; Zeichenklassen-Pflichten gibt es bewusst nicht, weil sie zu
+  `Passwort1!` führen und Passwörter nicht besser machen.
+- **Sitzungen** liegen als `HttpOnly`-Cookie im Browser: JavaScript kommt
+  nicht an sie heran, und der Ereignisstrom funktioniert ohne Token in der
+  Adresszeile. Sie gelten 30 Tage und verlängern sich bei Nutzung; unter
+  „Angemeldete Geräte“ lässt sich jede einzeln beenden.
+- **Rollen:** `admin` verwaltet Personen und Integrationen, `member` bedient
+  das Zuhause. Der letzte Administrator lässt sich weder löschen noch
+  herabstufen – sonst käme niemand mehr an die Verwaltung.
+- **Nach fünf Fehlversuchen** ist ein Konto 15 Minuten gesperrt. Ob Name oder
+  Passwort falsch war, sagt der Hub nicht: Sonst ließe sich mit der
+  Anmeldemaske herausfinden, welche Konten es gibt.
+- **Zugriffstoken** gibt es weiterhin – aber nur noch für das, wofür sie
+  taugen: Skripte und andere Programme. Sie gehören keinem Benutzer und
+  reichen deshalb nicht für die Kontenverwaltung.
+
+Kommt ein Hub aus einer früheren Fassung, hat er einen Haushalt, aber noch
+kein Konto. Wer dort mit dem alten Token hereinkommt, legt genau einmal einen
+Zugang an; danach wird das Token nicht mehr gebraucht.
+
+---
+
 ## Sicherheit
 
 - **Zugangsdaten** (Hue Application Key, Shelly-Passwörter) liegen mit
@@ -314,9 +377,10 @@ WCAG-Leuchtdichteformel aus, damit die Beschriftung lesbar bleibt.
   → Geht `SECRET_KEY` verloren, müssen die Integrationen neu verbunden werden.
 - **API-Token** werden nur als SHA-256-Hash gespeichert und genau einmal im
   Klartext ausgegeben.
-- Offen ohne Token bleiben nur `/api/health`, `/api/system/info` und
-  `/api/setup/state`. Solange noch kein Haushalt existiert, ist die API
-  entsperrt – anders käme man nicht durch die Ersteinrichtung.
+- Offen ohne Anmeldung bleiben nur `/api/health`, `/api/system/info`,
+  `/api/setup/state` und `/api/auth/login`. Solange noch kein Haushalt
+  existiert, ist die API entsperrt – anders käme man nicht durch die
+  Ersteinrichtung.
 - Hue Bridges verwenden ein selbstsigniertes Zertifikat. Die Verbindung ist
   verschlüsselt, die Zertifikatskette wird aber nicht gegen die System-CAs
   geprüft (anders geht es bei Hue nicht).
@@ -368,6 +432,10 @@ curl -X POST localhost:8080/api/devices/dev_heizung/command \
 curl -X POST localhost:8080/api/devices/dev_rollladen/command \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"type":"setPosition","position":50}'
+
+# Szene herstellen
+curl -X POST localhost:8080/api/scenes/scn_abc/apply \
+  -H "Authorization: Bearer $TOKEN"
 
 # Alles im Bad ausschalten
 curl -X POST localhost:8080/api/rooms/room_bad/command \
@@ -435,7 +503,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 266 Tests, node:test
+npm test        # 324 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
@@ -466,6 +534,11 @@ Abgedeckt sind unter anderem:
 - Darstellung: Grenzen für Schriftgröße, ungültige Farben, und dass ein
   Haushalt aus einer früheren Fassung die neuen Felder nachgerüstet bekommt
 - Kennung der Oberfläche: gleich bei gleichem Stand, anders nach einer Änderung
+- Passwörter: scrypt-Ableitung, zeitunabhängiger Vergleich, zusammengesetzte
+  Umlaute, manipulierte Hashes, Sperre nach fünf Fehlversuchen und die Frage,
+  ob die Fehlermeldung verrät, welcher Teil falsch war
+- Szenen: was aus einem Zustand an Kommandos wird (und was bewusst nicht),
+  Reihenfolge, ein stummes Gerät mitten in der Szene
 
 ---
 

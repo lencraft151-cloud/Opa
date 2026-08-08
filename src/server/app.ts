@@ -5,12 +5,14 @@ import { createLogger } from '../core/logger.js';
 import type { Container } from '../container.js';
 import { createAuthMiddleware } from './auth.js';
 import { errorHandler, notFoundHandler } from './errorHandler.js';
+import { authRoutes } from './routes/auth.js';
 import { automationRoutes } from './routes/automations.js';
 import { deviceRoutes } from './routes/devices.js';
 import { energyRoutes } from './routes/energy.js';
 import { householdRoutes } from './routes/household.js';
 import { integrationRoutes } from './routes/integrations.js';
 import { roomRoutes } from './routes/rooms.js';
+import { sceneRoutes } from './routes/scenes.js';
 import { setupRoutes } from './routes/setup.js';
 import { systemRoutes } from './routes/system.js';
 import { telemetryRoutes } from './routes/telemetry.js';
@@ -46,6 +48,7 @@ export function createApp(container: Container): express.Express {
   const api = express.Router();
   api.use(createAuthMiddleware(container));
   api.use(systemRoutes(container));
+  api.use(authRoutes(container));
   api.use(setupRoutes(container));
   api.use(householdRoutes(container));
   api.use(roomRoutes(container));
@@ -55,6 +58,7 @@ export function createApp(container: Container): express.Express {
   api.use(automationRoutes(container));
   api.use(energyRoutes(container));
   api.use(updateRoutes(container));
+  api.use(sceneRoutes(container));
   app.use('/api', api);
 
   app.use(express.static(PUBLIC_DIR, { index: 'index.html', maxAge: '1h' }));

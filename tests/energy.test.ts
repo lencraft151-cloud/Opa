@@ -200,8 +200,8 @@ describe('Verbrauchs- und Kostenrechnung', () => {
     const repos = createRepositories(db);
     const households = new HouseholdService(repos);
 
-    const created = await households.create({ name: 'Energie', pricePerKwh: 0.4 });
-    householdId = created.household.id;
+    const household = await households.create({ name: 'Energie', pricePerKwh: 0.4 });
+    householdId = household.id;
     await households.update({ basePricePerMonth: 14.6 }); // ergibt 0,02 €/h
 
     store = new TelemetryStore(path.join(dir, 'telemetry'), 30);

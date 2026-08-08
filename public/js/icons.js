@@ -13,6 +13,8 @@ export const icons = {
   automation: wrap('<circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>'),
   settings: wrap('<circle cx="12" cy="12" r="3"/><path d="M4 12h2M18 12h2M12 4v2M12 18v2"/><circle cx="12" cy="12" r="8.5"/>'),
   more: wrap('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>'),
+  scene: wrap('<path d="m12 3 2.1 5.2L19.5 9l-4 3.7 1 5.4L12 15.6 7.5 18l1-5.4-4-3.7 5.4-.8z"/>'),
+  user: wrap('<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'),
   update: wrap('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/>'),
   power: wrap('<path d="M12 3v9"/><path d="M6.5 6.5a8 8 0 1 0 11 0"/>'),
   up: wrap('<path d="m6 15 6-6 6 6"/>'),

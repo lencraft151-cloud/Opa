@@ -184,7 +184,7 @@ export class HomematicClient {
         });
       }
     }
-    return disambiguate(channels);
+    return channels;
   }
 
   /** Liest einen einzelnen Kanalwert. */
@@ -260,11 +260,15 @@ function readableName(channel: RawChannel, device: RawDevice): string {
 }
 
 /**
- * Zwei Kanäle desselben Geräts können nach dem Kürzen gleich heißen (etwa
- * der Klima- und der Wartungskanal eines Wettersensors). Dann kommt die
- * Kanalnummer zurück – aber nur bei denen, die es wirklich betrifft.
+ * Zwei Kanäle können nach dem Kürzen gleich heißen (etwa der Klima- und der
+ * Wartungskanal eines Wettersensors). Dann kommt die Kanalnummer zurück –
+ * aber nur bei denen, die es wirklich betrifft.
+ *
+ * Angewendet wird das erst, wenn feststeht, welche Kanäle überhaupt Geräte
+ * werden: Die fünf Empfängerkanäle eines HmIP-Rollladens heißen alle gleich,
+ * übrig bleibt aber nur einer – der braucht dann auch keine Nummer.
  */
-function disambiguate(channels: HomematicChannel[]): HomematicChannel[] {
+export function disambiguate(channels: HomematicChannel[]): HomematicChannel[] {
   const counts = new Map<string, number>();
   for (const channel of channels) counts.set(channel.name, (counts.get(channel.name) ?? 0) + 1);
 

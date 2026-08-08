@@ -1,6 +1,12 @@
 import { badRequest, conflict } from '../core/errors.js';
-import type { Appearance, AccessToken, Household, SetupStep } from '../core/types.js';
-import { DEFAULT_APPEARANCE, SETUP_STEPS } from '../core/types.js';
+import type {
+  AccessToken,
+  Appearance,
+  Household,
+  PresenceSimulation,
+  SetupStep,
+} from '../core/types.js';
+import { DEFAULT_APPEARANCE, DEFAULT_PRESENCE, SETUP_STEPS } from '../core/types.js';
 import { sha256Hex } from '../util/crypto.js';
 import { createId, createToken, nowIso } from '../util/id.js';
 import type { Repositories } from '../storage/repositories.js';
@@ -28,7 +34,7 @@ export type HouseholdUpdate = Partial<
     | 'autoUpdateFrom'
     | 'autoUpdateTo'
   >
-> & { appearance?: Partial<Appearance> };
+> & { appearance?: Partial<Appearance>; presence?: Partial<PresenceSimulation> };
 
 /**
  * Der Hub verwaltet bewusst genau einen Haushalt: Er läuft typischerweise auf
@@ -50,7 +56,11 @@ export class HouseholdService {
     return this.current()?.setupCompletedAt !== null && this.current() !== undefined;
   }
 
-  async create(input: CreateHouseholdInput): Promise<{ household: Household; token: string }> {
+  /**
+   * Legt den Haushalt an. Das Benutzerkonto entsteht getrennt davon im
+   * Einrichtungsassistenten – der Haushalt weiß nichts über Anmeldungen.
+   */
+  async create(input: CreateHouseholdInput): Promise<Household> {
     if (this.current()) {
       throw conflict(
         'Es existiert bereits ein Haushalt. Zum Neuanlegen muss der bestehende zuerst gelöscht werden.',
@@ -78,14 +88,12 @@ export class HouseholdService {
       autoUpdateFrom: '03:00',
       autoUpdateTo: '05:00',
       appearance: { ...DEFAULT_APPEARANCE },
+      presence: { ...DEFAULT_PRESENCE },
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
     await this.repos.households.insert(household);
-
-    // Das erste Token wird genau einmal im Klartext ausgegeben.
-    const { token } = await this.issueToken(household.id, 'Einrichtung');
-    return { household, token };
+    return household;
   }
 
   async update(changes: HouseholdUpdate): Promise<Household> {
@@ -112,15 +120,19 @@ export class HouseholdService {
         'Start- und Endzeit müssen sich unterscheiden, z. B. 03:00 bis 05:00.',
       );
     }
-    // Die Darstellung wird feldweise zusammengeführt: Wer nur die Schriftgröße
-    // ändert, soll nicht seine Farben verlieren.
-    const patch: Partial<Household> = { ...changes, appearance: undefined };
-    delete patch.appearance;
+    // Darstellung und Urlaubsmodus werden feldweise zusammengeführt: Wer nur
+    // die Schriftgröße ändert, soll nicht seine Farben verlieren.
+    const { appearance: _appearance, presence: _presence, ...rest } = changes;
+    const patch: Partial<Household> = { ...rest };
+
     if (changes.appearance) {
       patch.appearance = normalizeAppearance({
         ...appearanceOf(household),
         ...changes.appearance,
       });
+    }
+    if (changes.presence) {
+      patch.presence = normalizePresence({ ...presenceOf(household), ...changes.presence });
     }
     return this.repos.households.patch(household.id, patch, 'Haushalt');
   }
@@ -163,12 +175,12 @@ export class HouseholdService {
     return this.repos.tokens.listByHousehold(household.id);
   }
 
+  /**
+   * Token widerrufen. Seit der Anmeldung mit Name und Passwort ist das
+   * gefahrlos: Man sperrt sich damit nicht mehr aus, sondern nimmt nur einem
+   * Skript den Zugang.
+   */
   async revokeToken(id: string): Promise<void> {
-    const household = this.require();
-    const remaining = this.repos.tokens.listByHousehold(household.id);
-    if (remaining.length <= 1) {
-      throw conflict('Das letzte Zugriffstoken kann nicht gelöscht werden – sonst sperrst du dich aus.');
-    }
     const removed = await this.repos.tokens.remove(id);
     if (!removed) throw badRequest(`Token ${id} existiert nicht`);
   }
@@ -182,6 +194,28 @@ export function appearanceOf(household: Household | undefined): Appearance {
   return normalizeAppearance({ ...DEFAULT_APPEARANCE, ...(household?.appearance ?? {}) });
 }
 
+export function presenceOf(household: Household | undefined): PresenceSimulation {
+  return normalizePresence({ ...DEFAULT_PRESENCE, ...(household?.presence ?? {}) });
+}
+
+/**
+ * Grenzen für den Urlaubsmodus. Unter zehn Minuten wäre das Geflacker
+ * auffälliger als eine dunkle Wohnung.
+ */
+export function normalizePresence(presence: PresenceSimulation): PresenceSimulation {
+  return {
+    enabled: presence.enabled === true,
+    from: TIME.test(presence.from) ? presence.from : DEFAULT_PRESENCE.from,
+    to: TIME.test(presence.to) ? presence.to : DEFAULT_PRESENCE.to,
+    roomIds: Array.isArray(presence.roomIds) ? [...new Set(presence.roomIds)] : [],
+    averageIntervalMinutes: Math.min(
+      120,
+      Math.max(10, Math.round(Number(presence.averageIntervalMinutes) || 25)),
+    ),
+  };
+}
+
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 /**

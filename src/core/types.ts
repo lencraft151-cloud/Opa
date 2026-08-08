@@ -142,9 +142,37 @@ export interface Household {
    * genauso wie auf dem Handy.
    */
   appearance: Appearance;
+  /** Anwesenheitssimulation für die Urlaubszeit. */
+  presence: PresenceSimulation;
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Urlaubsmodus.
+ *
+ * Eine Wohnung, in der abends nie ein Licht angeht, fällt auf. Im gewählten
+ * Zeitfenster schaltet der Hub deshalb in unregelmäßigen Abständen Lichter an
+ * und aus – unregelmäßig ist der Punkt, ein Muster wäre schlimmer als nichts.
+ */
+export interface PresenceSimulation {
+  enabled: boolean;
+  /** Zeitfenster in lokaler Zeit, `HH:MM`. */
+  from: string;
+  to: string;
+  /** Räume, in denen geschaltet wird. Leer = überall, wo Licht ist. */
+  roomIds: string[];
+  /** Mittlerer Abstand zwischen zwei Schaltvorgängen in Minuten. */
+  averageIntervalMinutes: number;
+}
+
+export const DEFAULT_PRESENCE: PresenceSimulation = {
+  enabled: false,
+  from: '17:30',
+  to: '22:45',
+  roomIds: [],
+  averageIntervalMinutes: 25,
+};
 
 /** Anzeigeeinstellungen der Oberfläche. */
 export interface Appearance {
@@ -373,6 +401,84 @@ export interface AccessToken {
   tokenHash: string;
   createdAt: string;
   lastUsedAt: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Benutzer und Anmeldung
+// ---------------------------------------------------------------------------
+
+export const USER_ROLES = ['admin', 'member'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+/**
+ * Ein Mensch, der sich anmeldet.
+ *
+ * `admin` darf Benutzer verwalten, Integrationen entfernen und Einstellungen
+ * ändern; `member` bedient das Zuhause. Der erste Benutzer entsteht beim
+ * Einrichten und ist immer Administrator.
+ */
+export interface User {
+  id: string;
+  householdId: string;
+  /** Anmeldename, klein geschrieben und eindeutig. */
+  username: string;
+  /** Wie der Name in der Oberfläche steht. */
+  displayName: string;
+  role: UserRole;
+  /** scrypt-Ableitung inklusive Parametern und Salz – nie das Passwort selbst. */
+  passwordHash: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string | null;
+  /** Fehlversuche seit der letzten erfolgreichen Anmeldung. */
+  failedAttempts: number;
+  /** Gesperrt bis – schützt gegen Durchprobieren. */
+  lockedUntil: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Szenen
+// ---------------------------------------------------------------------------
+
+/**
+ * Eine gespeicherte Zusammenstellung von Gerätezuständen.
+ *
+ * „Fernsehabend" ist leichter zu erklären als „Deckenlicht 20 %, Stehlampe
+ * warmweiß, Rollladen zu". Beim Sichern liest der Hub die aktuellen Zustände
+ * aus und leitet daraus die Kommandos ab, die sie wiederherstellen.
+ */
+export interface Scene {
+  id: string;
+  householdId: string;
+  name: string;
+  emoji: string;
+  /** Optional auf einen Raum bezogen – dann steht sie auch dort. */
+  roomId: string | null;
+  entries: SceneEntry[];
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  lastAppliedAt: string | null;
+}
+
+export interface SceneEntry {
+  deviceId: string;
+  /** Was ausgeführt wird, um diesen Zustand herzustellen. */
+  commands: DeviceCommand[];
+}
+
+/** Eine angemeldete Sitzung, üblicherweise ein Browser. */
+export interface Session {
+  id: string;
+  householdId: string;
+  userId: string;
+  /** SHA-256 des Sitzungsschlüssels. */
+  tokenHash: string;
+  createdAt: string;
+  lastUsedAt: string;
+  expiresAt: string;
+  /** Grobe Gerätekennung aus dem User-Agent, für die Sitzungsliste. */
+  device: string | null;
 }
 
 // ---------------------------------------------------------------------------

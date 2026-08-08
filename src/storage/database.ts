@@ -8,8 +8,11 @@ import type {
   Household,
   Integration,
   Room,
+  Scene,
+  Session,
+  User,
 } from '../core/types.js';
-import { DEFAULT_APPEARANCE } from '../core/types.js';
+import { DEFAULT_APPEARANCE, DEFAULT_PRESENCE } from '../core/types.js';
 
 const log = createLogger('db');
 
@@ -23,6 +26,9 @@ export interface DatabaseShape {
   devices: Device[];
   rules: AutomationRule[];
   tokens: AccessToken[];
+  users: User[];
+  sessions: Session[];
+  scenes: Scene[];
 }
 
 function emptyDatabase(): DatabaseShape {
@@ -34,6 +40,9 @@ function emptyDatabase(): DatabaseShape {
     devices: [],
     rules: [],
     tokens: [],
+    users: [],
+    sessions: [],
+    scenes: [],
   };
 }
 
@@ -142,7 +151,14 @@ function migrate(data: DatabaseShape): DatabaseShape {
   // bestehender Haushalt keine Schriftgröße und keine Akzentfarbe.
   for (const household of data.households) {
     household.appearance = { ...DEFAULT_APPEARANCE, ...(household.appearance ?? {}) };
+    household.presence = { ...DEFAULT_PRESENCE, ...(household.presence ?? {}) };
   }
+
+  // Benutzer, Sitzungen und Szenen kamen später dazu. Ein Datenstand ohne
+  // sie ist gültig – ohne diese Zeilen wäre er nur nicht benutzbar.
+  data.users ??= [];
+  data.sessions ??= [];
+  data.scenes ??= [];
 
   data.version = SCHEMA_VERSION;
   return data;

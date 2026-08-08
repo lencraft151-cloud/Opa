@@ -9,6 +9,13 @@ export interface HubEventMap {
   'room.updated': { room: Room };
   'telemetry.sample': { sample: TelemetrySample };
   'automation.triggered': { ruleId: string; ruleName: string; householdId: string };
+  'scene.applied': {
+    householdId: string;
+    sceneId: string;
+    name: string;
+    applied: number;
+    failed: number;
+  };
   'notification': { householdId: string; message: string; level: 'info' | 'warn' | 'error' };
 }
 

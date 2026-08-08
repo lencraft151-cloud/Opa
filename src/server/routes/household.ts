@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { Container } from '../../container.js';
 import { asyncHandler, parseBody } from '../http.js';
-import { appearanceSchema } from '../validation.js';
+import { appearanceSchema, presenceSchema } from '../validation.js';
 
 export function householdRoutes(container: Container): Router {
   const router = Router();
@@ -35,6 +35,8 @@ export function householdRoutes(container: Container): Router {
             .optional(),
           // Darstellung: Schriftgröße, Akzentfarben, Helligkeit, Bewegung
           appearance: appearanceSchema.optional(),
+          // Urlaubsmodus – bedient wird er über /api/presence
+          presence: presenceSchema.optional(),
         }),
         req,
       );

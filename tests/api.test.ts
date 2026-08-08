@@ -16,6 +16,9 @@ let dir: string;
 let container: Container;
 let server: Server;
 let baseUrl: string;
+/** Sitzungs-Cookie der angemeldeten Testperson. */
+let cookie = '';
+/** Zugriffstoken für den Programm-Zugang. */
 let token = '';
 
 function testConfig(dataDir: string): AppConfig {
@@ -40,12 +43,42 @@ async function call(
   method: string,
   path: string,
   body?: unknown,
-  withToken = true,
-): Promise<{ status: number; data: any }> {
+  withAuth = true,
+): Promise<{ status: number; data: any; headers: Headers }> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
-  if (withToken && token) headers['authorization'] = `Bearer ${token}`;
+  if (withAuth && cookie) headers['cookie'] = cookie;
 
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  // Der Hub schickt die Sitzung als Cookie – wie ein Browser merken wir sie uns.
+  const setCookie = response.headers.get('set-cookie');
+  if (setCookie) {
+    const value = setCookie.split(';')[0] as string;
+    if (value.endsWith('=')) cookie = '';
+    else cookie = value;
+  }
+
+  const text = await response.text();
+  return {
+    status: response.status,
+    data: text ? JSON.parse(text) : null,
+    headers: response.headers,
+  };
+}
+
+/** Aufruf mit Zugriffstoken statt Sitzung – der Weg für Programme. */
+async function callWithToken(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; data: any }> {
+  const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+  if (body !== undefined) headers['content-type'] = 'application/json';
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers,
@@ -97,18 +130,40 @@ describe('Einrichtung über die API', () => {
     assert.equal(second.data.build, first.data.build, 'gleicher Stand, gleiche Kennung');
   });
 
-  it('legt den Haushalt an und gibt genau einmal ein Token aus', async () => {
-    const { status, data } = await call('POST', '/api/setup/household', {
+  it('legt Haushalt und erstes Benutzerkonto an', async () => {
+    const { status, data, headers } = await call('POST', '/api/setup/household', {
       name: 'Testhaushalt',
       timezone: 'Europe/Berlin',
       pricePerKwh: 0.42,
+      username: 'Anna',
+      password: 'drei zufaellige woerter',
+      displayName: 'Anna',
     });
     assert.equal(status, 201);
-    assert.ok(data.accessToken?.startsWith('sh_'));
     assert.equal(data.household.name, 'Testhaushalt');
     assert.equal(data.state.currentStep, 'integrations');
     assert.equal(data.household.pricePerKwh, 0.42, 'der eingegebene Strompreis wird übernommen');
-    token = data.accessToken;
+
+    // Der erste Mensch am Hub ist immer Administrator.
+    assert.equal(data.user.username, 'anna', 'Anmeldenamen werden klein geschrieben');
+    assert.equal(data.user.role, 'admin');
+    assert.equal(data.accessToken, undefined, 'kein Token mehr im Bogen');
+
+    // Und er ist direkt angemeldet – als HttpOnly-Cookie.
+    const setCookie = headers.get('set-cookie') ?? '';
+    assert.match(setCookie, /sh_session=ss_/);
+    assert.match(setCookie, /HttpOnly/);
+    assert.match(setCookie, /SameSite=Lax/);
+  });
+
+  it('weist ein zu kurzes Passwort ab, bevor der Haushalt entsteht', async () => {
+    // Der Haushalt existiert schon – hier geht es um die Prüfung an sich.
+    const { status, data } = await call('POST', '/api/auth/users', {
+      username: 'kurz',
+      password: 'abc',
+    });
+    assert.equal(status, 400);
+    assert.match(JSON.stringify(data), /mindestens 10 Zeichen|zu kurz/i);
   });
 
   it('setzt sinnvolle Voreinstellungen', async () => {
@@ -119,18 +174,22 @@ describe('Einrichtung über die API', () => {
   });
 
   it('lehnt einen zweiten Haushalt ab', async () => {
-    const { status, data } = await call('POST', '/api/setup/household', { name: 'Zweiter' });
+    const { status, data } = await call('POST', '/api/setup/household', {
+      name: 'Zweiter',
+      username: 'zweiter',
+      password: 'drei zufaellige woerter',
+    });
     assert.equal(status, 409);
     assert.equal(data.error.code, 'conflict');
   });
 
-  it('verlangt ab jetzt ein Token', async () => {
+  it('verlangt ab jetzt eine Anmeldung', async () => {
     const { status, data } = await call('GET', '/api/household', undefined, false);
     assert.equal(status, 401);
     assert.equal(data.error.code, 'unauthorized');
   });
 
-  it('akzeptiert das ausgegebene Token', async () => {
+  it('lässt die angemeldete Sitzung durch', async () => {
     const { status, data } = await call('GET', '/api/household');
     assert.equal(status, 200);
     assert.equal(data.name, 'Testhaushalt');
@@ -151,9 +210,124 @@ describe('Einrichtung über die API', () => {
     }
   });
 
-  it('akzeptiert das Token auch als Query-Parameter (für EventSource)', async () => {
-    const response = await fetch(`${baseUrl}/api/household?access_token=${token}`);
+  it('erlaubt den Ereignisstrom mit dem Sitzungs-Cookie', async () => {
+    // `EventSource` kann keine Header setzen – das Cookie reist von selbst mit.
+    const response = await fetch(`${baseUrl}/api/household`, { headers: { cookie } });
     assert.equal(response.status, 200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Anmeldung
+// ---------------------------------------------------------------------------
+
+describe('Anmeldung mit Name und Passwort', () => {
+  it('sagt, wer angemeldet ist', async () => {
+    const { data } = await call('GET', '/api/auth/me');
+    assert.equal(data.user.username, 'anna');
+    assert.equal(data.user.role, 'admin');
+    assert.equal(data.userCount, 1);
+  });
+
+  it('nennt weder Name noch Passwort als den falschen Teil', async () => {
+    // Sonst ließe sich mit der Anmeldemaske herausfinden, welche Konten es gibt.
+    const wrongUser = await call('POST', '/api/auth/login', {
+      username: 'gibtesnicht',
+      password: 'irgendwas1234',
+    });
+    const wrongPassword = await call('POST', '/api/auth/login', {
+      username: 'anna',
+      password: 'falsches passwort',
+    });
+    assert.equal(wrongUser.status, 401);
+    assert.equal(wrongPassword.status, 401);
+    assert.equal(wrongUser.data.error.message, wrongPassword.data.error.message);
+  });
+
+  it('meldet mit richtigen Angaben an und setzt ein Cookie', async () => {
+    const { status, data, headers } = await call('POST', '/api/auth/login', {
+      username: 'anna',
+      password: 'drei zufaellige woerter',
+    });
+    assert.equal(status, 200);
+    assert.equal(data.user.username, 'anna');
+    assert.match(headers.get('set-cookie') ?? '', /sh_session=ss_/);
+  });
+
+  it('legt eine zweite Person an und trennt die Rollen', async () => {
+    const created = await call('POST', '/api/auth/users', {
+      username: 'ben',
+      password: 'noch drei woerter',
+      displayName: 'Ben',
+      role: 'member',
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.data.role, 'member');
+
+    const list = await call('GET', '/api/auth/users');
+    assert.deepEqual(
+      list.data.map((user: { username: string }) => user.username).sort(),
+      ['anna', 'ben'],
+    );
+  });
+
+  it('lehnt denselben Anmeldenamen ein zweites Mal ab', async () => {
+    const { status, data } = await call('POST', '/api/auth/users', {
+      username: 'BEN',
+      password: 'wieder drei woerter',
+    });
+    assert.equal(status, 409);
+    assert.match(data.error.message, /gibt es schon/);
+  });
+
+  it('prüft den Anmeldenamen auf brauchbare Zeichen', async () => {
+    const { status, data } = await call('POST', '/api/auth/users', {
+      username: 'anna müller',
+      password: 'drei ganz andere woerter',
+    });
+    assert.equal(status, 400);
+    assert.match(JSON.stringify(data), /Buchstaben|erlaubt/);
+  });
+
+  it('führt Sitzungen und beendet sie einzeln', async () => {
+    const sessions = await call('GET', '/api/auth/sessions');
+    assert.ok(sessions.data.length >= 1);
+    assert.equal(
+      sessions.data.filter((session: { current: boolean }) => session.current).length,
+      1,
+      'genau eine Sitzung ist die eigene',
+    );
+  });
+
+  it('lässt das eigene Passwort nur mit dem bisherigen ändern', async () => {
+    const wrong = await call('POST', '/api/auth/password', {
+      currentPassword: 'stimmt nicht',
+      newPassword: 'ein ganz neues passwort',
+    });
+    assert.equal(wrong.status, 401);
+
+    const right = await call('POST', '/api/auth/password', {
+      currentPassword: 'drei zufaellige woerter',
+      newPassword: 'ein ganz neues passwort',
+    });
+    assert.equal(right.status, 200);
+
+    // Zurück zum bekannten Passwort, damit die folgenden Tests weiterlaufen.
+    await call('POST', '/api/auth/password', {
+      currentPassword: 'ein ganz neues passwort',
+      newPassword: 'drei zufaellige woerter',
+    });
+  });
+
+  it('lässt den letzten Administrator nicht entfernen', async () => {
+    const users = await call('GET', '/api/auth/users');
+    const ben = users.data.find((user: { username: string }) => user.username === 'ben');
+    await call('PATCH', `/api/auth/users/${ben.id}`, { role: 'member' });
+
+    const me = await call('GET', '/api/auth/me');
+    const removeSelf = await call('DELETE', `/api/auth/users/${me.data.user.id}`);
+    assert.equal(removeSelf.status, 409);
+    assert.match(removeSelf.data.error.message, /eigene Konto/);
   });
 });
 
@@ -377,25 +551,57 @@ describe('Darstellung', () => {
   });
 });
 
-describe('Zugriffstoken', () => {
-  it('erstellt ein weiteres Token und widerruft es', async () => {
-    const created = await call('POST', '/api/household/tokens', { name: 'Handy' });
-    assert.equal(created.status, 201);
-    assert.ok(created.data.accessToken.startsWith('sh_'));
-
+describe('Zugriffstoken für Programme', () => {
+  it('legt beim Einrichten von selbst keines mehr an', async () => {
+    // Menschen melden sich an – ein Token braucht nur, wer ein Skript schreibt.
     const list = await call('GET', '/api/household/tokens');
-    assert.equal(list.data.length, 2);
-    assert.ok(list.data.every((entry: Record<string, unknown>) => !('tokenHash' in entry)));
-
-    const removed = await call('DELETE', `/api/household/tokens/${created.data.id}`);
-    assert.equal(removed.status, 204);
+    assert.deepEqual(list.data, []);
   });
 
-  it('verhindert das Löschen des letzten Tokens', async () => {
+  it('erstellt eines und gibt es genau einmal aus', async () => {
+    const created = await call('POST', '/api/household/tokens', { name: 'Backup-Skript' });
+    assert.equal(created.status, 201);
+    assert.ok(created.data.accessToken.startsWith('sh_'));
+    token = created.data.accessToken;
+
     const list = await call('GET', '/api/household/tokens');
-    const { status, data } = await call('DELETE', `/api/household/tokens/${list.data[0].id}`);
-    assert.equal(status, 409);
-    assert.match(data.error.message, /letzte Zugriffstoken/);
+    assert.equal(list.data.length, 1);
+    assert.ok(
+      list.data.every((entry: Record<string, unknown>) => !('tokenHash' in entry)),
+      'der Hash bleibt im Hub',
+    );
+  });
+
+  it('lässt ein Programm damit lesen und schalten', async () => {
+    const { status, data } = await callWithToken('GET', '/api/devices');
+    assert.equal(status, 200);
+    assert.ok(Array.isArray(data));
+  });
+
+  it('reicht aber nicht für die Benutzerverwaltung', async () => {
+    // Ein Token gehört einem Programm, nicht einer Person – es hat keine Rolle.
+    const { status, data } = await callWithToken('POST', '/api/auth/users', {
+      username: 'skript',
+      password: 'drei zufaellige woerter',
+    });
+    assert.equal(status, 401);
+    assert.match(JSON.stringify(data), /Person|Anmeldung/);
+  });
+
+  it('lässt sich widerrufen – auch das letzte', async () => {
+    // Früher war das gesperrt, weil man sich sonst aussperrte. Seit es eine
+    // Anmeldung gibt, kann das nicht mehr passieren.
+    const list = await call('GET', '/api/household/tokens');
+    const { status } = await call('DELETE', `/api/household/tokens/${list.data[0].id}`);
+    assert.equal(status, 204);
+
+    const after = await call('GET', '/api/household/tokens');
+    assert.deepEqual(after.data, []);
+  });
+
+  it('weist ein widerrufenes Token ab', async () => {
+    const { status } = await callWithToken('GET', '/api/devices');
+    assert.equal(status, 401);
   });
 });
 

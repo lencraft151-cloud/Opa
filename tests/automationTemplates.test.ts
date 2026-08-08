@@ -197,8 +197,8 @@ describe('Regel aus einer Vorlage anlegen', () => {
     const devices = new DeviceService(repos, registry, integrations, telemetry);
     automations = new AutomationService(repos, devices, households);
 
-    const created = await households.create({ name: 'Vorlagen' });
-    householdId = created.household.id;
+    const household = await households.create({ name: 'Vorlagen' });
+    householdId = household.id;
 
     const flur = await rooms.create(householdId, { name: 'Flur' });
     for (const device of [

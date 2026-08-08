@@ -548,6 +548,77 @@ legend {
   outline-offset: 2px;
 }
 
+/* ---------------------------------------------------------- Anmeldung */
+
+#view-login {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: 1.2rem;
+}
+.login-box {
+  width: min(26rem, 100%);
+  animation: rise 0.35s var(--ease);
+}
+.login-box h1 {
+  margin-bottom: 0.2rem;
+}
+
+/* --------------------------------------------------------------- Szenen */
+
+.grid.scenes {
+  margin-bottom: 1rem;
+}
+.scene-card .scene-emoji {
+  font-size: 1.15em;
+  margin-right: 0.25rem;
+}
+
+/* Geräteauswahl beim Sichern einer Szene */
+.picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.35rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 0.2rem;
+  margin: 0.5rem 0;
+}
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
+}
+.pick:hover {
+  border-color: var(--border-strong);
+}
+.pick span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pick small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.pick:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
 /* ------------------------------------------------------- Einstellungen */
 
 .setting-block {

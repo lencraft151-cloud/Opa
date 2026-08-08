@@ -1,9 +1,10 @@
 import { badRequest } from '../core/errors.js';
-import type { Household, SetupStep } from '../core/types.js';
+import type { Household, Session, SetupStep } from '../core/types.js';
 import type { Repositories } from '../storage/repositories.js';
 import type { DeviceService } from './deviceService.js';
 import type { HouseholdService, CreateHouseholdInput } from './householdService.js';
 import type { RoomService } from './roomService.js';
+import type { PublicUser, UserService } from './userService.js';
 
 export interface SetupStepInfo {
   id: SetupStep;
@@ -33,7 +34,8 @@ const STEP_DEFINITIONS: Array<{ id: SetupStep; title: string; description: strin
   {
     id: 'household',
     title: 'Haushalt anlegen',
-    description: 'Name und Zeitzone festlegen. Danach gibt es ein Zugriffstoken für die API.',
+    description:
+      'Name, Zeitzone und dein Zugang: Anmeldename und Passwort, mit denen du dich künftig anmeldest.',
   },
   {
     id: 'integrations',
@@ -69,6 +71,7 @@ export class SetupService {
     private readonly households: HouseholdService,
     private readonly rooms: RoomService,
     private readonly devices: DeviceService,
+    private readonly users: UserService,
   ) {}
 
   state(): SetupState {
@@ -147,11 +150,40 @@ export class SetupService {
     };
   }
 
+  /**
+   * Legt Haushalt und erstes Benutzerkonto in einem Schritt an.
+   *
+   * Beides gehört zusammen: Ein Haushalt ohne Konto wäre für niemanden
+   * erreichbar, und ein Konto ohne Haushalt hätte nichts zu verwalten. Der
+   * erste Benutzer ist immer Administrator.
+   */
   async createHousehold(
-    input: CreateHouseholdInput,
-  ): Promise<{ household: Household; token: string; state: SetupState }> {
-    const { household, token } = await this.households.create(input);
-    return { household, token, state: this.state() };
+    input: CreateHouseholdInput & { username: string; password: string; displayName?: string },
+  ): Promise<{
+    household: Household;
+    user: PublicUser;
+    sessionToken: string;
+    session: Session;
+    state: SetupState;
+  }> {
+    const household = await this.households.create(input);
+    const user = await this.users.create(household.id, {
+      username: input.username,
+      password: input.password,
+      displayName: input.displayName,
+      role: 'admin',
+    });
+    // Direkt angemeldet weitermachen – ein zweites Formular an dieser Stelle
+    // wäre nur eine Hürde.
+    const login = await this.users.login(household.id, input.username, input.password);
+
+    return {
+      household,
+      user,
+      sessionToken: login.token,
+      session: login.session,
+      state: this.state(),
+    };
   }
 
   async goToStep(step: SetupStep): Promise<SetupState> {

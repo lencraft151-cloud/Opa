@@ -22,6 +22,7 @@ import {
 import {
   capabilitiesFor,
   classifyChannel,
+  pickPrimaryChannels,
   stateFromValues,
   targetTemperatureKey,
   tiltKey,
@@ -233,6 +234,41 @@ describe('Shelly der ersten Generation', () => {
     assert.equal(cover.state.coverState, 'closing');
   });
 
+  it('bietet im Rollladenmodus nicht auch noch die Motorrelais an', () => {
+    /*
+     * Ein Shelly 2.5 im Rollladenmodus meldet zusätzlich seine zwei Relais –
+     * das sind die Motorrichtungen. Als Schalter angeboten wären sie nicht
+     * nur verwirrend, sondern gefährlich: beide zugleich ein legt Spannung
+     * auf beide Wicklungen.
+     */
+    const components = parseGen1Status(
+      {
+        relays: [
+          { ison: false, has_timer: false },
+          { ison: false, has_timer: false },
+        ],
+        rollers: [{ state: 'stop', current_pos: 70, power: 0, is_valid: true, positioning: true }],
+        meters: [{ power: 0, total: 24500 }],
+      },
+      emptyNaming,
+    );
+
+    assert.equal(
+      components.filter((entry) => entry.capabilities.includes('switch')).length,
+      0,
+      'im Rollladenmodus gibt es keine Schalter',
+    );
+    assert.equal(components.filter((entry) => entry.capabilities.includes('cover')).length, 1);
+  });
+
+  it('zeigt ohne Rollladenmodus weiterhin die Relais', () => {
+    const components = parseGen1Status(
+      { relays: [{ ison: true, has_timer: false }], meters: [{ power: 12, total: 100 }] },
+      emptyNaming,
+    );
+    assert.equal(components.filter((entry) => entry.capabilities.includes('switch')).length, 1);
+  });
+
   it('erkennt den Temperatursensor eines Shelly H&T', () => {
     const components = parseGen1Status(
       { tmp: { value: 19.75, units: 'C', is_valid: true }, hum: { value: 55, is_valid: true } },
@@ -296,6 +332,11 @@ describe('Homematic', () => {
     assert.equal(classifyChannel(channel('BLIND_VIRTUAL_RECEIVER')), 'cover');
     assert.equal(classifyChannel(channel('BLIND')), 'cover');
     assert.equal(classifyChannel(channel('JALOUSIE')), 'cover');
+    // HmIP-Rollladenaktoren (HmIP-BROLL, HmIP-FROLL) heißen SHUTTER.
+    assert.equal(classifyChannel(channel('SHUTTER_VIRTUAL_RECEIVER')), 'cover');
+    assert.equal(classifyChannel(channel('SHUTTER_TRANSMITTER')), 'cover');
+    // Aber der Fensterkontakt heißt genauso und ist keiner.
+    assert.equal(classifyChannel(channel('SHUTTER_CONTACT')), 'contact');
     assert.equal(classifyChannel(channel('HEATING_CLIMATECONTROL_TRANSCEIVER')), 'thermostat');
     assert.equal(classifyChannel(channel('CLIMATECONTROL_RT_TRANSCEIVER')), 'thermostat');
     assert.equal(classifyChannel(channel('WEATHER')), 'climate');
@@ -361,6 +402,45 @@ describe('Homematic', () => {
     const state = stateFromValues('climate', { ACTUAL_TEMPERATURE: '21.75', HUMIDITY: '50' });
     assert.equal(state.temperatureC, 21.75);
     assert.equal(state.humidity, 50);
+  });
+
+  it('macht aus fünf gleichwertigen Kanälen einen Rollladen', () => {
+    /*
+     * Ein HmIP-BROLL führt für jede Gruppenzuordnung einen eigenen
+     * „virtual receiver“ – alle fahren denselben Motor. Ohne diesen Schritt
+     * stünde derselbe Rollladen fünfmal in der Geräteliste.
+     */
+    const entries = [3, 4, 5, 6, 7].map((index) => ({
+      channel: { ...channel('SHUTTER_VIRTUAL_RECEIVER'), address: `ABC1234567:${index}` },
+      kind: 'cover' as const,
+    }));
+    entries.push({
+      channel: { ...channel('SHUTTER_TRANSMITTER'), address: 'ABC1234567:1' },
+      kind: 'cover' as const,
+    });
+
+    const picked = pickPrimaryChannels(entries);
+    assert.equal(picked.length, 1);
+    assert.equal(
+      picked[0]?.channel.address,
+      'ABC1234567:3',
+      'der Empfängerkanal mit der kleinsten Nummer gewinnt',
+    );
+  });
+
+  it('lässt Kanäle verschiedener Geräte und Gattungen nebeneinander', () => {
+    const on = (deviceAddress: string, index: number, type: string) => ({
+      ...channel(type),
+      deviceAddress,
+      address: `${deviceAddress}:${index}`,
+    });
+
+    const picked = pickPrimaryChannels([
+      { channel: on('AAA1', 3, 'SHUTTER_VIRTUAL_RECEIVER'), kind: 'cover' as const },
+      { channel: on('BBB2', 3, 'SHUTTER_VIRTUAL_RECEIVER'), kind: 'cover' as const },
+      { channel: on('AAA1', 1, 'WEATHER'), kind: 'climate' as const },
+    ]);
+    assert.equal(picked.length, 3, 'zwei Rollläden plus ein Sensorkanal');
   });
 
   it('macht aus „Batterie schwach" einen Prozentwert', () => {

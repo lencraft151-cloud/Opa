@@ -14,6 +14,10 @@ const $ = (selector) => document.querySelector(selector);
 export const store = {
   /** Antwort von `/system/info` – Fassung, Kennung, verfügbare Adapter. */
   systemInfo: null,
+  /** Angemeldeter Benutzer. */
+  me: null,
+  scenes: [],
+  presence: null,
   summary: null,
   household: null,
   rooms: [],
@@ -31,7 +35,7 @@ export const store = {
 };
 
 export async function loadDashboardData() {
-  const [summary, rooms, devices, integrations, automations, climate, updates, energy] =
+  const [summary, rooms, devices, integrations, automations, climate, updates, energy, scenes, presence, me] =
     await Promise.all([
       api('/household/summary'),
       api('/rooms'),
@@ -43,6 +47,9 @@ export async function loadDashboardData() {
       // Die Übersicht zeigt die Tageskosten – ohne dieses Vorabladen stünde
       // dort bis zum ersten Besuch der Energie-Ansicht nur ein Platzhalter.
       api(`/energy/summary?period=${store.energyPeriod}`),
+      api('/scenes'),
+      api('/presence'),
+      api('/auth/me'),
     ]);
   Object.assign(store, {
     summary,
@@ -54,6 +61,9 @@ export async function loadDashboardData() {
     climate,
     updates,
     energy,
+    scenes,
+    presence,
+    me,
   });
   $('#household-name').textContent = summary.household.name;
 }
@@ -110,24 +120,114 @@ const RENDERERS = {
   overview: renderOverview,
   rooms: renderRooms,
   devices: renderDevices,
+  scenes: renderScenes,
   energy: renderEnergy,
   history: renderHistory,
   automations: renderAutomations,
   settings: renderSettings,
 };
 
+/**
+ * Welche Ansichten überhaupt von Gerätezuständen abhängen.
+ *
+ * Der Hub fragt die Geräte alle 15 Sekunden ab. Früher wurde bei jeder
+ * Antwort die *gesamte* aktive Ansicht neu aufgebaut – auch „Automationen"
+ * und „Einstellungen". Wer dort ein Formular ausfüllte, hatte 15 Sekunden
+ * Zeit, dann war die Eingabe weg. Diese beiden Ansichten zeigen keine
+ * Messwerte; sie werden nur noch nach dem Speichern neu gezeichnet.
+ */
+const DEVICE_DEPENDENT = new Set(['overview', 'rooms', 'devices', 'scenes', 'energy', 'history']);
+
 let current = 'overview';
 
 export function renderPanel(name) {
   current = name;
   for (const key of Object.keys(RENDERERS)) {
-    $(`#panel-${key}`).classList.toggle('hidden', key !== name);
+    $(`#panel-${key}`)?.classList.toggle('hidden', key !== name);
   }
   void RENDERERS[name]?.();
 }
 
-export function renderCurrent() {
-  void RENDERERS[current]?.();
+/**
+ * Zeichnet die aktive Ansicht neu.
+ *
+ * @param {{ reason?: 'devices' | 'manual' }} options `devices` bedeutet: Es
+ *   kam nur ein neuer Messwert herein. Ansichten ohne Gerätebezug bleiben
+ *   dann unangetastet.
+ */
+export function renderCurrent(options = {}) {
+  if (options.reason === 'devices' && !DEVICE_DEPENDENT.has(current)) return;
+  const panel = $(`#panel-${current}`);
+  if (!panel) return;
+  withPreservedInput(panel, () => void RENDERERS[current]?.());
+}
+
+/**
+ * Führt das Neuzeichnen aus, ohne wegzunehmen, woran gerade jemand arbeitet.
+ *
+ * Gesichert werden Eingabefelder außerhalb der Gerätekarten – die Karten
+ * *sollen* dem Gerät folgen, ein Helligkeitsregler muss den neuen Wert
+ * zeigen. Alles andere (Suchfeld, Automations-Formular, Einstellungen)
+ * behält seinen Inhalt, dazu Cursorposition und Scrollstand.
+ */
+function withPreservedInput(panel, render) {
+  const fields = () => [...panel.querySelectorAll('input, select, textarea')].filter(
+    (field) => !field.closest('.device-card'),
+  );
+
+  const before = new Map();
+  for (const field of fields()) {
+    const key = fieldKey(field);
+    if (key) before.set(key, readField(field));
+  }
+
+  const active = document.activeElement;
+  const focusKey = active && panel.contains(active) ? fieldKey(active) : null;
+  const caret =
+    focusKey && typeof active.selectionStart === 'number'
+      ? [active.selectionStart, active.selectionEnd]
+      : null;
+  const scrollY = window.scrollY;
+
+  render();
+
+  for (const field of fields()) {
+    const key = fieldKey(field);
+    if (key && before.has(key)) writeField(field, before.get(key));
+    if (key && key === focusKey) {
+      field.focus({ preventScroll: true });
+      if (caret && typeof field.setSelectionRange === 'function') {
+        try {
+          field.setSelectionRange(caret[0], caret[1]);
+        } catch {
+          /* Felder wie type=number lassen keine Auswahl zu */
+        }
+      }
+    }
+  }
+
+  if (window.scrollY !== scrollY) window.scrollTo({ top: scrollY });
+}
+
+/** Wiedererkennungsmerkmal eines Feldes über das Neuzeichnen hinweg. */
+function fieldKey(field) {
+  if (!field || !field.tagName) return null;
+  if (field.id) return `#${field.id}`;
+  const form = field.closest('form, fieldset, .card');
+  const scope = form?.id || form?.className || '';
+  const name = field.name || field.dataset.field || '';
+  if (!name) return null;
+  // Gleichnamige Felder (Wochentage) über ihren Wert unterscheiden.
+  return `${scope}::${name}::${field.type === 'checkbox' || field.type === 'radio' ? field.value : ''}`;
+}
+
+function readField(field) {
+  return field.type === 'checkbox' || field.type === 'radio' ? field.checked : field.value;
+}
+
+function writeField(field, value) {
+  if (field.type === 'checkbox' || field.type === 'radio') field.checked = value;
+  else field.value = value;
 }
 
 // ---------------------------------------------------------------------------
@@ -518,6 +618,321 @@ function renderDevices() {
     deviceFilter.capability = event.target.value;
     renderDevices();
   });
+}
+
+// ---------------------------------------------------------------------------
+// Szenen
+// ---------------------------------------------------------------------------
+
+/**
+ * Szenen sichern den *aktuellen* Zustand: Man stellt sein Zuhause ein, wie
+ * man es haben will, und drückt auf sichern. Das ist der Grund, warum es
+ * hier keinen Editor für einzelne Kommandos gibt – der wäre der umständliche
+ * Weg zum selben Ziel.
+ */
+async function renderScenes() {
+  const panel = $('#panel-scenes');
+  const scenes = store.scenes ?? [];
+  const presence = store.presence;
+
+  const controllable = store.devices.filter(
+    (device) =>
+      !device.hidden &&
+      device.capabilities.some((capability) =>
+        ['switch', 'dimmer', 'color', 'color_temperature', 'cover', 'thermostat'].includes(
+          capability,
+        ),
+      ),
+  );
+
+  panel.innerHTML = `
+    <p class="intro">
+      Eine Szene merkt sich, wie dein Zuhause gerade ist – Licht, Farbe, Rollläden, Heizung.
+      Ein Tipp später steht alles wieder genauso.
+    </p>
+
+    <div class="grid scenes">
+      ${
+        scenes.map(sceneCard).join('') ||
+        emptyState(
+          '✨',
+          'Noch keine Szene.',
+          'Stell dein Zuhause so ein, wie du es magst – und sichere es unten als Szene.',
+        )
+      }
+    </div>
+
+    <details class="card" data-section="new-scene">
+      <summary>Neue Szene aus dem jetzigen Zustand sichern</summary>
+      <form id="form-scene" class="form">
+        <div class="field-row">
+          <label>Name <input name="name" required maxlength="80" placeholder="z. B. Fernsehabend" /></label>
+          <label>Zeichen <input name="emoji" maxlength="4" value="✨" class="narrow" /></label>
+          <label>Raum (optional)
+            <select name="roomId">
+              <option value="">– ganzer Haushalt –</option>
+              ${store.rooms
+                .map((room) => `<option value="${esc(room.id)}">${esc(room.name)}</option>`)
+                .join('')}
+            </select>
+          </label>
+        </div>
+
+        <div class="setting-head">
+          <strong>Welche Geräte gehören dazu?</strong>
+          <span class="row tight">
+            <button type="button" class="small ghost" data-scene-select="all">Alle</button>
+            <button type="button" class="small ghost" data-scene-select="none">Keine</button>
+          </span>
+        </div>
+        <div class="picker">
+          ${
+            controllable
+              .map(
+                (device) => `<label class="pick">
+                  <input type="checkbox" name="deviceIds" value="${esc(device.id)}" />
+                  <span>
+                    <b>${esc(device.name)}</b>
+                    <small>${esc(roomName(device.roomId))} · ${esc(describeDeviceState(device))}</small>
+                  </span>
+                </label>`,
+              )
+              .join('') || '<p class="muted small">Es sind noch keine steuerbaren Geräte da.</p>'
+          }
+        </div>
+        <p class="field-help">
+          Gesichert wird der Zustand von jetzt. Ausgeschaltete Geräte bleiben in der Szene aus –
+          Helligkeit und Farbe einer dunklen Lampe mitzuschreiben würde sie beim Abrufen nur
+          kurz aufblitzen lassen.
+        </p>
+        <button type="submit" class="primary" ${controllable.length ? '' : 'disabled'}>
+          Szene sichern
+        </button>
+      </form>
+    </details>
+
+    <div class="card">
+      <h2>Urlaubsmodus</h2>
+      <p class="muted small">
+        Eine Wohnung, in der abends nie ein Licht angeht, fällt auf. Im gewählten Zeitfenster
+        schaltet der Hub deshalb einzelne Lampen an und aus – in unregelmäßigen Abständen,
+        denn ein festes Muster wäre schlimmer als gar nichts.
+      </p>
+      <form id="form-presence" class="form">
+        <label class="check">
+          <span class="switch">
+            <input type="checkbox" name="enabled" ${presence?.settings.enabled ? 'checked' : ''} />
+            <span></span>
+          </span>
+          <span>Urlaubsmodus einschalten</span>
+        </label>
+        <div class="field-row">
+          <label>Von <input type="time" name="from" value="${esc(presence?.settings.from ?? '17:30')}" /></label>
+          <label>Bis <input type="time" name="to" value="${esc(presence?.settings.to ?? '22:45')}" /></label>
+          <label>Im Schnitt alle
+            <select name="averageIntervalMinutes">
+              ${[10, 15, 20, 25, 30, 45, 60, 90]
+                .map(
+                  (minutes) =>
+                    `<option value="${minutes}" ${
+                      (presence?.settings.averageIntervalMinutes ?? 25) === minutes ? 'selected' : ''
+                    }>${minutes} Minuten</option>`,
+                )
+                .join('')}
+            </select>
+          </label>
+        </div>
+        <div class="setting-head"><strong>Nur in diesen Räumen</strong>
+          <span class="muted small">Nichts angekreuzt heißt: überall, wo Licht ist</span></div>
+        <div class="chips">
+          ${store.rooms
+            .map(
+              (room) => `<label class="weekday">
+                <input type="checkbox" name="roomIds" value="${esc(room.id)}"
+                  ${presence?.settings.roomIds?.includes(room.id) ? 'checked' : ''} />
+                <span>${esc(room.name)}</span>
+              </label>`,
+            )
+            .join('')}
+        </div>
+        <div class="row tight">
+          <button type="submit" class="primary">Speichern</button>
+          <span class="badge ${presence?.active ? 'warn' : ''}">${
+            presence?.active
+              ? `läuft gerade · ${plural(presence.devicesOn, 'Lampe an', 'Lampen an')}`
+              : presence?.settings.enabled
+                ? 'aktiv, aber außerhalb der Zeit'
+                : 'aus'
+          }</span>
+          <span class="muted small">${esc(
+            plural(presence?.candidates ?? 0, 'Lampe kommt infrage', 'Lampen kommen infrage'),
+          )}</span>
+        </div>
+      </form>
+    </div>`;
+
+  wireScenes(panel);
+  restoreOpenSections(panel);
+}
+
+function sceneCard(scene) {
+  const room = scene.roomId ? roomName(scene.roomId) : 'ganzer Haushalt';
+  return `<article class="device-card scene-card">
+    <header>
+      <div>
+        <div class="name"><span class="scene-emoji">${esc(scene.emoji)}</span> ${esc(scene.name)}</div>
+        <div class="meta">${esc(room)} · ${esc(
+          plural(scene.entries.length, 'Gerät', 'Geräte'),
+        )}${scene.lastAppliedAt ? ` · zuletzt ${esc(fmt.relative(scene.lastAppliedAt))}` : ''}</div>
+      </div>
+    </header>
+    <div class="row tight">
+      <button class="primary" data-scene-apply="${esc(scene.id)}">Herstellen</button>
+      <button class="small" data-scene-restamp="${esc(scene.id)}"
+              title="Den jetzigen Zustand als neue Vorlage sichern">Neu aufnehmen</button>
+      <button class="small danger" data-scene-remove="${esc(scene.id)}">Löschen</button>
+    </div>
+  </article>`;
+}
+
+/** Eine Zeile, die den aktuellen Zustand eines Geräts beschreibt. */
+function describeDeviceState(device) {
+  const state = device.state ?? {};
+  const parts = [];
+  if (device.capabilities.includes('cover')) {
+    parts.push(`Rollladen ${fmt.percent(state.position)} offen`);
+  } else if (device.capabilities.includes('thermostat')) {
+    parts.push(`Soll ${fmt.temperature(state.targetTemperatureC)}`);
+  } else if (state.on === true) {
+    parts.push('an');
+    if (typeof state.brightness === 'number') parts.push(fmt.percent(state.brightness));
+  } else if (state.on === false) {
+    parts.push('aus');
+  }
+  return parts.join(', ') || 'kein Zustand bekannt';
+}
+
+function wireScenes(panel) {
+  panel.querySelectorAll('[data-scene-apply]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      const result = await guard(() =>
+        api(`/scenes/${button.dataset.sceneApply}/apply`, { method: 'POST' }),
+      );
+      button.disabled = false;
+      if (!result) return;
+      toast(
+        result.failed === 0
+          ? `„${result.name}" hergestellt.`
+          : `„${result.name}" teilweise hergestellt.`,
+        {
+          kind: result.failed === 0 ? 'success' : 'warn',
+          hint:
+            result.failed === 0
+              ? `${plural(result.applied, 'Gerät', 'Geräte')} geschaltet.`
+              : `${result.failed} von ${result.applied + result.failed} Geräten haben nicht reagiert.`,
+        },
+      );
+      await reloadDevices();
+    });
+  });
+
+  panel.querySelectorAll('[data-scene-restamp]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!confirm('Die Szene mit dem jetzigen Zustand überschreiben?')) return;
+      const updated = await guard(
+        () => api(`/scenes/${button.dataset.sceneRestamp}/restamp`, { method: 'POST' }),
+        { success: 'Szene neu aufgenommen.' },
+      );
+      if (!updated) return;
+      await loadScenes();
+      void renderScenes();
+    });
+  });
+
+  panel.querySelectorAll('[data-scene-remove]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!confirm('Szene wirklich löschen?')) return;
+      await guard(() => api(`/scenes/${button.dataset.sceneRemove}`, { method: 'DELETE' }));
+      await loadScenes();
+      void renderScenes();
+    });
+  });
+
+  panel.querySelectorAll('[data-scene-select]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const checked = button.dataset.sceneSelect === 'all';
+      panel
+        .querySelectorAll('input[name="deviceIds"]')
+        .forEach((input) => (input.checked = checked));
+    });
+  });
+
+  panel.querySelector('#form-scene')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const deviceIds = [...event.target.querySelectorAll('input[name="deviceIds"]:checked')].map(
+      (input) => input.value,
+    );
+    if (deviceIds.length === 0) {
+      toast('Wähle mindestens ein Gerät aus.', {
+        kind: 'warn',
+        hint: 'Eine Szene ohne Geräte hätte nichts herzustellen.',
+      });
+      return;
+    }
+
+    const created = await guard(
+      () =>
+        api('/scenes', {
+          method: 'POST',
+          body: {
+            name: form.get('name'),
+            emoji: String(form.get('emoji') || '').trim() || undefined,
+            roomId: form.get('roomId') || null,
+            deviceIds,
+          },
+        }),
+      { success: 'Szene gesichert.' },
+    );
+    if (!created) return;
+    event.target.reset();
+    await loadScenes();
+    void renderScenes();
+  });
+
+  panel.querySelector('#form-presence')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const roomIds = [...event.target.querySelectorAll('input[name="roomIds"]:checked')].map(
+      (input) => input.value,
+    );
+
+    const status = await guard(
+      () =>
+        api('/presence', {
+          method: 'PATCH',
+          body: {
+            enabled: form.get('enabled') === 'on',
+            from: form.get('from'),
+            to: form.get('to'),
+            averageIntervalMinutes: Number(form.get('averageIntervalMinutes')),
+            roomIds,
+          },
+        }),
+      { success: 'Urlaubsmodus gespeichert.' },
+    );
+    if (!status) return;
+    store.presence = status;
+    void renderScenes();
+  });
+}
+
+/** Szenen und Urlaubsmodus nachladen. */
+export async function loadScenes() {
+  const [scenes, presence] = await Promise.all([api('/scenes'), api('/presence')]);
+  store.scenes = scenes;
+  store.presence = presence;
 }
 
 // ---------------------------------------------------------------------------
@@ -1305,19 +1720,7 @@ async function renderSettings() {
       <div class="list">${store.rooms.map(roomItem).join('')}</div>
     </div>
 
-    <div class="card">
-      <h2>Zugriffstoken</h2>
-      <p class="muted small">
-        Ein Token ist wie ein Schlüssel zu deinem Hub. Dieser Browser hat schon einen.
-        Einen weiteren brauchst du nur, wenn ein anderes Gerät oder Programm zugreifen soll –
-        widerrufen kannst du ihn jederzeit.
-      </p>
-      <form id="form-token" class="form inline">
-        <input name="name" placeholder="z. B. Handy" maxlength="80" required />
-        <button type="submit" class="primary">Token erstellen</button>
-      </form>
-      <div class="list" id="tokens-list"></div>
-    </div>
+    ${accountCard()}
 
     <div class="card">
       <h2>Diese Oberfläche</h2>
@@ -1364,8 +1767,265 @@ async function renderSettings() {
     </details>`;
 
   wireSettings(panel);
+  wireAccount(panel);
   restoreOpenSections(panel);
-  await renderTokens();
+  await Promise.all([renderTokens(), renderSessions(), renderUsers()]);
+}
+
+/** Konto, Personen und angemeldete Geräte bedienen. */
+function wireAccount(panel) {
+  panel.querySelector('#form-password')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    if (String(form.get('newPassword')) !== String(form.get('newPasswordRepeat'))) {
+      toast('Die beiden neuen Passwörter stimmen nicht überein.', { kind: 'error' });
+      return;
+    }
+    const result = await guard(() =>
+      api('/auth/password', {
+        method: 'POST',
+        body: {
+          currentPassword: form.get('currentPassword'),
+          newPassword: form.get('newPassword'),
+        },
+      }),
+    );
+    if (!result) return;
+    event.target.reset();
+    toast(result.message, { kind: 'success' });
+    await renderSessions();
+  });
+
+  panel.querySelector('#btn-logout')?.addEventListener('click', async () => {
+    await guard(() => api('/auth/logout', { method: 'POST' }));
+    location.reload();
+  });
+
+  panel.querySelector('#btn-end-others')?.addEventListener('click', async () => {
+    const result = await guard(() => api('/auth/sessions/end-others', { method: 'POST' }));
+    if (!result) return;
+    toast(plural(result.ended, 'Gerät abgemeldet', 'Geräte abgemeldet'), { kind: 'success' });
+    await renderSessions();
+  });
+
+  panel.querySelector('#form-user')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const created = await guard(() =>
+      api('/auth/users', {
+        method: 'POST',
+        body: {
+          username: String(form.get('username')).trim(),
+          displayName: String(form.get('displayName') || '').trim() || undefined,
+          password: form.get('password'),
+          role: form.get('role'),
+        },
+      }),
+    );
+    if (!created) return;
+    event.target.reset();
+    toast(`„${created.displayName}" kann sich jetzt anmelden.`, {
+      kind: 'success',
+      hint: `Anmeldename: ${created.username}`,
+    });
+    await renderUsers();
+  });
+}
+
+async function renderSessions() {
+  const list = $('#sessions-list');
+  if (!list) return;
+  const sessions = await guard(() => api('/auth/sessions'));
+  if (!sessions) return;
+
+  list.innerHTML =
+    sessions
+      .map(
+        (session) => `<div class="item">
+          <div>
+            <div class="title">${esc(session.device ?? 'Unbekanntes Gerät')}
+              ${session.current ? '<span class="badge ok">dieses Gerät</span>' : ''}</div>
+            <div class="sub">zuletzt genutzt ${esc(fmt.relative(session.lastUsedAt))} ·
+              angemeldet ${esc(fmt.time(session.createdAt))}</div>
+          </div>
+          ${
+            session.current
+              ? ''
+              : `<button class="small danger" data-end-session="${esc(session.id)}">Abmelden</button>`
+          }
+        </div>`,
+      )
+      .join('') || emptyState('💤', 'Keine weiteren Anmeldungen.');
+
+  list.querySelectorAll('[data-end-session]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await guard(() => api(`/auth/sessions/${button.dataset.endSession}`, { method: 'DELETE' }));
+      await renderSessions();
+    });
+  });
+}
+
+async function renderUsers() {
+  const list = $('#users-list');
+  if (!list) return;
+  const users = await guard(() => api('/auth/users'));
+  if (!users) return;
+
+  const me = store.me?.user;
+  list.innerHTML = users
+    .map(
+      (user) => `<div class="item">
+        <div>
+          <div class="title">${esc(user.displayName)}
+            <span class="badge ${user.role === 'admin' ? 'ok' : ''}">${
+              user.role === 'admin' ? 'Administrator' : 'Mitbewohner'
+            }</span>
+            ${user.id === me?.id ? '<span class="badge">du</span>' : ''}
+          </div>
+          <div class="sub">Anmeldename ${esc(user.username)} ·
+            ${user.lastLoginAt ? `zuletzt angemeldet ${esc(fmt.relative(user.lastLoginAt))}` : 'noch nie angemeldet'}</div>
+        </div>
+        ${
+          user.id === me?.id
+            ? ''
+            : `<div class="row tight">
+                 <button class="small" data-reset-password="${esc(user.id)}"
+                         data-username="${esc(user.username)}">Passwort setzen</button>
+                 <button class="small danger" data-remove-user="${esc(user.id)}">Entfernen</button>
+               </div>`
+        }
+      </div>`,
+    )
+    .join('');
+
+  list.querySelectorAll('[data-reset-password]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const newPassword = prompt(
+        `Neues Passwort für „${button.dataset.username}" (mindestens 10 Zeichen):`,
+      );
+      if (!newPassword) return;
+      const result = await guard(() =>
+        api(`/auth/users/${button.dataset.resetPassword}/password`, {
+          method: 'POST',
+          body: { newPassword },
+        }),
+      );
+      if (result) toast(result.message, { kind: 'success' });
+    });
+  });
+
+  list.querySelectorAll('[data-remove-user]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!confirm('Diese Person wirklich entfernen? Sie kann sich danach nicht mehr anmelden.')) {
+        return;
+      }
+      await guard(() => api(`/auth/users/${button.dataset.removeUser}`, { method: 'DELETE' }));
+      await renderUsers();
+    });
+  });
+}
+
+/**
+ * Konto, weitere Personen, angemeldete Geräte – und ganz unten die
+ * Zugriffstoken, die es weiterhin gibt, aber nur noch für Programme.
+ */
+function accountCard() {
+  const me = store.me?.user;
+  const isAdmin = me?.role === 'admin';
+
+  return `<div class="card">
+    <h2>Dein Konto</h2>
+    ${
+      me
+        ? `<p class="muted small">
+             Angemeldet als <strong>${esc(me.displayName)}</strong> (${esc(me.username)}) ·
+             ${me.role === 'admin' ? 'Administrator' : 'Mitbewohner'}
+           </p>`
+        : `<p class="muted small">
+             Dieser Hub läuft ohne Anmeldepflicht (<code>AUTH_DISABLED</code>). Für den
+             Zugriff von außerhalb des Heimnetzes ist das nicht gedacht.
+           </p>`
+    }
+
+    ${
+      me
+        ? `<form id="form-password" class="form">
+             <div class="field-row">
+               <label>Bisheriges Passwort
+                 <input name="currentPassword" type="password" required autocomplete="current-password" />
+               </label>
+               <label>Neues Passwort
+                 <input name="newPassword" type="password" required minlength="10" autocomplete="new-password" />
+               </label>
+               <label>Wiederholen
+                 <input name="newPasswordRepeat" type="password" required minlength="10" autocomplete="new-password" />
+               </label>
+             </div>
+             <p class="field-help">
+               Mindestens zehn Zeichen. Nach der Änderung werden alle anderen angemeldeten
+               Geräte abgemeldet – genau dafür ändert man üblicherweise sein Passwort.
+             </p>
+             <div class="row tight">
+               <button type="submit" class="primary">Passwort ändern</button>
+               <button type="button" class="ghost" id="btn-logout">Abmelden</button>
+             </div>
+           </form>
+
+           <details data-section="sessions">
+             <summary>Angemeldete Geräte</summary>
+             <div class="list" id="sessions-list"></div>
+             <button class="small" id="btn-end-others">Alle anderen Geräte abmelden</button>
+           </details>`
+        : ''
+    }
+
+    ${
+      isAdmin
+        ? `<details data-section="users">
+             <summary>Personen im Haushalt</summary>
+             <p class="muted small">
+               Jede Person bekommt einen eigenen Zugang. „Mitbewohner" dürfen alles bedienen,
+               „Administratoren" zusätzlich Geräte und Konten verwalten.
+             </p>
+             <div class="list" id="users-list"></div>
+             <form id="form-user" class="form">
+               <div class="field-row">
+                 <label>Anmeldename
+                   <input name="username" required minlength="3" maxlength="32" placeholder="z. B. ben"
+                          autocapitalize="none" autocorrect="off" spellcheck="false" />
+                 </label>
+                 <label>Angezeigter Name
+                   <input name="displayName" maxlength="80" placeholder="z. B. Ben" />
+                 </label>
+                 <label>Passwort
+                   <input name="password" type="password" required minlength="10" autocomplete="new-password" />
+                 </label>
+                 <label>Rolle
+                   <select name="role">
+                     <option value="member">Mitbewohner</option>
+                     <option value="admin">Administrator</option>
+                   </select>
+                 </label>
+               </div>
+               <button type="submit" class="primary">Person hinzufügen</button>
+             </form>
+           </details>`
+        : ''
+    }
+
+    <details data-section="tokens">
+      <summary>Zugänge für Programme (Zugriffstoken)</summary>
+      <p class="muted small">
+        Für Skripte und andere Programme, die sich nicht anmelden können. Menschen brauchen
+        das nicht – für dich reicht dein Name und dein Passwort.
+      </p>
+      <form id="form-token" class="form inline">
+        <input name="name" placeholder="z. B. Backup-Skript" maxlength="80" required />
+        <button type="submit" class="primary">Token erstellen</button>
+      </form>
+      <div class="list" id="tokens-list"></div>
+    </details>
+  </div>`;
 }
 
 /**
@@ -1718,11 +2378,11 @@ function wireSettings(panel) {
     });
   });
 
-  panel.querySelector('#btn-reload-ui').addEventListener('click', () => {
+  panel.querySelector('#btn-reload-ui')?.addEventListener('click', () => {
     void applyUpdate({ silent: false });
   });
 
-  panel.querySelector('#form-token').addEventListener('submit', async (event) => {
+  panel.querySelector('#form-token')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const name = new FormData(event.target).get('name');
     const result = await guard(() => api('/household/tokens', { method: 'POST', body: { name } }));

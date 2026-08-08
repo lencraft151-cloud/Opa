@@ -20,6 +20,31 @@
   <body>
     <div id="toasts" class="toasts" aria-live="polite"></div>
 
+    <!-- ==================== Anmeldung ==================== -->
+    <main id="view-login" class="view hidden">
+      <div class="login-box card">
+        <h1><span class="logo-mark">⌂</span> Anmelden</h1>
+        <p class="muted" id="login-subtitle">Dein Zuhause wartet.</p>
+        <div id="login-banner"></div>
+        <form id="form-login" class="form">
+          <label>
+            Anmeldename
+            <input name="username" required autocomplete="username" autocapitalize="none"
+                   autocorrect="off" spellcheck="false" enterkeyhint="next" />
+          </label>
+          <label>
+            Passwort
+            <input name="password" type="password" required autocomplete="current-password"
+                   enterkeyhint="go" />
+          </label>
+          <button type="submit" class="primary lg">Anmelden</button>
+        </form>
+        <p class="muted small">
+          Passwort vergessen? Ein anderer Administrator im Haushalt kann es zurücksetzen.
+        </p>
+      </div>
+    </main>
+
     <!-- ==================== Einrichtungsassistent ==================== -->
     <main id="view-setup" class="view hidden">
       <div class="wizard">
@@ -55,16 +80,43 @@
             <p class="muted small">
               Der Strompreis lässt sich später ändern – er ist die Grundlage der Kostenrechnung.
             </p>
+
+            <h3>Dein Zugang</h3>
+            <p class="muted small">
+              Damit meldest du dich künftig an – auf jedem Gerät, mit demselben Namen und
+              Passwort. Weitere Personen im Haushalt kannst du später hinzufügen.
+            </p>
+            <div class="field-row">
+              <label>
+                Anmeldename
+                <input name="username" required minlength="3" maxlength="32" placeholder="z. B. anna"
+                       autocomplete="username" autocapitalize="none" autocorrect="off"
+                       spellcheck="false" />
+              </label>
+              <label>
+                Angezeigter Name (optional)
+                <input name="displayName" maxlength="80" placeholder="z. B. Anna" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label>
+                Passwort
+                <input name="password" type="password" required minlength="10"
+                       autocomplete="new-password" />
+              </label>
+              <label>
+                Passwort wiederholen
+                <input name="passwordRepeat" type="password" required minlength="10"
+                       autocomplete="new-password" />
+              </label>
+            </div>
+            <p class="field-help">
+              Mindestens zehn Zeichen. Drei zufällige Wörter hintereinander sind leicht zu
+              merken und trotzdem sicher.
+            </p>
+
             <button type="submit" class="primary lg">Haushalt anlegen</button>
           </form>
-          <div id="token-box" class="token-box hidden">
-            <strong>Zugriffstoken – wird nur einmal angezeigt</strong>
-            <code id="token-value"></code>
-            <p class="muted small">
-              Bereits in diesem Browser gespeichert. Für externe Zugriffe als
-              <code>Authorization: Bearer &lt;token&gt;</code> mitsenden.
-            </p>
-          </div>
         </section>
 
         <!-- Schritt 2: Integrationen -->
@@ -176,6 +228,7 @@
         <section id="panel-overview" class="tab-panel"></section>
         <section id="panel-rooms" class="tab-panel hidden"></section>
         <section id="panel-devices" class="tab-panel hidden"></section>
+        <section id="panel-scenes" class="tab-panel hidden"></section>
         <section id="panel-energy" class="tab-panel hidden"></section>
         <section id="panel-history" class="tab-panel hidden"></section>
         <section id="panel-automations" class="tab-panel hidden"></section>

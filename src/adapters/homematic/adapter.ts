@@ -10,10 +10,11 @@ import type {
 import { mapWithConcurrency } from '../../util/http.js';
 import { browse, MDNS_SERVICES } from '../../util/mdns.js';
 import { isIPv4, scannableHosts } from '../../util/net.js';
-import { HomematicClient, type HomematicChannel } from './client.js';
+import { disambiguate, HomematicClient, type HomematicChannel } from './client.js';
 import {
   capabilitiesFor,
   classifyChannel,
+  pickPrimaryChannels,
   stateFromValues,
   targetTemperatureKey,
   tiltKey,
@@ -336,7 +337,7 @@ export class HomematicAdapter implements IntegrationAdapter {
 
     const client = this.clientFor(ctx);
     const channels = await client.listChannels();
-    const entries = new Map<string, ChannelEntry>();
+    const found: ChannelEntry[] = [];
 
     await mapWithConcurrency(channels, 4, async (channel) => {
       const kind = classifyChannel(channel);
@@ -345,7 +346,7 @@ export class HomematicAdapter implements IntegrationAdapter {
         const values = await client.getParamset(channel.interfaceName, channel.address);
         // Ein Kanal ohne verwertbare Fähigkeit wäre eine leere Karte in der UI.
         if (capabilitiesFor(kind, values).length === 0) return;
-        entries.set(channel.address, { channel, kind, values });
+        found.push({ channel, kind, values });
       } catch (err) {
         log.debug('Kanal übersprungen', {
           address: channel.address,
@@ -354,8 +355,28 @@ export class HomematicAdapter implements IntegrationAdapter {
       }
     });
 
+    /*
+     * Aktoren melden bei HmIP mehrere gleichwertige Kanäle – ein Rollladen
+     * hat fünf „virtual receiver“, die alle denselben Motor fahren. Ohne
+     * diesen Schritt stünde er fünfmal in der Geräteliste.
+     */
+    const primary = pickPrimaryChannels(found);
+
+    // Erst jetzt Namen eindeutig machen: Die fünf Empfängerkanäle eines
+    // HmIP-Rollladens heißen alle gleich, übrig bleibt aber nur einer.
+    const named = disambiguate(primary.map((entry) => entry.channel));
+    const entries = new Map<string, ChannelEntry>();
+    primary.forEach((entry, index) => {
+      const channel = named[index] ?? entry.channel;
+      entries.set(channel.address, { ...entry, channel });
+    });
+
     this.channelCache.set(key, { entries, expiresAt: Date.now() + CHANNEL_TTL_MS });
-    log.info('Homematic-Kanäle eingelesen', { host: ctx.config.host, kanäle: entries.size });
+    log.info('Homematic-Kanäle eingelesen', {
+      host: ctx.config.host,
+      gefunden: found.length,
+      übernommen: entries.size,
+    });
     return entries;
   }
 }

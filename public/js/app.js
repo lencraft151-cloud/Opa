@@ -1,9 +1,10 @@
 /** Einstiegspunkt: Navigation, Live-Updates, Service Worker. */
 
-import { api, auth, showError, toast } from './api.js';
+import { api, setUnauthorizedHandler, showError, toast } from './api.js';
 import { applyAppearance, applyStoredAppearance } from './appearance.js';
 import { loadDashboardData, renderCurrent, renderPanel, store } from './dashboard.js';
 import { icons } from './icons.js';
+import { hideLogin, showLogin } from './login.js';
 import { startSelfUpdate } from './selfupdate.js';
 import { initSetup } from './setup.js';
 
@@ -13,7 +14,8 @@ const TABS = [
   { id: 'overview', label: 'Übersicht', icon: icons.home, primary: true },
   { id: 'rooms', label: 'Räume', icon: icons.rooms, primary: true },
   { id: 'devices', label: 'Geräte', icon: icons.devices, primary: true },
-  { id: 'energy', label: 'Energie', icon: icons.energy, primary: true },
+  { id: 'scenes', label: 'Szenen', icon: icons.scene, primary: true },
+  { id: 'energy', label: 'Energie', icon: icons.energy },
   { id: 'history', label: 'Verlauf', icon: icons.chart },
   { id: 'automations', label: 'Automationen', icon: icons.automation },
   { id: 'settings', label: 'Einstellungen', icon: icons.settings },
@@ -21,6 +23,8 @@ const TABS = [
 
 let activeTab = 'overview';
 let info = null;
+/** Verhindert, dass mehrere abgelaufene Anfragen die Maske mehrfach öffnen. */
+let signedOut = false;
 
 // ---------------------------------------------------------------------------
 // Start
@@ -45,14 +49,91 @@ async function boot() {
   // Ab hier bemerkt die Seite selbst, wenn der Hub eine neue Fassung hat.
   startSelfUpdate(info.build);
 
+  // Eine abgelaufene Anmeldung führt von überall zurück zur Anmeldemaske.
+  setUnauthorizedHandler(() => {
+    if (signedOut) return;
+    signedOut = true;
+    source?.close();
+    showLogin(onSignedIn, { reason: 'Die Anmeldung ist abgelaufen. Bitte melde dich erneut an.' });
+  });
+
   const setupState = await api('/setup/state');
   if (!setupState.hasHousehold || !setupState.completed) {
+    hideLogin();
     $('#view-setup').classList.remove('hidden');
     $('#view-app').classList.add('hidden');
-    initSetup(setupState, startDashboard);
+    initSetup(setupState, onSignedIn);
     return;
   }
+
+  // Eingerichtet – bleibt die Frage, wer davorsitzt.
+  const me = await api('/auth/me', { silent401: true }).catch(() => null);
+
+  if (me?.userCount === 0 && (me?.viaToken || me?.authDisabled)) {
+    // Hub aus einer früheren Fassung: Haushalt ja, Konto nein.
+    showFirstAccountSetup();
+    return;
+  }
+  if (!me?.user && !me?.authDisabled) {
+    showLogin(onSignedIn);
+    return;
+  }
+
   await startDashboard();
+}
+
+/** Nach erfolgreicher Anmeldung: Oberfläche aufbauen. */
+async function onSignedIn() {
+  signedOut = false;
+  hideLogin();
+  await startDashboard();
+}
+
+/**
+ * Nachrüstung für bestehende Hubs: Es gibt einen Haushalt, aber noch kein
+ * Konto. Wer mit dem alten Zugriffstoken hereinkommt, legt hier eines an.
+ */
+function showFirstAccountSetup() {
+  hideLogin();
+  $('#view-setup').classList.add('hidden');
+  $('#view-app').classList.add('hidden');
+  $('#view-login').classList.remove('hidden');
+  $('#login-subtitle').textContent =
+    'Dieser Hub kannte bisher nur ein Zugriffstoken. Lege jetzt deinen Zugang an.';
+
+  const form = $('#form-login');
+  form.querySelector('[name="password"]').setAttribute('autocomplete', 'new-password');
+  form.querySelector('button[type="submit"]').textContent = 'Zugang anlegen';
+
+  form.addEventListener(
+    'submit',
+    async (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const data = new FormData(form);
+      const created = await guardFirstAccount({
+        username: String(data.get('username')).trim(),
+        password: String(data.get('password')),
+      });
+      if (!created) return;
+      toast(`Zugang für „${created.username}" angelegt.`, {
+        kind: 'success',
+        hint: 'Ab jetzt meldest du dich damit an – auf jedem Gerät.',
+      });
+      await onSignedIn();
+    },
+    { capture: true },
+  );
+}
+
+async function guardFirstAccount(input) {
+  try {
+    const { createFirstAccount } = await import('./login.js');
+    return await createFirstAccount(input);
+  } catch (err) {
+    showError(err);
+    return null;
+  }
 }
 
 async function startDashboard() {
@@ -65,10 +146,8 @@ async function startDashboard() {
     // Die Darstellung gehört zum Haushalt und gilt damit auf jedem Gerät.
     applyAppearance(store.household?.appearance);
   } catch (err) {
-    showError(err);
-    // Ein abgelaufenes Token ist der häufigste Grund – zurück zur Einrichtung
-    // hilft hier nicht, aber die Meldung erklärt, was zu tun ist.
-    if (err?.status === 401) auth.token = '';
+    // Bei 401 zeigt der Handler oben bereits die Anmeldemaske.
+    if (err?.status !== 401) showError(err);
     return;
   }
   renderPanel(activeTab);
@@ -170,6 +249,14 @@ for (const [event, value] of [
   });
 }
 
+/**
+ * Neuzeichnen nach einem Geräteereignis.
+ *
+ * `reason: 'devices'` sagt der Dashboard-Schicht, dass nur ein Messwert
+ * hereinkam. Ansichten ohne Gerätebezug – Automationen, Einstellungen –
+ * bleiben dann stehen, statt einem halb ausgefüllten Formular in die Quere
+ * zu kommen.
+ */
 function scheduleRender() {
   if (renderTimer) return;
   renderTimer = setTimeout(() => {
@@ -178,7 +265,7 @@ function scheduleRender() {
       scheduleRender(); // später erneut versuchen
       return;
     }
-    renderCurrent();
+    renderCurrent({ reason: 'devices' });
   }, 350);
 }
 
@@ -189,7 +276,9 @@ function scheduleRender() {
  */
 function connectEventStream() {
   source?.close();
-  source = new EventSource(`/api/events?access_token=${encodeURIComponent(auth.token)}`);
+  // Die Anmeldung reist als Cookie mit – `EventSource` kann keine Header
+  // setzen, und ein Token in der Adresszeile stünde in jedem Server-Log.
+  source = new EventSource('/api/events');
 
   source.addEventListener('ready', () => {
     reconnectDelay = 1000;
@@ -250,7 +339,7 @@ function startPeriodicRefresh() {
       ]);
       store.summary = summary;
       store.climate = climate;
-      if (activeTab === 'overview') renderCurrent();
+      if (activeTab === 'overview') renderCurrent({ reason: 'devices' });
     } catch {
       /* beim nächsten Durchlauf erneut */
     }

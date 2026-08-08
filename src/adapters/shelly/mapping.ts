@@ -241,7 +241,16 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
   const meters = arr(status['meters']) ?? arr(status['emeters']) ?? [];
   const isEmeter = arr(status['meters']) === undefined && arr(status['emeters']) !== undefined;
 
-  const relays = arr(status['relays']) ?? [];
+  const rollers = arr(status['rollers']) ?? [];
+
+  /*
+   * Im Rollladenmodus meldet ein Shelly 2/2.5 zusätzlich seine beiden Relais –
+   * das sind die Motorrichtungen „auf" und „zu". Sie als Schalter anzubieten
+   * wäre nicht nur verwirrend, sondern gefährlich: Beide gleichzeitig
+   * eingeschaltet legt Spannung auf beide Wicklungen. In diesem Modus zählt
+   * deshalb allein der Rollladen.
+   */
+  const relays = rollers.length > 0 ? [] : (arr(status['relays']) ?? []);
   relays.forEach((rawRelay, index) => {
     const relay = obj(rawRelay);
     if (!relay) return;
@@ -302,7 +311,6 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
     });
   });
 
-  const rollers = arr(status['rollers']) ?? [];
   rollers.forEach((rawRoller, index) => {
     const roller = obj(rawRoller);
     if (!roller) return;

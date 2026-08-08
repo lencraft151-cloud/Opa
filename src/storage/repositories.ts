@@ -7,6 +7,9 @@ import type {
   Integration,
   PublicIntegration,
   Room,
+  Scene,
+  Session,
+  User,
 } from '../core/types.js';
 import { nowIso } from '../util/id.js';
 import type { Database, DatabaseShape } from './database.js';
@@ -220,6 +223,93 @@ export class TokenRepository extends BaseRepository<AccessToken> {
   }
 }
 
+export class UserRepository extends BaseRepository<User> {
+  constructor(db: Database) {
+    super(db, 'users');
+  }
+
+  listByHousehold(householdId: string): User[] {
+    return this.all().filter((user) => user.householdId === householdId);
+  }
+
+  findByUsername(householdId: string, username: string): User | undefined {
+    return this.all().find(
+      (user) => user.householdId === householdId && user.username === username,
+    );
+  }
+}
+
+export class SessionRepository extends BaseRepository<Session> {
+  constructor(db: Database) {
+    super(db, 'sessions');
+  }
+
+  findByHash(hash: string): Session | undefined {
+    return this.all().find((session) => session.tokenHash === hash);
+  }
+
+  listByUser(userId: string): Session[] {
+    return this.all().filter((session) => session.userId === userId);
+  }
+
+  /** Verlängert eine Sitzung; läuft gepuffert, weil es oft passiert. */
+  async touch(id: string, expiresAt: string): Promise<void> {
+    await this.db.updateDeferred((data) => {
+      const session = data.sessions.find((item) => item.id === id);
+      if (!session) return;
+      session.lastUsedAt = nowIso();
+      session.expiresAt = expiresAt;
+    });
+  }
+
+  /** Beendet alle Sitzungen eines Benutzers, optional bis auf eine. */
+  async removeByUser(userId: string, keepId?: string): Promise<number> {
+    return this.db.update((data) => {
+      const before = data.sessions.length;
+      data.sessions = data.sessions.filter(
+        (session) => session.userId !== userId || session.id === keepId,
+      );
+      return before - data.sessions.length;
+    });
+  }
+
+  async removeExpired(now: string): Promise<number> {
+    return this.db.update((data) => {
+      const before = data.sessions.length;
+      data.sessions = data.sessions.filter((session) => session.expiresAt > now);
+      return before - data.sessions.length;
+    });
+  }
+}
+
+export class SceneRepository extends BaseRepository<Scene> {
+  constructor(db: Database) {
+    super(db, 'scenes');
+  }
+
+  listByHousehold(householdId: string): Scene[] {
+    return this.all()
+      .filter((scene) => scene.householdId === householdId)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'de'));
+  }
+
+  findByName(householdId: string, name: string): Scene | undefined {
+    const needle = name.trim().toLowerCase();
+    return this.all().find(
+      (scene) => scene.householdId === householdId && scene.name.toLowerCase() === needle,
+    );
+  }
+
+  /** Entfernt ein Gerät aus allen Szenen – etwa nach dem Löschen. */
+  async removeDevice(deviceId: string): Promise<void> {
+    await this.db.update((data) => {
+      for (const scene of data.scenes) {
+        scene.entries = scene.entries.filter((entry) => entry.deviceId !== deviceId);
+      }
+    });
+  }
+}
+
 export interface Repositories {
   households: HouseholdRepository;
   rooms: RoomRepository;
@@ -227,6 +317,9 @@ export interface Repositories {
   devices: DeviceRepository;
   rules: RuleRepository;
   tokens: TokenRepository;
+  users: UserRepository;
+  sessions: SessionRepository;
+  scenes: SceneRepository;
 }
 
 export function createRepositories(db: Database): Repositories {
@@ -237,5 +330,8 @@ export function createRepositories(db: Database): Repositories {
     devices: new DeviceRepository(db),
     rules: new RuleRepository(db),
     tokens: new TokenRepository(db),
+    users: new UserRepository(db),
+    sessions: new SessionRepository(db),
+    scenes: new SceneRepository(db),
   };
 }

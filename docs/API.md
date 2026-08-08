@@ -2,20 +2,71 @@
 
 Basis-URL: `http://<host>:8080/api`
 
-## Authentifizierung
+## Anmeldung
 
-Alle Endpunkte außer `/health`, `/system/info` und `/setup/state` verlangen ein
+Zwei Wege führen herein.
+
+**Menschen** melden sich mit Name und Passwort an; das Ergebnis ist eine
+Sitzung, die als `HttpOnly`-Cookie (`sh_session`) zurückkommt und bei jedem
+weiteren Aufruf automatisch mitreist.
+
+```bash
+curl -c cookies.txt -X POST localhost:8080/api/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"username":"anna","password":"drei zufaellige woerter"}'
+
+curl -b cookies.txt localhost:8080/api/devices
+```
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `POST` | `/auth/login` | `{ username, password }` → setzt das Sitzungs-Cookie |
+| `POST` | `/auth/logout` | Beendet die eigene Sitzung |
+| `GET` | `/auth/me` | Wer angemeldet ist (`{ user: null }`, wenn niemand) – ohne Anmeldung erreichbar |
+| `POST` | `/auth/password` | `{ currentPassword, newPassword }`; meldet alle anderen Geräte ab |
+| `GET` | `/auth/sessions` | Angemeldete Geräte, `current` markiert das eigene |
+| `DELETE` | `/auth/sessions/:id` | Ein Gerät abmelden |
+| `POST` | `/auth/sessions/end-others` | Alle außer dem eigenen abmelden |
+| `GET` | `/auth/users` | Personen im Haushalt |
+| `POST` | `/auth/users` | Person anlegen (nur Administratoren) |
+| `PATCH` | `/auth/users/:id` | `displayName`, `role` (nur Administratoren) |
+| `POST` | `/auth/users/:id/password` | Passwort zurücksetzen (nur Administratoren) |
+| `DELETE` | `/auth/users/:id` | Person entfernen (nur Administratoren) |
+
+Regeln, die der Hub durchsetzt:
+
+- Anmeldenamen sind klein geschrieben und eindeutig; erlaubt sind Buchstaben,
+  Ziffern, Punkt, Bindestrich und Unterstrich.
+- Passwörter brauchen mindestens 10 Zeichen, dürfen nicht auf der Liste der
+  meistgenutzten stehen und nicht den Anmeldenamen enthalten.
+- Nach fünf Fehlversuchen ist das Konto 15 Minuten gesperrt. Ob Name oder
+  Passwort falsch war, sagt die Antwort nicht.
+- Der letzte Administrator lässt sich weder löschen noch herabstufen.
+- Ein **Zugriffstoken** (siehe unten) gehört einem Programm, nicht einer
+  Person. Es hat keine Rolle und reicht für `/auth/users` nicht.
+
+---
+
+## Authentifizierung für Programme
+
+Skripte und andere Programme, die sich nicht anmelden können, nehmen ein
 Zugriffstoken:
 
 ```
 Authorization: Bearer sh_…
 ```
 
-Alternativ `X-Access-Token: sh_…` oder – nur für `EventSource`, das keine Header
-setzen kann – `?access_token=sh_…`.
+Alternativ `X-Access-Token: sh_…` oder `?access_token=sh_…`.
 
-Solange noch kein Haushalt existiert, ist die API offen. Das erste Token entsteht
-beim Anlegen des Haushalts und wird **einmalig** zurückgegeben.
+Token werden unter **Einstellungen → Zugänge für Programme** erstellt
+(`POST /household/tokens`) und **einmalig** im Klartext ausgegeben; gespeichert
+wird nur ihr SHA-256-Hash. Sie gehören keinem Benutzer und reichen deshalb nicht
+für `/auth/users`. Jedes Token lässt sich einzeln widerrufen – auch das letzte,
+denn ausgesperrt ist damit niemand mehr.
+
+Offen ohne Anmeldung sind `/health`, `/system/info`, `/setup/state` und
+`/auth/login`. Solange noch kein Haushalt existiert, ist die API entsperrt –
+anders käme man nicht durch die Ersteinrichtung.
 
 ## Fehlerformat
 
@@ -86,12 +137,17 @@ source.addEventListener('device.updated', (e) => console.log(JSON.parse(e.data))
 Ohne Token. Aktueller Schritt, Fortschritt, Kennzahlen und Hinweise.
 
 ### `POST /setup/household`
+Legt Haushalt und erstes Benutzerkonto zusammen an – beides gehört zusammen:
+Ein Haushalt ohne Konto wäre für niemanden erreichbar.
+
 ```json
 { "name": "Wohnung Musterstraße", "timezone": "Europe/Berlin", "locale": "de-DE",
-  "pricePerKwh": 0.35, "currency": "EUR", "basePricePerMonth": 12.9 }
+  "pricePerKwh": 0.35, "currency": "EUR", "basePricePerMonth": 12.9,
+  "username": "anna", "password": "drei zufaellige woerter", "displayName": "Anna" }
 ```
-→ `201` mit `{ household, state, accessToken }`. **Das Token wird nur hier
-ausgegeben.** Ein zweiter Haushalt wird mit `409` abgelehnt.
+→ `201` mit `{ household, state, user }` und einem gesetzten Sitzungs-Cookie:
+Man ist direkt angemeldet. Der erste Benutzer ist immer Administrator. Ein
+zweiter Haushalt wird mit `409` abgelehnt.
 
 ### `POST /setup/step`
 `{ "step": "rooms" }` – springt im Assistenten. Erlaubt: `household`,
@@ -363,6 +419,77 @@ bietet dann keinen Knopf an, der ins Leere liefe (Homematic aktualisiert sich
 Die automatische Installation wird über `PATCH /household` gesteuert
 (`autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`). Sie greift nur innerhalb des
 Zeitfensters; das Gerät startet dabei neu.
+
+---
+
+## Szenen
+
+Eine Szene sichert den *aktuellen* Zustand der genannten Geräte. Der Hub liest
+ihn aus und leitet die Kommandos ab, die ihn wiederherstellen.
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/scenes` | Alle Szenen |
+| `GET` | `/scenes/:id` | Eine Szene inklusive ihrer Kommandos |
+| `POST` | `/scenes` | `{ name, emoji?, roomId?, deviceIds[] }` – sichert den jetzigen Zustand |
+| `PATCH` | `/scenes/:id` | `name`, `emoji`, `roomId` |
+| `POST` | `/scenes/:id/restamp` | Zustände neu aufnehmen („so wie es jetzt ist“) |
+| `POST` | `/scenes/:id/apply` | Szene herstellen |
+| `DELETE` | `/scenes/:id` | Szene löschen |
+| `POST` | `/scenes/preview` | `{ deviceIds[] }` → was gesichert würde, ohne zu speichern |
+
+```json
+{
+  "id": "scn_…", "name": "Fernsehabend", "emoji": "📺", "roomId": null,
+  "entries": [
+    { "deviceId": "dev_lampe",
+      "commands": [
+        { "type": "setColorTemperature", "kelvin": 2700 },
+        { "type": "setBrightness", "brightness": 25 },
+        { "type": "setPower", "on": true }
+      ] },
+    { "deviceId": "dev_rollladen", "commands": [{ "type": "setPosition", "position": 35 }] }
+  ],
+  "lastAppliedAt": "…"
+}
+```
+
+Die Reihenfolge ist Absicht: erst Farbe und Helligkeit, dann schalten – sonst
+sähe man beim Herstellen kurz die alte Farbe. Von einer ausgeschalteten Lampe
+wird nur `setPower: false` gesichert; ihre Helligkeit mitzuschreiben würde sie
+beim Abrufen aufblitzen lassen.
+
+`POST /scenes/:id/apply` antwortet mit Einzelergebnissen:
+
+```json
+{ "sceneId": "scn_…", "name": "Fernsehabend", "applied": 2, "failed": 1,
+  "results": [ { "deviceId": "dev_…", "ok": false, "error": "Gerät antwortet nicht" } ] }
+```
+
+Ein stummes Gerät hält die anderen nicht auf.
+
+---
+
+## Urlaubsmodus
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/presence` | Einstellungen und aktueller Zustand |
+| `PATCH` | `/presence` | `enabled`, `from`, `to`, `roomIds[]`, `averageIntervalMinutes` |
+
+```json
+{
+  "settings": { "enabled": true, "from": "17:30", "to": "22:45",
+                "roomIds": [], "averageIntervalMinutes": 25 },
+  "active": true, "devicesOn": 2, "candidates": 6
+}
+```
+
+`active` heißt: eingeschaltet **und** gerade im Zeitfenster. Die Abstände
+zwischen zwei Schaltvorgängen streuen zufällig zwischen der Hälfte und dem
+Anderthalbfachen des Mittelwerts – ein festes Muster wäre von außen schneller
+zu erkennen als gar kein Licht. Erlaubt sind 10 bis 120 Minuten. Beim
+Abschalten geht alles wieder aus, was die Simulation eingeschaltet hat.
 
 ---
 

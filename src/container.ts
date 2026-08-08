@@ -10,10 +10,13 @@ import { EnergyService } from './services/energyService.js';
 import { HouseholdService } from './services/householdService.js';
 import { IntegrationService } from './services/integrationService.js';
 import { PollingService } from './services/pollingService.js';
+import { PresenceService } from './services/presenceService.js';
 import { RoomService } from './services/roomService.js';
+import { SceneService } from './services/sceneService.js';
 import { SetupService } from './services/setupService.js';
 import { TelemetryService } from './services/telemetryService.js';
 import { UpdateService } from './services/updateService.js';
+import { UserService } from './services/userService.js';
 
 const log = createLogger('container');
 
@@ -32,6 +35,9 @@ export interface Container {
   setup: SetupService;
   energy: EnergyService;
   updates: UpdateService;
+  users: UserService;
+  scenes: SceneService;
+  presence: PresenceService;
   /** Startet Hintergrunddienste, sobald ein Haushalt existiert. */
   startBackgroundServices: () => Promise<void>;
   shutdown: () => Promise<void>;
@@ -61,9 +67,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const devices = new DeviceService(repos, registry, integrations, telemetry);
   const automations = new AutomationService(repos, devices, households);
   const polling = new PollingService(repos, registry, integrations, devices, telemetry, config);
-  const setup = new SetupService(repos, households, rooms, devices);
+  const users = new UserService(repos);
+  const setup = new SetupService(repos, households, rooms, devices, users);
   const energy = new EnergyService(repos, telemetry, households);
   const updates = new UpdateService(repos, registry, integrations, households);
+  const scenes = new SceneService(repos, devices);
+  const presence = new PresenceService(repos, devices, households);
 
   const startBackgroundServices = async (): Promise<void> => {
     const household = households.current();
@@ -74,11 +83,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     await polling.start(household.id);
     automations.start(household.id);
     updates.start(household.id);
+    presence.start(household.id);
   };
 
   const shutdown = async (): Promise<void> => {
     automations.stop();
     updates.stop();
+    presence.stop();
     await polling.stop();
     await telemetry.flush();
     await db.flush();
@@ -100,6 +111,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     setup,
     energy,
     updates,
+    users,
+    scenes,
+    presence,
     startBackgroundServices,
     shutdown,
   };
