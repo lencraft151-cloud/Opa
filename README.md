@@ -1,8 +1,8 @@
 # Smart-Home-Hub
 
-Ein Hub, der **Philips Hue**, **Shelly** und **Homematic** unter einer
-Oberfläche und einer API zusammenführt – statt drei Apps für Licht,
-Steckdosen, Rollläden, Heizung und Temperaturmessung. Geschrieben in
+Ein Hub, der **Philips Hue**, **Shelly**, **Homematic** und die
+**FRITZ!Box** unter einer Oberfläche und einer API zusammenführt – statt vier
+Apps für Licht, Steckdosen, Rollläden, Heizung und Temperaturmessung. Geschrieben in
 generischem Node.js mit TypeScript, ohne native Abhängigkeiten und ohne
 Cloud-Zwang.
 
@@ -29,6 +29,7 @@ Geräte.
 | **Philips Hue** | Bridge-Discovery (mDNS + Cloud + Subnetz-Scan), Pairing über Link-Button, CLIP-API v2 – und automatischer Rückfall auf die API v1 für die runde Bridge (BSB001) |
 | **Shelly** | Gen1 (REST, Basic-Auth) und Gen2/3/4 (JSON-RPC, Digest-Auth SHA-256), Relais, Dimmer, Rollläden, Heizkörperventil (TRV), Verbrauchsmessung, H&T-Sensoren, Add-On-Fühler |
 | **Homematic** | CCU2, CCU3 und RaspberryMatic über die JSON-API: Rollläden mit Lamellen, Heizkörperthermostate, Wandthermostate, Klima- und Bewegungsmelder, BidCos wie HmIP |
+| **FRITZ!Box** *(experimentell)* | DECT-Geräte an der Box: Schaltsteckdosen mit Verbrauchsmessung, Heizkörperregler, Lampen mit Farbe und Rollläden über HAN-FUN |
 | **Rollläden** | Auf/Zu/Stop, Position, Lamellenverstellung bei Jalousien, Fahrzustand mit animierter Anzeige, Sammelbefehle je Raum – von Shelly und von Homematic |
 | **Heizung** | Solltemperatur per Regler oder Plus/Minus, gemessene Temperatur, Ventilstellung – für Shelly TRV, Homematic-Thermostate und Shelly Wall Display |
 | **Farbe** | Farbrad mit ziehbarem Griff für Maus, Finger und Tastatur, dazu Farb- und Weißton-Vorlagen |
@@ -37,7 +38,8 @@ Geräte.
 | **Stromverbrauch** | Verbrauch und Kosten je Gerät, Raum und Zeitraum, Hochrechnung auf Monat/Jahr, Erkennung von Dauerverbrauchern |
 | **Firmware-Updates** | Prüfung für Hue Bridge und Shelly, Übersicht über **alle** Geräte samt Firmwarestand, Installation auf Knopfdruck oder automatisch im gewählten Nachtfenster |
 | **Automationen** | Neun fertige Vorlagen mit vorausgewählten Geräten, dazu frei baubare Regeln aus Sensorschwellen, Gerätezuständen, Uhrzeiten und **Wiederholungen** mit Zeitfenster und Wochentagen |
-| **Darstellung** | Schriftgröße, Akzentfarben, hell/dunkel und „Bewegung reduzieren“ – am Haushalt gespeichert und damit auf jedem Gerät gleich |
+| **Darstellung** | Schriftgröße, Akzentfarben, hell/dunkel, „Bewegung reduzieren“ und die Lichtvorschau – am Haushalt gespeichert und damit auf jedem Gerät gleich |
+| **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Oberfläche** | Installierbare Web-App (PWA) mit Live-Updates (SSE), Dashboard, Raum-, Geräte-, Energie- und Verlaufsansicht; aktualisiert sich nach einem Update des Hubs selbst |
 
 ---
@@ -71,6 +73,8 @@ automatisch.
 - Shelly Gen1 oder Gen2/3/4 mit erreichbarer lokaler HTTP-API
 - Homematic CCU2, CCU3 oder RaspberryMatic mit aktivierter JSON-API und einem
   Benutzer mit Administratorrechten
+- FRITZ!Box mit FRITZ!OS 6.0 oder neuer und einem Benutzer mit der
+  Berechtigung „Smart-Home-Geräte steuern“ (unter *System → FRITZ!Box-Benutzer*)
 
 ---
 
@@ -113,7 +117,8 @@ src/
 ├── adapters/      Integrationen
 │   ├── hue/       Client (CLIP v2 + API v1), Discovery, Mapping, Adapter
 │   ├── shelly/    Client (Gen1 REST + Gen2 RPC), Discovery, Mapping, Adapter
-│   └── homematic/ Client (JSON-RPC der CCU), Kanal-Abbildung, Adapter
+│   ├── homematic/ Client (JSON-RPC der CCU), Kanal-Abbildung, Adapter
+│   └── fritzbox/  Client (AHA-Schnittstelle), Bitmasken-Abbildung, Adapter
 ├── services/      Haushalt, Räume, Integrationen, Geräte, Telemetrie,
 │                  Polling, Automationen, Einrichtung
 ├── server/        Express-App, Auth, Fehlerbehandlung, Routen
@@ -160,6 +165,32 @@ anderes ändert sich.
   Kanäle mit sprechenden Typnamen (`BLIND_VIRTUAL_RECEIVER`,
   `CLIMATECONTROL_RT_TRANSCEIVER`, `WEATHER`), und diese Namen sind über CCU2,
   CCU3 und RaspberryMatic hinweg stabil – auch bei Geräten von 2012.
+
+### FRITZ!Box (experimentell)
+
+An der Box hängen DECT-Geräte: Schaltsteckdosen mit Verbrauchsmessung,
+Heizkörperregler, Lampen und – über HAN-FUN – Rollläden. Angesprochen wird
+die AHA-Schnittstelle (`/webservices/homeautoswitch.lua`).
+
+Drei Eigenheiten von AVM sind der Grund für den eigenen Adapter:
+
+- **Anmeldung per Aufgabe.** Die Box stellt eine „Challenge“, der Client
+  rechnet daraus mit dem Passwort eine Antwort. Es gibt zwei Verfahren –
+  PBKDF2 ab FRITZ!OS 7.24 und davor MD5 über die Zeichenkette in **UTF-16LE**.
+  Genau dieses UTF-16LE ist die Stelle, an der Nachbauten reihenweise
+  scheitern; der Hub beherrscht beide Verfahren.
+- **Fähigkeiten als Bitmaske.** Jedes Gerät meldet eine Zahl
+  (`functionbitmask`), in der jedes Bit für eine Fähigkeit steht. Das ist über
+  alle Modelle hinweg gleich – eine FRITZ!DECT 200 von 2013 und eine DECT 500
+  von heute melden sich nach demselben Schema.
+- **Umgekehrte Zählrichtung bei Rollläden.** AVM zählt die *Höhe des
+  Behangs*: 0 ist offen, 100 ist geschlossen. Der Hub zählt wie überall
+  sonst (100 = offen) und dreht beim Lesen wie beim Schreiben um. Ohne das
+  führe der Regler in der Oberfläche in die falsche Richtung.
+
+Die Integration steht als **experimentell** in der Oberfläche: Sie
+funktioniert, aber der Zoo an DECT- und HAN-FUN-Geräten ist groß und weniger
+erprobt als Hue und Shelly.
 
 ### Alte Geräte
 
@@ -322,6 +353,23 @@ deshalb einzelne Lampen an und aus. Die Abstände streuen zufällig um den
 eingestellten Mittelwert – ein festes Muster („alle 30 Minuten“) wäre von
 außen schneller zu erkennen als gar kein Licht. Beim Abschalten bleibt kein
 Licht an, das die Simulation eingeschaltet hat.
+
+### Lichtvorschau
+
+Kommandos gehen erst beim Loslassen an das Gerät – sonst löste jede
+Fingerbewegung eine Anfrage aus. Zwischen „Regler bewegen“ und „Lampe
+reagiert“ lägen damit ein bis zwei Sekunden, in denen man nur eine Zahl
+sieht.
+
+Die Gerätekarte schließt diese Lücke: Sie trägt einen farbigen Schein, dessen
+Farbe der eingestellten Farbe folgt und dessen Stärke der Helligkeit – und
+zwar sofort beim Ziehen, nicht erst nach der Antwort des Geräts. Eine
+ausgeschaltete Lampe leuchtet dabei nicht, eine auf 5 % gedimmte bleibt
+trotzdem sichtbar (der Schein wächst nicht linear mit der Helligkeit, sonst
+wäre er bei wenig Licht praktisch unsichtbar).
+
+Abschaltbar unter *Einstellungen → Darstellung*: Auf einem alten Tablet
+kostet ein weichgezeichneter Schein spürbar Rechenzeit.
 
 ### Darstellung
 
@@ -503,7 +551,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 324 Tests, node:test
+npm test        # 353 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
@@ -534,6 +582,11 @@ Abgedeckt sind unter anderem:
 - Darstellung: Grenzen für Schriftgröße, ungültige Farben, und dass ein
   Haushalt aus einer früheren Fassung die neuen Felder nachgerüstet bekommt
 - Kennung der Oberfläche: gleich bei gleichem Stand, anders nach einer Änderung
+- FRITZ!Box: eigener XML-Leser, beide Anmeldeverfahren (inklusive UTF-16LE),
+  die Bitmaske, die Sonderwerte des Heizkörperreglers und die umgekehrte
+  Zählrichtung des Rollladens – dazu der Adapter gegen eine simulierte Box
+- Lichtvorschau: dass eine ausgeschaltete Lampe nicht leuchtet, eine schwach
+  gedimmte trotzdem sichtbar bleibt und warmes Licht warm aussieht
 - Passwörter: scrypt-Ableitung, zeitunabhängiger Vergleich, zusammengesetzte
   Umlaute, manipulierte Hashes, Sperre nach fünf Fehlversuchen und die Frage,
   ob die Fehlermeldung verrät, welcher Teil falsch war

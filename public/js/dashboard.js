@@ -145,7 +145,7 @@ export function renderPanel(name) {
   for (const key of Object.keys(RENDERERS)) {
     $(`#panel-${key}`)?.classList.toggle('hidden', key !== name);
   }
-  void RENDERERS[name]?.();
+  renderCurrent({ reason: 'manual' });
 }
 
 /**
@@ -159,7 +159,23 @@ export function renderCurrent(options = {}) {
   if (options.reason === 'devices' && !DEVICE_DEPENDENT.has(current)) return;
   const panel = $(`#panel-${current}`);
   if (!panel) return;
-  withPreservedInput(panel, () => void RENDERERS[current]?.());
+  withPreservedInput(panel, () => RENDERERS[current]?.());
+}
+
+/**
+ * Nummeriert Karten durch, damit sie gestaffelt auffahren statt alle
+ * gleichzeitig. Der Wert landet als `--i` im Stil; die Verzögerung rechnet
+ * das Stylesheet daraus aus.
+ */
+function stagger(root) {
+  const groups = ['.device-card', '.tile', '.list > .item', '.template-card'];
+  for (const selector of groups) {
+    root.querySelectorAll(selector).forEach((element, index) => {
+      // Nach dem zwölften Element bringt die Staffelung nichts mehr – sie
+      // würde den Aufbau nur künstlich in die Länge ziehen.
+      element.style.setProperty('--i', String(Math.min(index, 12)));
+    });
+  }
 }
 
 /**
@@ -189,7 +205,10 @@ function withPreservedInput(panel, render) {
       : null;
   const scrollY = window.scrollY;
 
-  render();
+  const result = render();
+  // Manche Ansichten laden nach; die Staffelung wartet darauf.
+  if (result && typeof result.then === 'function') void result.then(() => stagger(panel));
+  else stagger(panel);
 
   for (const field of fields()) {
     const key = fieldKey(field);
@@ -523,7 +542,7 @@ function renderRooms() {
   }
 
   panel.innerHTML = groups.join('');
-  bindDeviceControls(panel, sendCommand);
+  bindDeviceControls(panel, sendCommand, deviceById);
   restoreOpenSections(panel);
 
   panel.querySelectorAll('[data-room-power]').forEach((button) => {
@@ -603,7 +622,7 @@ function renderDevices() {
         : emptyState('🔍', 'Keine passenden Geräte.', 'Setze den Filter zurück oder ändere die Suche.')
     }</div>`;
 
-  bindDeviceControls(panel, sendCommand);
+  bindDeviceControls(panel, sendCommand, deviceById);
   restoreOpenSections(panel);
 
   $('#device-search').addEventListener('input', (event) => {
@@ -816,6 +835,11 @@ function wireScenes(panel) {
   panel.querySelectorAll('[data-scene-apply]').forEach((button) => {
     button.addEventListener('click', async () => {
       button.disabled = true;
+      // Kurz aufleuchten – die Geräte brauchen einen Moment, die Rückmeldung
+      // soll trotzdem sofort da sein.
+      const card = button.closest('.scene-card');
+      card?.classList.add('applying');
+      setTimeout(() => card?.classList.remove('applying'), 800);
       const result = await guard(() =>
         api(`/scenes/${button.dataset.sceneApply}/apply`, { method: 'POST' }),
       );
@@ -2100,10 +2124,20 @@ function appearanceCard() {
       </div>
     </div>
 
-    <label class="check">
-      <input type="checkbox" id="reduce-motion" ${current.reduceMotion ? 'checked' : ''} />
-      <span>Bewegung reduzieren – Animationen laufen dann nicht mehr</span>
-    </label>
+    <div class="setting-block">
+      <div class="setting-head"><strong>Bewegung und Vorschau</strong></div>
+      <label class="check">
+        <input type="checkbox" id="live-preview" ${current.livePreview !== false ? 'checked' : ''} />
+        <span>
+          Lichtvorschau – beim Verstellen zeigt die Gerätekarte sofort, wie das Licht
+          aussehen wird, statt auf die Antwort der Lampe zu warten
+        </span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="reduce-motion" ${current.reduceMotion ? 'checked' : ''} />
+        <span>Bewegung reduzieren – Animationen laufen dann nicht mehr</span>
+      </label>
+    </div>
 
     <div class="row tight">
       <button class="ghost small" id="btn-appearance-reset">Auf Standard zurücksetzen</button>
@@ -2451,7 +2485,11 @@ function wireAppearance(panel) {
 
   panel
     .querySelector('#reduce-motion')
-    .addEventListener('change', (event) => void change({ reduceMotion: event.target.checked }));
+    ?.addEventListener('change', (event) => void change({ reduceMotion: event.target.checked }));
+
+  panel
+    .querySelector('#live-preview')
+    ?.addEventListener('change', (event) => void change({ livePreview: event.target.checked }));
 
   panel.querySelector('#btn-appearance-reset').addEventListener('click', () =>
     void change({
@@ -2460,6 +2498,7 @@ function wireAppearance(panel) {
       accentColorAlt: null,
       theme: 'auto',
       reduceMotion: false,
+      livePreview: true,
     }),
   );
 }

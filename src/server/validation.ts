@@ -154,6 +154,7 @@ export const appearanceSchema = z
       .optional(),
     theme: z.enum(THEME_PREFERENCES).optional(),
     reduceMotion: z.boolean().optional(),
+    livePreview: z.boolean().optional(),
   })
   .strict();
 

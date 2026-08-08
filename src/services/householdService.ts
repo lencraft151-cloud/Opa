@@ -234,6 +234,8 @@ export function normalizeAppearance(appearance: Appearance): Appearance {
     accentColorAlt: color(appearance.accentColorAlt),
     theme: appearance.theme === 'dark' || appearance.theme === 'light' ? appearance.theme : 'auto',
     reduceMotion: appearance.reduceMotion === true,
+    // Vorgabe ist an – wer sie nicht will, schaltet sie ab.
+    livePreview: appearance.livePreview !== false,
   };
 }
 

@@ -1,5 +1,6 @@
 import { badRequest } from '../core/errors.js';
 import type { IntegrationType } from '../core/types.js';
+import { FritzboxAdapter } from './fritzbox/adapter.js';
 import { HomematicAdapter } from './homematic/adapter.js';
 import { HueAdapter } from './hue/adapter.js';
 import { ShellyAdapter } from './shelly/adapter.js';
@@ -34,5 +35,6 @@ export function createAdapterRegistry(): AdapterRegistry {
   registry.register(new HueAdapter());
   registry.register(new ShellyAdapter());
   registry.register(new HomematicAdapter());
+  registry.register(new FritzboxAdapter());
   return registry;
 }

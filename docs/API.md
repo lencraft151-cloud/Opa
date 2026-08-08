@@ -200,6 +200,7 @@ zusammengeführt – wer nur die Schriftgröße ändert, verliert seine Farben n
 | `accentColorAlt` | `#rrggbb` oder `null` | Zweite Farbe für Verläufe |
 | `theme` | `auto`, `light`, `dark` | `auto` folgt der Systemeinstellung |
 | `reduceMotion` | `true`/`false` | Animationen abschalten |
+| `livePreview` | `true`/`false` | Lichtvorschau auf den Gerätekarten (Vorgabe: an) |
 
 Werte außerhalb der Grenzen und Farben, die keine sind, werden mit `400`
 abgewiesen – eine ungültige Farbe würde der Browser stillschweigend verwerfen
@@ -209,7 +210,7 @@ und die Einstellung sähe aus, als täte sie nichts.
 
 ## Integrationen
 
-### `GET /integrations/discover?type=hue|shelly|homematic&scan=true`
+### `GET /integrations/discover?type=hue|shelly|homematic|fritzbox&scan=true`
 Sucht im Netzwerk. `scan=true` scannt zusätzlich das Subnetz (langsamer, findet
 aber schlafende Geräte). Antwort:
 

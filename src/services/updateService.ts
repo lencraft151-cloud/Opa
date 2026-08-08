@@ -129,6 +129,8 @@ export class UpdateService {
       .filter((device) => !device.hidden)
       .map((device) => {
         const integration = byIntegration.get(device.integrationId);
+        // Ein Shelly ist sein eigenes Gerät und aktualisiert sich selbst;
+        // Hue, Homematic und FRITZ!Box verteilen Firmware über die Zentrale.
         const updatedBy: 'device' | 'bridge' = device.vendor === 'shelly' ? 'device' : 'bridge';
         return {
           deviceId: device.id,

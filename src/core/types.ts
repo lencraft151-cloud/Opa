@@ -9,7 +9,7 @@
 // Integrationen
 // ---------------------------------------------------------------------------
 
-export const INTEGRATION_TYPES = ['hue', 'shelly', 'homematic'] as const;
+export const INTEGRATION_TYPES = ['hue', 'shelly', 'homematic', 'fritzbox'] as const;
 export type IntegrationType = (typeof INTEGRATION_TYPES)[number];
 
 export const INTEGRATION_STATUS = ['pending', 'linked', 'error', 'disabled'] as const;
@@ -54,10 +54,22 @@ export interface HomematicIntegrationConfig {
   username: string;
 }
 
+/**
+ * FRITZ!Box als Smart-Home-Zentrale. `username` darf leer sein – Boxen ohne
+ * angelegte Benutzer kennen nur ein Kennwort.
+ */
+export interface FritzboxIntegrationConfig {
+  host: string;
+  username: string;
+  model?: string;
+  firmware?: string;
+}
+
 export type IntegrationConfig =
   | HueIntegrationConfig
   | ShellyIntegrationConfig
-  | HomematicIntegrationConfig;
+  | HomematicIntegrationConfig
+  | FritzboxIntegrationConfig;
 
 /** Verschlüsselt abgelegte Zugangsdaten einer Integration. */
 export interface HueIntegrationSecrets {
@@ -73,10 +85,15 @@ export interface HomematicIntegrationSecrets {
   password: string;
 }
 
+export interface FritzboxIntegrationSecrets {
+  password: string;
+}
+
 export type IntegrationSecrets =
   | HueIntegrationSecrets
   | ShellyIntegrationSecrets
-  | HomematicIntegrationSecrets;
+  | HomematicIntegrationSecrets
+  | FritzboxIntegrationSecrets;
 
 /** Ergebnis einer Firmware-Prüfung. */
 export interface UpdateInfo {
@@ -190,6 +207,12 @@ export interface Appearance {
   theme: ThemePreference;
   /** Bewegung reduzieren – für empfindliche Augen und schwache Geräte. */
   reduceMotion: boolean;
+  /**
+   * Lichtvorschau: Die Gerätekarte zeigt beim Verstellen, wie die Lampe
+   * aussehen wird – Farbe und Helligkeit als Schein hinter der Karte.
+   * Abschaltbar, denn auf einem schwachen Tablet kostet das Rechenzeit.
+   */
+  livePreview: boolean;
 }
 
 export const THEME_PREFERENCES = ['auto', 'dark', 'light'] as const;
@@ -201,6 +224,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   accentColorAlt: null,
   theme: 'auto',
   reduceMotion: false,
+  livePreview: true,
 };
 
 export interface Room {

@@ -30,6 +30,13 @@ export const INTEGRATION_HINTS = {
     hint: 'Benutzername und Passwort sind dieselben wie in der CCU-Weboberfläche. Der Benutzer braucht Administratorrechte; ohne Eintrag versucht der Hub „Admin“.',
     needsUsername: true,
   },
+  fritzbox: {
+    label: 'FRITZ!Box (experimentell)',
+    password: 'Passwort',
+    hint: 'Nimm einen Benutzer aus der Box unter „System → FRITZ!Box-Benutzer" mit der Berechtigung „Smart-Home-Geräte steuern". Als Adresse funktioniert meist fritz.box. Diese Integration ist neu und weniger erprobt als die anderen.',
+    needsUsername: true,
+    experimental: true,
+  },
 };
 
 /** Ein Fundstück aus der Netzwerksuche. */
@@ -97,19 +104,22 @@ export async function connectFound(button, onConnected) {
   const body = { type: button.dataset.type, host: button.dataset.connect, importRooms: true };
 
   if (button.dataset.auth) {
-    // Die Homematic-Zentrale kennt Benutzer, ein Shelly nur ein Passwort.
+    // Zentralen kennen Benutzerkonten, ein Shelly nur ein Passwort.
     if (INTEGRATION_HINTS[body.type]?.needsUsername) {
+      const isFritz = body.type === 'fritzbox';
       const username = prompt(
-        `Benutzername der Zentrale ${body.host} (wie in der CCU-Weboberfläche):`,
-        'Admin',
+        isFritz
+          ? `Benutzername der FRITZ!Box ${body.host} (aus „System → FRITZ!Box-Benutzer"):`
+          : `Benutzername der Zentrale ${body.host} (wie in der CCU-Weboberfläche):`,
+        isFritz ? '' : 'Admin',
       );
       if (username === null) return;
-      body.username = username.trim() || 'Admin';
+      body.username = username.trim() || (isFritz ? '' : 'Admin');
     }
     const password = prompt(
       body.username
         ? `Passwort für ${body.username} auf ${body.host}:`
-        : `Passwort für das Gerät ${body.host}:`,
+        : `Passwort für ${body.host}:`,
     );
     if (password === null) return;
     body.password = password;
@@ -157,7 +167,7 @@ export function manualForm(id) {
       <label>Anzeigename (optional)
         <input name="name" maxlength="120" placeholder="z. B. Shelly Bad" />
       </label>
-      <label data-for-type="homematic" hidden>Benutzername
+      <label data-for-username hidden>Benutzername
         <input name="username" maxlength="64" placeholder="Admin" autocomplete="username" />
       </label>
       <label><span data-password-label>Passwort</span>
@@ -183,8 +193,9 @@ export function bindManualForm(form, onConnected) {
     const hint = form.querySelector('[data-type-hint]');
     if (label) label.textContent = info.password;
     if (hint) hint.textContent = info.hint;
-    form.querySelectorAll('[data-for-type]').forEach((element) => {
-      element.hidden = element.dataset.forType !== select.value;
+    // Nur Zentralen mit Benutzerkonten fragen nach einem Namen.
+    form.querySelectorAll('[data-for-username]').forEach((element) => {
+      element.hidden = !info.needsUsername;
     });
   };
 
@@ -204,7 +215,7 @@ export function bindManualForm(form, onConnected) {
     const username = String(data.get('username') || '').trim();
     if (name) body.name = name;
     if (password) body.password = password;
-    if (username && INTEGRATION_HINTS[body.type]?.needsUsername) body.username = username;
+    if (INTEGRATION_HINTS[body.type]?.needsUsername) body.username = username;
 
     const result = await connect(body);
     if (!result) return;

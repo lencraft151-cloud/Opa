@@ -8,6 +8,8 @@
  * sofort angewendet.
  */
 
+import { setLivePreview } from './lightpreview.js';
+
 const STORAGE_KEY = 'smarthome.appearance';
 
 export const DEFAULT_APPEARANCE = {
@@ -16,6 +18,7 @@ export const DEFAULT_APPEARANCE = {
   accentColorAlt: null,
   theme: 'auto',
   reduceMotion: false,
+  livePreview: true,
 };
 
 /** Auswahlmöglichkeiten für die Einstellungen – Beschriftung inklusive. */
@@ -72,6 +75,10 @@ export function applyAppearance(appearance) {
 
   if (settings.reduceMotion) root.dataset.motion = 'reduced';
   else delete root.dataset.motion;
+
+  // Lichtvorschau: Die Gerätekarten zeigen beim Verstellen, wie es aussehen
+  // wird. Auf schwachen Geräten kostet der weichgezeichnete Schein Zeit.
+  setLivePreview(settings.livePreview !== false);
 
   /*
    * Eine eigene Farbe wird direkt am Dokument gesetzt und schlägt damit die

@@ -1037,6 +1037,8 @@ details.card summary {
 /* --------------------------------------------------------- Gerätekarten */
 
 .device-card {
+  position: relative;
+  isolation: isolate;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1045,14 +1047,59 @@ details.card summary {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
-  animation: rise 0.3s var(--ease);
+  transition:
+    box-shadow 0.25s var(--ease),
+    transform 0.25s var(--ease),
+    border-color 0.35s var(--ease);
+  /* Gestaffelter Auftritt: --i wird beim Zeichnen gesetzt. */
+  animation: card-in 0.42s var(--ease) backwards;
+  animation-delay: calc(var(--i, 0) * 28ms);
 }
 .device-card:hover {
   box-shadow: var(--shadow-lg);
+  transform: translateY(-1px);
 }
 .device-card.on {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+/*
+ * Lichtschein.
+ *
+ * Zeigt in der Farbe und Stärke, die die Lampe gerade hat – und beim
+ * Verstellen sofort die, die sie gleich haben wird. Zwischen „Regler
+ * bewegen" und „Lampe reagiert" liegen ein bis zwei Sekunden; ohne diese
+ * Vorschau sähe man in der Zeit nur eine Zahl.
+ */
+.device-card .glow {
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  z-index: -1;
+  pointer-events: none;
+  opacity: calc(var(--light-strength, 0) * 0.9);
+  background:
+    radial-gradient(
+      120% 90% at 50% 0%,
+      color-mix(in srgb, var(--light-color, transparent) 60%, transparent) 0%,
+      transparent 72%
+    );
+  box-shadow: 0 8px 32px -6px color-mix(in srgb, var(--light-color, transparent) 55%, transparent);
+  transition:
+    opacity 0.4s var(--ease),
+    background 0.4s var(--ease),
+    box-shadow 0.4s var(--ease);
+}
+/* Während einer Bedienung reagiert der Schein sofort statt nachzulaufen. */
+.device-card.previewing .glow {
+  transition-duration: 0.08s;
+}
+.device-card.previewing {
+  border-color: color-mix(in srgb, var(--light-color, var(--accent)) 60%, var(--border));
+}
+/* Ohne Vorschau bleibt es beim schlichten Kartenbild. */
+:root[data-preview='off'] .device-card .glow {
+  display: none;
 }
 .device-card.offline {
   opacity: 0.62;
@@ -1695,6 +1742,30 @@ button.round {
 
 /* ------------------------------------------------------------ Animationen */
 
+/* Karten kommen leicht von unten und werden dabei scharf. */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Ein Bereichswechsel blendet den neuen Inhalt auf. */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @keyframes rise {
   from {
     opacity: 0;
@@ -1810,5 +1881,99 @@ button.round {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+
+/* ==========================================================================
+   Auftritt und Feinschliff
+   ========================================================================== */
+
+/*
+ * Beim Wechsel eines Bereichs blendet der neue Inhalt auf. Das ist nicht nur
+ * hübsch: Ohne Übergang wirkt ein Wechsel wie ein Fehler – als hätte die
+ * Seite neu geladen.
+ */
+.tab-panel:not(.hidden) {
+  animation: panel-in 0.28s var(--ease);
+}
+
+/* Kacheln und Listeneinträge kommen ebenfalls gestaffelt. */
+.tile,
+.list > .item {
+  animation: card-in 0.36s var(--ease) backwards;
+  animation-delay: calc(var(--i, 0) * 22ms);
+}
+
+/* Die Kopfzeile hebt sich beim Scrollen leicht ab. */
+.topbar {
+  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+/*
+ * Der aktive Reiter bekommt eine mitlaufende Unterstreichung statt eines
+ * harten Farbwechsels – man sieht, wohin man gewechselt ist.
+ */
+.tabs .tab {
+  position: relative;
+}
+.tabs .tab.active::after {
+  content: '';
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  bottom: -2px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  animation: underline-in 0.3s var(--ease);
+}
+@keyframes underline-in {
+  from {
+    transform: scaleX(0.2);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* Ein eingeschaltetes Gerät zeigt das auch am Namen. */
+.device-card.on .name::before {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  margin-right: 0.45em;
+  border-radius: 50%;
+  vertical-align: 0.08em;
+  background: var(--light-color, var(--accent));
+  box-shadow: 0 0 0.6em color-mix(in srgb, var(--light-color, var(--accent)) 70%, transparent);
+  transition: background 0.3s var(--ease);
+}
+
+/* Szenenkarten heben sich beim Überfahren stärker – sie sind zum Antippen da. */
+.scene-card {
+  cursor: default;
+}
+.scene-card:hover {
+  transform: translateY(-2px);
+}
+
+/* Beim Herstellen einer Szene kurz aufleuchten. */
+.scene-card.applying {
+  animation: scene-pulse 0.7s var(--ease);
+}
+@keyframes scene-pulse {
+  0% {
+    box-shadow: var(--shadow);
+  }
+  35% {
+    box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-lg);
+  }
+  100% {
+    box-shadow: var(--shadow);
   }
 }

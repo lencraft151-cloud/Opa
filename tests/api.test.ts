@@ -118,7 +118,7 @@ describe('Einrichtung über die API', () => {
     assert.equal(status, 200);
     assert.deepEqual(
       data.adapters.map((adapter: { type: string }) => adapter.type).sort(),
-      ['homematic', 'hue', 'shelly'],
+      ['fritzbox', 'homematic', 'hue', 'shelly'],
     );
   });
 
@@ -496,6 +496,9 @@ describe('Darstellung', () => {
       accentColorAlt: null,
       theme: 'auto',
       reduceMotion: false,
+      // Die Lichtvorschau ist vorgabemäßig an – sie schließt die Lücke
+      // zwischen „Regler bewegen" und „Lampe reagiert".
+      livePreview: true,
     });
   });
 
@@ -544,6 +547,7 @@ describe('Darstellung', () => {
         accentColorAlt: null,
         theme: 'auto',
         reduceMotion: false,
+        livePreview: true,
       },
     });
     assert.equal(data.appearance.fontScale, 1);

@@ -8,6 +8,7 @@
  */
 
 import { esc } from './format.js';
+import { previewChange } from './lightpreview.js';
 
 /** Voreingestellte Stimmungen – schneller als jedes Rad. */
 export const COLOR_PRESETS = [
@@ -85,12 +86,13 @@ export function colorWheel(device) {
  * Loslassen. Sonst würde jede Fingerbewegung ein Kommando an die Bridge
  * schicken und die Lampe käme mit dem Nachziehen nicht hinterher.
  */
-export function bindColorControls(root, onCommand) {
+export function bindColorControls(root, onCommand, lookupDevice = () => undefined) {
   root.querySelectorAll('[data-wheel]').forEach((wheel) => {
     const deviceId = wheel.dataset.wheel;
     const handle = wheel.querySelector('.wheel-handle');
     const label = root.querySelector(`[data-color-label="${CSS.escape(deviceId)}"]`);
     const dot = label?.previousElementSibling;
+    const card = wheel.closest('.device-card');
     let pending = null;
 
     const positionFrom = (event) => {
@@ -112,6 +114,8 @@ export function bindColorControls(root, onCommand) {
       handle.style.setProperty('--angle', `${hue}deg`);
       handle.style.setProperty('--radius', String(saturation));
       if (dot) dot.style.background = hsvToCss(hue, saturation);
+      // Die ganze Karte zeigt mit, wie das Licht aussehen wird.
+      if (card) previewChange(card, lookupDevice(deviceId), { hue, saturation });
       if (label) label.textContent = `Farbton ${hue}°, Sättigung ${saturation} %`;
       wheel.setAttribute(
         'aria-valuetext',
@@ -137,6 +141,8 @@ export function bindColorControls(root, onCommand) {
       wheel.releasePointerCapture?.(event.pointerId);
       const { hue, saturation } = pending;
       pending = null;
+      // Die Vorschau endet hier – ab jetzt zeigt die Karte den echten Zustand.
+      card?.classList.remove('previewing');
       void onCommand(deviceId, { type: 'setColor', hue, saturation });
     };
     wheel.addEventListener('pointerup', release);

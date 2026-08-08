@@ -4,6 +4,7 @@ import { sparkline } from './charts.js';
 import { bindColorControls, colorWheel, hsvToCss } from './colorwheel.js';
 import { CAPABILITY_LABEL, COVER_STATE_LABEL, esc, fmt, VENDOR_LABEL } from './format.js';
 import { iconForDevice, icons } from './icons.js';
+import { endPreview, lightStyle, previewChange } from './lightpreview.js';
 
 const has = (device, capability) => device.capabilities.includes(capability);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -95,7 +96,8 @@ export function deviceCard(device, options = {}) {
       : '';
 
   return `<article class="device-card ${state.on ? 'on' : ''} ${device.reachable ? '' : 'offline'}"
-                   data-device="${esc(device.id)}">
+                   data-device="${esc(device.id)}" style="${lightStyle(device)}">
+    <span class="glow" aria-hidden="true"></span>
     <header>
       <div>
         <div class="name">${esc(device.name)}</div>
@@ -184,6 +186,7 @@ export function coverCard(device, options = {}) {
 
   return `<article class="device-card cover-card ${device.reachable ? '' : 'offline'}"
                    data-device="${esc(device.id)}">
+    <span class="glow" aria-hidden="true"></span>
     <header>
       <div>
         <div class="name">${esc(device.name)}</div>
@@ -266,6 +269,7 @@ export function thermostatCard(device, options = {}) {
   return `<article class="device-card thermostat-card ${heating ? 'heating' : ''} ${
     device.reachable ? '' : 'offline'
   }" data-device="${esc(device.id)}">
+    <span class="glow" aria-hidden="true"></span>
     <header>
       <div>
         <div class="name">${esc(device.name)}</div>
@@ -322,14 +326,30 @@ const READOUT = {
   target: (value) => fmt.temperature(value),
 };
 
+/** Wie aus einem Reglerwert eine Vorschau wird. */
+const PREVIEW = {
+  brightness: (value) => ({ brightness: value }),
+  kelvin: (value) => ({ kelvin: value }),
+};
+
 /**
  * Verbindet alle Bedienelemente eines gerenderten Bereichs mit `onCommand`.
+ *
  * @param {ParentNode} root
  * @param {(deviceId: string, command: object) => Promise<unknown>} onCommand
+ * @param {(deviceId: string) => object|undefined} lookupDevice Für die
+ *   Lichtvorschau: Sie braucht den bisherigen Zustand als Ausgangspunkt.
  */
-export function bindDeviceControls(root, onCommand) {
+export function bindDeviceControls(root, onCommand, lookupDevice = () => undefined) {
   root.querySelectorAll('[data-power]').forEach((input) => {
     input.addEventListener('change', () => {
+      // Beim Schalten sofort zeigen, was passieren wird – die Antwort des
+      // Geräts kommt erst ein bis zwei Sekunden später.
+      const card = input.closest('.device-card');
+      if (card) {
+        previewChange(card, lookupDevice(input.dataset.power), { on: input.checked });
+        setTimeout(() => card.classList.remove('previewing'), 400);
+      }
       void onCommand(input.dataset.power, { type: 'setPower', on: input.checked });
     });
   });
@@ -342,11 +362,17 @@ export function bindDeviceControls(root, onCommand) {
         input.closest('.slider-field')?.querySelector('[data-readout]') ??
         input.closest('.device-card')?.querySelector(`[data-readout="${attribute}"]`);
 
-      // Beschriftung folgt dem Finger, gesendet wird erst beim Loslassen.
+      const card = input.closest('.device-card');
+
+      // Beschriftung und Lichtschein folgen dem Finger, gesendet wird erst
+      // beim Loslassen. Ohne die Vorschau sähe man bis dahin nur eine Zahl.
       input.addEventListener('input', () => {
-        if (readout) readout.textContent = READOUT[attribute](Number(input.value));
+        const value = Number(input.value);
+        if (readout) readout.textContent = READOUT[attribute](value);
+        if (card && PREVIEW[attribute]) previewChange(card, lookupDevice(input.dataset[attribute]), PREVIEW[attribute](value));
       });
       input.addEventListener('change', () => {
+        if (card) card.classList.remove('previewing');
         void onCommand(input.dataset[attribute], build(Number(input.value)));
       });
     });
@@ -385,8 +411,10 @@ export function bindDeviceControls(root, onCommand) {
     });
   }
 
-  bindColorControls(root, onCommand);
+  bindColorControls(root, onCommand, lookupDevice);
 }
+
+export { endPreview };
 
 /** Icon eines Geräts – auch außerhalb der Karte nutzbar. */
 export { iconForDevice };

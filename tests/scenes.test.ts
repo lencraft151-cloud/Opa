@@ -294,3 +294,50 @@ describe('Urlaubsmodus prüfen und begrenzen', () => {
     assert.equal(DEFAULT_PRESENCE.enabled, false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lichtvorschau (Front-End-Logik)
+// ---------------------------------------------------------------------------
+
+describe('Lichtvorschau', () => {
+  it('leuchtet nur, wenn das Gerät an ist', async () => {
+    const { lightFromDevice } = await import('../public/js/lightpreview.js');
+
+    const on = lightFromDevice({ state: { on: true, hue: 200, saturation: 80, brightness: 100 } });
+    assert.ok(on.color);
+    assert.ok(on.strength > 0.9);
+
+    // Eine ausgeschaltete Lampe leuchtet nicht – auch nicht schwach.
+    const off = lightFromDevice({ state: { on: false, hue: 200, saturation: 80 } });
+    assert.equal(off.color, null);
+    assert.equal(off.strength, 0);
+  });
+
+  it('macht auch eine schwach gedimmte Lampe sichtbar', async () => {
+    const { lightFromDevice } = await import('../public/js/lightpreview.js');
+    // Bei 5 % wäre ein linearer Schein praktisch unsichtbar.
+    const dim = lightFromDevice({ state: { on: true, hue: 40, saturation: 60, brightness: 5 } });
+    assert.ok(dim.strength > 0.25, 'sichtbar, aber deutlich schwächer');
+    assert.ok(dim.strength < 0.4);
+  });
+
+  it('nimmt bei Weißton-Lampen die Farbtemperatur', async () => {
+    const { lightColor, kelvinToCss } = await import('../public/js/lightpreview.js');
+    assert.equal(lightColor({ colorTemperatureK: 2700 }), kelvinToCss(2700));
+    assert.equal(lightColor({ temperatureC: 21 }), null, 'ein Fühler ist keine Lampe');
+  });
+
+  it('bleibt bei warmem Licht warm und bei kaltem kühl', async () => {
+    const { kelvinToCss } = await import('../public/js/lightpreview.js');
+    const warm = /hsl\((\d+)/.exec(kelvinToCss(2200))?.[1];
+    const cold = /hsl\((\d+)/.exec(kelvinToCss(6500))?.[1];
+    assert.ok(Number(warm) < 60, 'Kerzenlicht liegt im gelb-orangen Bereich');
+    assert.ok(Number(cold) > 150, 'Tageslicht liegt im bläulichen Bereich');
+  });
+
+  it('hält sich an die Grenzen der Farbtemperatur', async () => {
+    const { kelvinToCss } = await import('../public/js/lightpreview.js');
+    assert.equal(kelvinToCss(500), kelvinToCss(1800), 'darunter wird abgeschnitten');
+    assert.equal(kelvinToCss(99999), kelvinToCss(6500));
+  });
+});

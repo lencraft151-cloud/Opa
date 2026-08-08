@@ -123,6 +123,7 @@ export const VENDOR_LABEL = {
   hue: 'Philips Hue',
   shelly: 'Shelly',
   homematic: 'Homematic',
+  fritzbox: 'FRITZ!Box',
 };
 
 export const COVER_STATE_LABEL = {
