@@ -93,6 +93,13 @@ export function parseGen2Status(
         break;
       }
 
+      /*
+       * `cct` ist eine reine Weißton-Lampe (Shelly Duo, DUO GU10), die
+       * anderen drei können Farbe – und viele davon zusätzlich Weißtöne.
+       * Bisher fiel `cct` ganz durch und der Weißton der übrigen unter den
+       * Tisch: Die Lampe war da, ließ sich aber nur dimmen.
+       */
+      case 'cct':
       case 'light':
       case 'rgbw':
       case 'rgb': {
@@ -102,6 +109,7 @@ export function parseGen2Status(
         if (on !== undefined) state.on = on;
         const brightness = num(value['brightness']);
         if (brightness !== undefined) state.brightness = round(brightness, 1);
+
         const rgb = arr(value['rgb']);
         if (rgb && rgb.length >= 3) {
           const hsv = rgbToHsv({
@@ -113,9 +121,17 @@ export function parseGen2Status(
           state.saturation = hsv.saturation;
           capabilities.push('color');
         }
+
+        // Der Weißton steht als Kelvin unter `ct` bzw. `temp`.
+        const kelvin = num(value['ct']) ?? num(value['temp']);
+        if (kelvin !== undefined) {
+          state.colorTemperatureK = round(kelvin, 0);
+          capabilities.push('color_temperature');
+        }
+
         components.push({
           externalId: key,
-          name: label(naming, key, `Licht ${channel + 1}`),
+          name: label(naming, key, kind === 'cct' ? `Licht ${channel + 1}` : `Licht ${channel + 1}`),
           capabilities,
           state,
         });
@@ -480,6 +496,17 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
       state.hue = hsv.hue;
       state.saturation = hsv.saturation;
       capabilities.push('color');
+    }
+
+    /*
+     * Die Shelly Duo ist eine reine Weißton-Lampe, die RGBW2 kann beides und
+     * meldet im Weißmodus ebenfalls `temp`. Ohne diesen Zweig ließ sich eine
+     * Duo nur dimmen – warm und kalt blieben unerreichbar.
+     */
+    const temp = num(light['temp']);
+    if (temp !== undefined) {
+      state.colorTemperatureK = round(temp, 0);
+      capabilities.push('color_temperature');
     }
     components.push({
       externalId,

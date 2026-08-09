@@ -235,12 +235,20 @@ export class ShellyAdapter implements IntegrationAdapter {
         return { targetTemperatureC: target };
       }
 
-      case 'setColorTemperature':
-        throw badRequest(
-          'Farbtemperatur wird von diesem Shelly-Kanal nicht unterstützt',
-          undefined,
-          'Farbtemperatur können nur Hue-Leuchten und Shelly-Bulbs.',
-        );
+      case 'setColorTemperature': {
+        // Weißton können `cct`-Lampen (Duo) und farbfähige Lampen, die
+        // zusätzlich einen Weißkanal führen (RGBW2, Bulb).
+        if (kind !== 'cct' && kind !== 'light' && kind !== 'rgbw') {
+          throw badRequest(
+            `Die Komponente "${externalId}" kann keine Weißtöne.`,
+            undefined,
+            'Weißtöne beherrschen Shelly Duo und RGBW-Lampen im Weißmodus – ein Relais nicht.',
+          );
+        }
+        const kelvin = clamp(command.kelvin, 2700, 6500);
+        await client.setColorTemperature(channel, kelvin, kind);
+        return { colorTemperatureK: kelvin };
+      }
 
       case 'setColor': {
         if (kind !== 'rgb' && kind !== 'rgbw' && kind !== 'light') {

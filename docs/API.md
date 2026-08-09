@@ -122,7 +122,7 @@ Zwischenspeicher und lädt sich neu. Gleicher Stand ⇒ gleiche Kennung, jede
 Änderung ⇒ neue Kennung. Der Wert wird 15 Sekunden lang zwischengespeichert.
 
 ```json
-{ "name": "Smart-Home-Hub", "version": "1.4.1", "build": "9617df2505a1",
+{ "name": "Smart-Home-Hub", "version": "1.4.2", "build": "9617df2505a1",
   "node": "v22.22.0", "hasHousehold": true, "setupCompleted": true,
   "authRequired": true,
   "adapters": [ { "type": "homematic", "displayName": "Homematic",
@@ -361,7 +361,9 @@ jetzt knapp 6).
 ```json
 { "type": "hue", "host": "192.168.1.42", "name": "Bridge", "importRooms": true }
 ```
-Für Shelly zusätzlich `password` (und bei Gen1 optional `username`).
+Für Shelly zusätzlich `password` (und bei Gen1 optional `username`). Für die
+FRITZ!Box genügt `password` – `username` ist optional und nur nötig, wenn die
+Box mehrere Benutzerkonten führt.
 
 Bei Hue **vorher den Knopf auf der Bridge drücken**, sonst `428
 link_button_required`. Antwort `201` mit Integration, übernommenen Geräten und

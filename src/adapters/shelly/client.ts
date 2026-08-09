@@ -322,6 +322,22 @@ export class ShellyClient {
     });
   }
 
+  /**
+   * Weißton setzen.
+   *
+   * Gen2 kennt zwei Bauteilarten: `cct` für reine Weißton-Lampen und `light`
+   * für solche, die auch Farbe können. Beide nehmen `ct` in Kelvin. Gen1
+   * (Shelly Duo, RGBW2 im Weißmodus) will `temp` an `/light/N`.
+   */
+  async setColorTemperature(channel: number, kelvin: number, kind = 'light'): Promise<void> {
+    const ct = Math.round(kelvin);
+    if (this.generation === 2) {
+      await this.rpc(kind === 'cct' ? 'CCT.Set' : 'Light.Set', { id: channel, ct });
+      return;
+    }
+    await this.sendJson(`/light/${channel}`, { query: { temp: ct, mode: 'white' } });
+  }
+
   async openCover(channel: number): Promise<void> {
     if (this.generation === 2) {
       await this.rpc('Cover.Open', { id: channel });

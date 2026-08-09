@@ -32,9 +32,12 @@ export const INTEGRATION_HINTS = {
   },
   fritzbox: {
     label: 'FRITZ!Box (experimentell)',
-    password: 'Passwort',
-    hint: 'Nimm einen Benutzer aus der Box unter „System → FRITZ!Box-Benutzer" mit der Berechtigung „Smart-Home-Geräte steuern". Als Adresse funktioniert meist fritz.box. Diese Integration ist neu und weniger erprobt als die anderen.',
-    needsUsername: true,
+    password: 'Passwort der Box',
+    hint: 'Das Kennwort der Box-Oberfläche genügt – ein Benutzername ist nur nötig, wenn unter „System → FRITZ!Box-Benutzer" mehrere Konten angelegt sind. Dann braucht das gewählte die Berechtigung „Smart-Home-Geräte steuern". Als Adresse funktioniert meist fritz.box. Diese Integration ist neu und weniger erprobt als die anderen.',
+    // Optional, nicht Pflicht: Viele Boxen sind auf „Anmeldung nur mit
+    // Passwort" eingestellt, und dann gibt es gar keinen Namen einzutragen.
+    needsUsername: false,
+    optionalUsername: true,
     experimental: true,
   },
 };
@@ -205,15 +208,12 @@ export async function connectFound(button, onConnected) {
   if (button.dataset.auth) {
     // Zentralen kennen Benutzerkonten, ein Shelly nur ein Passwort.
     if (INTEGRATION_HINTS[body.type]?.needsUsername) {
-      const isFritz = body.type === 'fritzbox';
       const username = prompt(
-        isFritz
-          ? `Benutzername der FRITZ!Box ${body.host} (aus „System → FRITZ!Box-Benutzer"):`
-          : `Benutzername der Zentrale ${body.host} (wie in der CCU-Weboberfläche):`,
-        isFritz ? '' : 'Admin',
+        `Benutzername der Zentrale ${body.host} (wie in der CCU-Weboberfläche):`,
+        'Admin',
       );
       if (username === null) return;
-      body.username = username.trim() || (isFritz ? '' : 'Admin');
+      body.username = username.trim() || 'Admin';
     }
     const password = prompt(
       body.username
@@ -292,9 +292,22 @@ export function bindManualForm(form, onConnected) {
     const hint = form.querySelector('[data-type-hint]');
     if (label) label.textContent = info.password;
     if (hint) hint.textContent = info.hint;
-    // Nur Zentralen mit Benutzerkonten fragen nach einem Namen.
+    /*
+     * Das Feld erscheint, wenn ein Name gebraucht *oder* möglich ist – bei
+     * der FRITZ!Box nur als Möglichkeit. Viele Boxen sind auf „Anmeldung nur
+     * mit Passwort" eingestellt; dort gibt es gar keinen Namen einzutragen,
+     * und ein Pflichtfeld wäre schlicht nicht auszufüllen.
+     */
     form.querySelectorAll('[data-for-username]').forEach((element) => {
-      element.hidden = !info.needsUsername;
+      element.hidden = !info.needsUsername && !info.optionalUsername;
+      const field = element.querySelector('input');
+      if (field) {
+        field.placeholder = info.optionalUsername ? 'nur bei mehreren Konten' : 'Admin';
+      }
+      const caption = element.childNodes[0];
+      if (caption && caption.nodeType === Node.TEXT_NODE) {
+        caption.textContent = info.optionalUsername ? 'Benutzername (optional) ' : 'Benutzername ';
+      }
     });
   };
 

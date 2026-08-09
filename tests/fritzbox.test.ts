@@ -482,3 +482,61 @@ describe('FRITZ!Box-Adapter gegen eine simulierte Box', () => {
     assert.ok(devices.length > 0);
   });
 });
+
+describe('Anmeldung ohne Benutzernamen', () => {
+  /*
+   * Viele Boxen sind auf „Anmeldung nur mit Passwort" eingestellt – dort gibt
+   * es gar keinen Namen einzutragen. Der Adapter verlangte trotzdem einen,
+   * und die Oberfläche fragte danach: ein Pflichtfeld, das niemand ausfüllen
+   * konnte.
+   */
+  it('schickt eine leere Kennung mit, statt sie zu erzwingen', async () => {
+    const challenge = '1234567z';
+    const password = 'boxkennwort';
+    let seenUsername: string | null = null;
+
+    const box = http.createServer(async (req, res) => {
+      const url = new URL(req.url ?? '/', 'http://box');
+      if (url.pathname === '/login_sid.lua') {
+        const response = url.searchParams.get('response');
+        if (!response) {
+          res.writeHead(200, { 'content-type': 'text/xml' });
+          res.end(
+            `<?xml version="1.0"?><SessionInfo><SID>0000000000000000</SID>` +
+              `<Challenge>${challenge}</Challenge><BoxInfo>FRITZ!Box 7590</BoxInfo>` +
+              `<Version>7.57</Version></SessionInfo>`,
+          );
+          return;
+        }
+        seenUsername = url.searchParams.get('username');
+        const expected = await solveChallenge(challenge, password);
+        res.writeHead(200, { 'content-type': 'text/xml' });
+        res.end(
+          `<?xml version="1.0"?><SessionInfo>` +
+            `<SID>${response === expected ? 'abcdef0123456789' : '0000000000000000'}</SID>` +
+            `<BoxInfo>FRITZ!Box 7590</BoxInfo><Version>7.57</Version></SessionInfo>`,
+        );
+        return;
+      }
+      if (url.pathname === '/webservices/homeautoswitch.lua') {
+        res.writeHead(200, { 'content-type': 'text/xml' });
+        res.end('<devicelist version="1"></devicelist>');
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    const port = await new Promise<number>((resolve) => {
+      box.listen(0, '127.0.0.1', () => resolve((box.address() as AddressInfo).port));
+    });
+
+    try {
+      const client = new FritzboxClient(`127.0.0.1:${port}`, '', password);
+      await client.deviceList();
+      assert.equal(seenUsername, '', 'die Box bekommt eine leere Kennung und nimmt ihren Standard');
+    } finally {
+      box.close();
+    }
+  });
+});

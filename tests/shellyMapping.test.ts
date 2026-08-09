@@ -241,3 +241,46 @@ describe('Shelly Gen2/Gen3: Heizungen, Sensoren und Unbekanntes', () => {
     assert.equal(inferComponent({ nur: 'text' }), undefined, 'ohne Anhaltspunkt wird nicht geraten');
   });
 });
+
+describe('Shelly-Lampen mit Weißton', () => {
+  const naming = { deviceName: 'Shelly', channelNames: new Map<string, string>() };
+
+  it('erkennt eine reine Weißton-Lampe (cct)', () => {
+    /*
+     * Die Shelly Duo meldet sich als `cct` – ein Bauteiltyp, den der Hub gar
+     * nicht kannte. Die Lampe war da, ließ sich aber nur dimmen; warm und
+     * kalt blieben unerreichbar.
+     */
+    const [entry] = parseGen2Status(
+      { 'cct:0': { id: 0, output: true, brightness: 80, ct: 3200 } },
+      naming,
+    );
+    assert.deepEqual(entry?.capabilities, ['switch', 'dimmer', 'color_temperature']);
+    assert.equal(entry?.state.colorTemperatureK, 3200);
+  });
+
+  it('gibt einer Farblampe zusätzlich den Weißton', () => {
+    const [entry] = parseGen2Status(
+      { 'rgbw:0': { id: 0, output: true, brightness: 60, rgb: [255, 120, 40], ct: 2700 } },
+      naming,
+    );
+    assert.ok(entry?.capabilities.includes('color'));
+    assert.ok(entry?.capabilities.includes('color_temperature'));
+    assert.equal(entry?.state.colorTemperatureK, 2700);
+  });
+
+  it('lässt eine Lampe ohne Weißton in Ruhe', () => {
+    // Ein einfacher Dimmer soll keinen Regler bekommen, den er nicht bedienen kann.
+    const [entry] = parseGen2Status({ 'light:0': { id: 0, output: false, brightness: 40 } }, naming);
+    assert.deepEqual(entry?.capabilities, ['switch', 'dimmer']);
+  });
+
+  it('liest den Weißton auch bei Gen1 (Duo, RGBW2 im Weißmodus)', () => {
+    const [entry] = parseGen1Status(
+      { lights: [{ ison: true, brightness: 70, temp: 4200, mode: 'white' }] },
+      naming,
+    );
+    assert.ok(entry?.capabilities.includes('color_temperature'));
+    assert.equal(entry?.state.colorTemperatureK, 4200);
+  });
+});

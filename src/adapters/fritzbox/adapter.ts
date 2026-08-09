@@ -122,11 +122,18 @@ export class FritzboxAdapter implements IntegrationAdapter {
   async link(req: LinkRequest): Promise<LinkResult> {
     if (!req.host) throw badRequest('Für eine FRITZ!Box wird eine Adresse benötigt');
     if (!req.password) {
+      /*
+       * Der Benutzername ist wirklich optional: Viele Boxen sind auf
+       * „Anmeldung nur mit Passwort" eingestellt, und dann gibt es gar keinen
+       * einzutragen. Die Box nimmt in diesem Fall eine leere Kennung an und
+       * verwendet ihren Standardbenutzer.
+       */
       throw badRequest(
-        'Für die FRITZ!Box werden Benutzername und Passwort gebraucht.',
+        'Für die FRITZ!Box wird das Passwort gebraucht.',
         undefined,
-        'Nimm einen Benutzer aus der Box-Oberfläche unter „System → FRITZ!Box-Benutzer". ' +
-          'Er braucht die Berechtigung „Smart-Home-Geräte steuern".',
+        'Das ist das Kennwort der Box-Oberfläche. Ein Benutzername ist nur nötig, wenn ' +
+          'unter „System → FRITZ!Box-Benutzer" mehrere Konten angelegt sind – dann muss ' +
+          'das gewählte die Berechtigung „Smart-Home-Geräte steuern" haben.',
       );
     }
 

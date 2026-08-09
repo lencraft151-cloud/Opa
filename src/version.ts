@@ -6,4 +6,4 @@
  * liegt, nicht darin. Beide Stellen zeigen dieselbe Zahl; `CHANGELOG.md` sagt,
  * was sich dahinter verbirgt.
  */
-export const VERSION = '1.4.1';
+export const VERSION = '1.4.2';

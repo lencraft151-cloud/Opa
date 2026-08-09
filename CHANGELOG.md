@@ -8,6 +8,22 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.4.2 – 2026-08-09
+
+**Shelly-Lampen können jetzt Weißtöne.** Die Shelly Duo meldet sich als
+Bauteiltyp `cct` – den kannte der Hub gar nicht. Die Lampe war da, ließ sich
+aber nur dimmen; warm und kalt blieben unerreichbar. Auch Farblampen (RGBW2,
+Bulb) führen einen Weißkanal, der bisher unter den Tisch fiel. Beide bekommen
+die Fähigkeit „Weißtöne" samt Regler, und der Befehl geht an das Gerät –
+`CCT.Set` bzw. `Light.Set` bei Gen2, `temp` an `/light/N` bei Gen1.
+
+**Die FRITZ!Box braucht keinen Benutzernamen mehr.** Viele Boxen sind auf
+„Anmeldung nur mit Passwort" eingestellt; dort gibt es gar keinen Namen
+einzutragen. Der Hub verlangte trotzdem einen und die Oberfläche fragte danach
+– ein Pflichtfeld, das niemand ausfüllen konnte. Jetzt genügt das Kennwort der
+Box-Oberfläche; das Namensfeld bleibt für den Fall, dass unter „System →
+FRITZ!Box-Benutzer" mehrere Konten angelegt sind.
+
 ## 1.4.1 – 2026-08-09
 
 **Die FRITZ!Box wurde nicht gefunden – und mit ihr keiner ihrer Rollläden.**

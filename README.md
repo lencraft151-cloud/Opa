@@ -78,8 +78,10 @@ automatisch.
 - Shelly Gen1 oder Gen2/3/4 mit erreichbarer lokaler HTTP-API
 - Homematic CCU2, CCU3 oder RaspberryMatic mit aktivierter JSON-API und einem
   Benutzer mit Administratorrechten
-- FRITZ!Box mit FRITZ!OS 6.0 oder neuer und einem Benutzer mit der
-  Berechtigung „Smart-Home-Geräte steuern“ (unter *System → FRITZ!Box-Benutzer*)
+- FRITZ!Box mit FRITZ!OS 6.0 oder neuer. Das Kennwort der Box-Oberfläche
+  genügt; ein Benutzername ist nur nötig, wenn unter *System →
+  FRITZ!Box-Benutzer* mehrere Konten angelegt sind – dann braucht das gewählte
+  die Berechtigung „Smart-Home-Geräte steuern“
 
 ---
 
@@ -685,7 +687,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 404 Tests, node:test
+npm test        # 409 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
