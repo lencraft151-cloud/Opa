@@ -32,6 +32,7 @@ export type HouseholdUpdate = Partial<
     | 'currency'
     | 'basePricePerMonth'
     | 'pollIntervalSeconds'
+    | 'fritzboxUrl'
     | 'autoUpdate'
     | 'autoUpdateFrom'
     | 'autoUpdateTo'
@@ -87,6 +88,7 @@ export class HouseholdService {
       currency: input.currency?.trim() || 'EUR',
       basePricePerMonth: input.basePricePerMonth ?? 0,
       pollIntervalSeconds: input.pollIntervalSeconds ?? 15,
+      fritzboxUrl: '',
       autoUpdate: false,
       autoUpdateFrom: '03:00',
       autoUpdateTo: '05:00',

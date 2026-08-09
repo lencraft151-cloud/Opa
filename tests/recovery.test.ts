@@ -356,6 +356,7 @@ describe('Sicherung und Wiederherstellung', () => {
     currency: 'EUR',
     basePricePerMonth: 12,
     pollIntervalSeconds: 15,
+  fritzboxUrl: '',
     autoUpdate: false,
     autoUpdateFrom: '03:00',
     autoUpdateTo: '05:00',

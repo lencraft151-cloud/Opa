@@ -29,7 +29,7 @@ Geräte.
 | **Philips Hue** | Bridge-Discovery (mDNS + Cloud + Subnetz-Scan), Pairing über Link-Button, CLIP-API v2 – und automatischer Rückfall auf die API v1 für die runde Bridge (BSB001) |
 | **Shelly** | Gen1 (REST, Basic-Auth) und Gen2/3/4 (JSON-RPC, Digest-Auth SHA-256), Relais, Dimmer, Rollläden, Heizkörperventil (TRV), Verbrauchsmessung, H&T-Sensoren, Add-On-Fühler |
 | **Homematic** | CCU2, CCU3 und RaspberryMatic über die JSON-API: Rollläden mit Lamellen, Heizkörperthermostate, Wandthermostate, Klima- und Bewegungsmelder, BidCos wie HmIP |
-| **FRITZ!Box** *(experimentell)* | DECT-Geräte an der Box: Schaltsteckdosen mit Verbrauchsmessung, Heizkörperregler, Lampen mit Farbe und Rollläden über HAN-FUN |
+| **FRITZ!Box** | DECT-Geräte an der Box: Schaltsteckdosen mit Verbrauchsmessung, Heizkörperregler, Lampen mit Farbe und Rollläden über HAN-FUN |
 | **Rollläden** | Auf/Zu/Stop, Position, Lamellenverstellung bei Jalousien, Fahrzustand mit animierter Anzeige, Sammelbefehle je Raum – von Shelly und von Homematic |
 | **Heizung** | Solltemperatur per Regler oder Plus/Minus, gemessene Temperatur, Ventilstellung – für Shelly TRV, Homematic-Thermostate und Shelly Wall Display |
 | **Farbe** | Farbrad mit ziehbarem Griff für Maus, Finger und Tastatur, dazu Farb- und Weißton-Vorlagen |
@@ -42,6 +42,7 @@ Geräte.
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
 | **Erneut verbinden** | Zugangsdaten erneuern oder den Knopf an der Hue Bridge noch einmal drücken – ohne Geräte, Räume, Szenen und Automationen zu verlieren |
+| **Alles verbinden** | Ein Knopf übernimmt alle gefundenen Geräte, die kein Passwort brauchen – mit Bericht, was ging und was nicht |
 | **Sonos** | Lautsprecher im eigenen Netz finden und bedienen: Titel, Titelbild, Play/Pause/Weiter und Lautstärke – gruppenfest, ohne Konto |
 | **Spotify** | Was gerade läuft, samt Steuerung und Gerätewechsel; Anmeldung mit PKCE, ohne Client-Geheimnis |
 | **Nextcloud** | Benachrichtigungen der eigenen Nextcloud – Talk, Freigaben, Kalender – als Einblendung im Hub, mit Verweis auf die Sache selbst |
@@ -176,7 +177,7 @@ anderes ändert sich.
   `CLIMATECONTROL_RT_TRANSCEIVER`, `WEATHER`), und diese Namen sind über CCU2,
   CCU3 und RaspberryMatic hinweg stabil – auch bei Geräten von 2012.
 
-### FRITZ!Box (experimentell)
+### FRITZ!Box
 
 An der Box hängen DECT-Geräte: Schaltsteckdosen mit Verbrauchsmessung,
 Heizkörperregler, Lampen und – über HAN-FUN – Rollläden. Angesprochen wird
@@ -198,9 +199,23 @@ Drei Eigenheiten von AVM sind der Grund für den eigenen Adapter:
   sonst (100 = offen) und dreht beim Lesen wie beim Schreiben um. Ohne das
   führe der Regler in der Oberfläche in die falsche Richtung.
 
-Die Integration steht als **experimentell** in der Oberfläche: Sie
-funktioniert, aber der Zoo an DECT- und HAN-FUN-Geräten ist groß und weniger
-erprobt als Hue und Shelly.
+**Wenn das Kennwort „nie geht".** Der häufigste Grund ist der Benutzername.
+Auch eine Box, die auf „Anmeldung nur mit Kennwort" steht, hat intern einen –
+sie hat ihn selbst angelegt und nennt ihn etwa `fritz3000`. Wer nichts
+einträgt, schickte bisher eine leere Kennung, und die weist die Box ab:
+richtiges Kennwort, falscher (weil gar kein) Benutzer. Den richtigen Namen
+nennt die Box in derselben Antwort, in der auch die Anmeldeaufgabe steht – der
+Hub liest ihn dort und verwendet ihn.
+
+Der zweite Grund ist die Berechtigung: Ohne das Recht „Smart-Home-Geräte und
+Automatisierung steuern" bleibt die Schnittstelle zu. Der Hub sagt das jetzt
+im Klartext, statt einen HTTP 403 durchzureichen.
+
+**Und wenn es trotzdem nicht geht:** Unter *Einstellungen → FRITZ!Box-Oberfläche*
+lässt sich die Adresse der Box eintragen. Der Hub zeigt ihre Oberfläche dann
+direkt an – dort funktioniert alles, was die Box kann. Ob sich die Seite
+einbetten lässt, entscheidet die Box selbst (viele verbieten das per
+`X-Frame-Options`); der Knopf „In neuem Fenster öffnen" daneben geht immer.
 
 ### Alte Geräte
 
@@ -746,7 +761,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 496 Tests, node:test
+npm test        # 503 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
@@ -800,6 +815,14 @@ Abgedeckt sind unter anderem:
 - FRITZ!Box-Sperre: dass nach einer abgelehnten Anmeldung **kein zweiter
   Versuch** bei der Box ankommt, und dass eine gemeldete Sperrzeit die Aufgabe
   gar nicht erst beantworten lässt
+- FRITZ!Box-Anmeldung: dass der Hub den Standardbenutzer nimmt, den die Box in
+  ihrer Anmeldeaufgabe selbst nennt (`fritz3000` statt leerer Kennung), und
+  dass eine fehlende Smart-Home-Berechtigung beim Namen genannt wird statt als
+  HTTP 403 durchgereicht
+- Sonos in der allgemeinen Suche: dass ein Lautsprecher als Treffer erscheint,
+  ohne Passwort und ohne Knopfdruck übernommen werden kann, als „bereits
+  verbunden" markiert wird – und einmal gezählt wird, auch wenn er unter zwei
+  Adressen antwortet
 - Szenen: was aus einem Zustand an Kommandos wird (und was bewusst nicht),
   Reihenfolge, ein stummes Gerät mitten in der Szene
 - Unbekannte Kanäle: dass ein Rollladen an Niveau und Fahrtrichtung erkannt wird,

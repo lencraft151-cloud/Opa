@@ -82,7 +82,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     minIntervalSeconds: config.telemetryMinIntervalSeconds,
     retentionDays: config.telemetryRetentionDays,
   });
-  const integrations = new IntegrationService(repos, registry, rooms, telemetry, config);
+  /*
+   * Sonos wird vor den Integrationen gebaut, weil es bei deren Netzwerksuche
+   * mitsucht: Wer „Netzwerk durchsuchen" drückt, will alles finden, was da
+   * ist – auch die Lautsprecher.
+   */
+  const sonos = new SonosService(repos);
+  const integrations = new IntegrationService(repos, registry, rooms, telemetry, config, [sonos]);
   const devices = new DeviceService(repos, registry, integrations, telemetry);
   const automations = new AutomationService(repos, devices, households);
   const polling = new PollingService(repos, registry, integrations, devices, telemetry, config);
@@ -100,7 +106,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const scenes = new SceneService(repos, devices);
   const presence = new PresenceService(repos, devices, households);
   const nextcloud = new NextcloudService(repos, config.secretKey);
-  const sonos = new SonosService(repos);
   const spotify = new SpotifyService(repos, config.secretKey);
 
   const startBackgroundServices = async (): Promise<void> => {

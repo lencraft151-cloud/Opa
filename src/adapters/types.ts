@@ -11,8 +11,18 @@ import type {
 } from '../core/types.js';
 
 /** Ein im Netzwerk gefundenes, noch nicht eingebundenes Gerät bzw. Bridge. */
+/**
+ * Was eine Netzwerksuche finden kann.
+ *
+ * Nicht alles davon ist eine Integration im Sinne des Adapters: Ein
+ * Sonos-Lautsprecher wird ohne Zugangsdaten übernommen und lebt in seinem
+ * eigenen Dienst. Gesucht wird er trotzdem gemeinsam mit den anderen – wer
+ * „Netzwerk durchsuchen" drückt, will alles finden, was da ist.
+ */
+export type DiscoveredKind = IntegrationType | 'sonos';
+
 export interface DiscoveredIntegration {
-  type: IntegrationType;
+  type: DiscoveredKind;
   host: string;
   /** Herstellerseitige ID (Hue Bridge-ID bzw. Shelly-Geräte-ID). */
   externalId: string;

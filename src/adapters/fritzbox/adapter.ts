@@ -45,18 +45,21 @@ type FritzboxContext = IntegrationContext<FritzboxIntegrationConfig, FritzboxInt
 const KNOWN_HOSTS = ['fritz.box', 'fritz.box.', '192.168.178.1', '169.254.1.1'];
 
 /**
- * FRITZ!Box als Smart-Home-Zentrale (experimentell).
+ * FRITZ!Box als Smart-Home-Zentrale.
  *
  * An der Box hängen DECT-Geräte: Schaltsteckdosen mit Verbrauchsmessung,
  * Heizkörperregler, Lampen und – über HAN-FUN – Rollläden und Melder. Die
  * Schnittstelle dafür ist gut dokumentiert und seit Jahren stabil, aber der
  * Zoo an Geräten ist groß und nicht jedes verhält sich wie beschrieben.
- * Deshalb steht diese Integration als „experimentell“ in der Oberfläche:
- * Sie funktioniert, aber sie ist weniger erprobt als Hue und Shelly.
+ *
+ * Wo es klemmt, klemmt es fast immer an der Anmeldung – siehe
+ * `client.ts`, dort steht, warum der Benutzername das eigentliche Nadelöhr
+ * ist. Kommt der Hub trotzdem nicht durch, führt der Weg über die Oberfläche
+ * der Box selbst; die lässt sich in den Einstellungen einbetten.
  */
 export class FritzboxAdapter implements IntegrationAdapter {
   readonly type = 'fritzbox' as const;
-  readonly displayName = 'FRITZ!Box (experimentell)';
+  readonly displayName = 'FRITZ!Box';
 
   private readonly clients = new Map<string, { client: FritzboxClient; fingerprint: string }>();
 

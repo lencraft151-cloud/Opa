@@ -8,6 +8,50 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.7.1 – 2026-08-09
+
+**Sonos wird jetzt überall gesucht.** „Netzwerk durchsuchen" kannte bisher nur
+Hue, Shelly, Homematic und die FRITZ!Box – Lautsprecher fand es nie, weil gar
+nicht nach ihnen gesucht wurde. Sonos sucht jetzt mit und meldet seine Treffer
+in derselben Liste; übernommen wird ein Lautsprecher mit demselben Knopf wie
+eine Bridge, nur ohne Passwortfrage. Auch die Auswahl unter „Von Hand
+eintragen" kennt Sonos jetzt.
+
+Kommt Multicast im Netz nicht durch – in Containern, hinter Repeatern, in
+manchen Router-Konfigurationen –, klopft der Hub zusätzlich Port 1400 ab.
+Bereits übernommene Lautsprecher werden immer mitgefragt und stehen als
+„bereits verbunden" in der Liste, statt zu fehlen. Und wer unter zwei Adressen
+antwortet, wird einmal gezählt: „2 Lautsprecher gefunden" für einen einzigen
+war schlicht falsch.
+
+**„Mit allen verbinden".** Sind mehrere Geräte gefunden, die kein Passwort
+brauchen, gibt es einen Knopf, der sie alle auf einmal übernimmt. Geschützte
+Geräte bleiben bewusst außen vor – ein Sammelknopf, der fünfmal nacheinander
+nach Kennwörtern fragt, ist keiner. Am Ende steht, was geklappt hat und was
+nicht; bei einer Hue Bridge hängt das daran, ob jemand rechtzeitig den Knopf
+gedrückt hat, und ein stilles „fertig" wäre dort gelogen.
+
+**Die FRITZ!Box nimmt das Kennwort jetzt an.** Der Grund für „geht nie" war
+der Benutzername: Auch eine Box mit „Anmeldung nur mit Kennwort" hat intern
+einen – sie hat ihn selbst angelegt und nennt ihn etwa `fritz3000`. Wer nichts
+eintrug, schickte eine **leere** Kennung, und die weist die Box ab: richtiges
+Kennwort, falscher Benutzer. Den richtigen Namen nennt die Box in derselben
+Antwort, in der auch die Anmeldeaufgabe steht – der Hub liest ihn dort und
+verwendet ihn.
+
+Der zweite Stolperstein war die Berechtigung. Ohne das Recht „Smart-Home-Geräte
+und Automatisierung steuern" bleibt die Schnittstelle zu, und bisher kam das
+als nackter HTTP 403 zurück – ein Fehler, aus dem niemand auf ein fehlendes
+Häkchen schließt. Jetzt steht es im Klartext, mitsamt dem Weg dorthin. Sind
+mehrere Benutzer angelegt, nennt die Fehlermeldung sie beim Namen.
+
+Das „experimentell" ist damit weg.
+
+**Und wenn es trotzdem klemmt:** Unter *Einstellungen → FRITZ!Box-Oberfläche*
+lässt sich die Adresse der Box eintragen; der Hub zeigt ihre Oberfläche dann
+direkt an. Ob sich die Seite einbetten lässt, entscheidet die Box (viele
+verbieten es) – der Knopf „In neuem Fenster öffnen" daneben geht immer.
+
 ## 1.7.0 – 2026-08-09
 
 **Sonos und Spotify – im eigenen Reiter „Dienste".** Dort stehen jetzt die

@@ -30,15 +30,20 @@ export const INTEGRATION_HINTS = {
     hint: 'Benutzername und Passwort sind dieselben wie in der CCU-Weboberfläche. Der Benutzer braucht Administratorrechte; ohne Eintrag versucht der Hub „Admin“.',
     needsUsername: true,
   },
+  sonos: {
+    label: 'Sonos-Lautsprecher',
+    password: 'Passwort (bei Sonos nicht nötig)',
+    hint: 'Sonos braucht kein Konto und kein Passwort – der Lautsprecher steht im eigenen Netz. Gefunden wird er normalerweise von allein; die Adresse steht in der Sonos-App unter Einstellungen → System → Produkte → Netzwerk.',
+    needsUsername: false,
+  },
   fritzbox: {
-    label: 'FRITZ!Box (experimentell)',
+    label: 'FRITZ!Box',
     password: 'Passwort der Box',
-    hint: 'Das Kennwort der Box-Oberfläche genügt – ein Benutzername ist nur nötig, wenn unter „System → FRITZ!Box-Benutzer" mehrere Konten angelegt sind. Dann braucht das gewählte die Berechtigung „Smart-Home-Geräte steuern". Als Adresse funktioniert meist fritz.box. Diese Integration ist neu und weniger erprobt als die anderen.',
+    hint: 'Das Kennwort der Box-Oberfläche genügt: Den Benutzernamen holt sich der Hub bei der Box selbst – auch Boxen mit „Anmeldung nur mit Kennwort" haben intern einen (er heißt dann etwa fritz3000). Nur wenn dort mehrere Konten angelegt sind, muss der Name eingetragen werden, und das gewählte Konto braucht die Berechtigung „Smart-Home-Geräte und Automatisierung steuern". Als Adresse funktioniert meist fritz.box.',
     // Optional, nicht Pflicht: Viele Boxen sind auf „Anmeldung nur mit
     // Passwort" eingestellt, und dann gibt es gar keinen Namen einzutragen.
     needsUsername: false,
     optionalUsername: true,
-    experimental: true,
   },
 };
 
@@ -92,12 +97,33 @@ export function runDiscovery(target, scan, onConnected) {
 
   const render = (status) => {
     const list = [...found.values()].map(discoveryItem).join('');
-    target.innerHTML = `${list}${status}`;
+    target.innerHTML = `${list}${connectAllBar()}${status}`;
     target.querySelectorAll('[data-connect]').forEach((button) => {
       if (button.dataset.wired) return;
       button.dataset.wired = 'yes';
       button.addEventListener('click', () => void connectFound(button, onConnected));
     });
+    target.querySelector('[data-connect-all]')?.addEventListener('click', (event) => {
+      void connectAll(event.currentTarget, [...found.values()], onConnected);
+    });
+  };
+
+  /**
+   * „Mit allem verbinden" – aber nur dort, wo das ohne Rückfrage geht.
+   *
+   * Alles, was ein Passwort braucht, bleibt außen vor: Ein Sammelknopf, der
+   * fünfmal hintereinander nach Kennwörtern fragt, ist kein Sammelknopf. Die
+   * Hue Bridge ist dabei, denn dort ist der „Schlüssel" der Knopf am Gerät.
+   */
+  const connectAllBar = () => {
+    const open = [...found.values()].filter(
+      (entry) => !entry.alreadyLinked && !entry.authRequired,
+    );
+    if (open.length < 2) return '';
+    return `<div class="row tight" style="margin:.6rem 0">
+      <button class="primary" data-connect-all>Mit allen ${open.length} verbinden</button>
+      <span class="muted small">Ohne Rückfrage – geschützte Geräte bleiben einzeln.</span>
+    </div>`;
   };
 
   /*
@@ -204,6 +230,26 @@ export function runDiscovery(target, scan, onConnected) {
 /** Verbindet ein gefundenes Gerät und fragt dabei nach Anmeldedaten. */
 export async function connectFound(button, onConnected) {
   const body = { type: button.dataset.type, host: button.dataset.connect, importRooms: true };
+
+  /*
+   * Ein Sonos-Lautsprecher ist keine Integration: Er hat keine Zugangsdaten
+   * und keine Geräteliste im Sinne des Hubs. Übernommen wird er deshalb über
+   * seinen eigenen Weg – gefunden wird er aber gemeinsam mit allen anderen,
+   * denn dort sucht man ihn.
+   */
+  if (body.type === 'sonos') {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Verbinde…';
+    const result = await guard(
+      () => api('/sonos/discover', { method: 'POST', body: { host: body.host } }),
+      { success: 'Lautsprecher übernommen.', successHint: 'Zu finden unter „Dienste".' },
+    );
+    button.disabled = false;
+    button.textContent = label;
+    if (result) await onConnected?.();
+    return;
+  }
 
   if (button.dataset.auth) {
     // Zentralen kennen Benutzerkonten, ein Shelly nur ein Passwort.
@@ -335,4 +381,60 @@ export function bindManualForm(form, onConnected) {
     sync();
     await onConnected?.();
   });
+}
+
+
+/**
+ * Verbindet alles auf einmal, was ohne Zugangsdaten auskommt.
+ *
+ * Der Bericht am Ende nennt beides – was ging und was nicht –, denn bei einer
+ * Hue Bridge hängt der Erfolg daran, ob jemand rechtzeitig den Knopf gedrückt
+ * hat. Ein stilles „fertig" wäre dort schlicht gelogen.
+ */
+export async function connectAll(button, entries, onConnected) {
+  const open = entries.filter((entry) => !entry.alreadyLinked && !entry.authRequired);
+  if (open.length === 0) return;
+
+  const label = button.textContent;
+  button.disabled = true;
+
+  const ok = [];
+  const failed = [];
+
+  for (const [index, entry] of open.entries()) {
+    button.textContent = `Verbinde ${index + 1}/${open.length}…`;
+    try {
+      if (entry.type === 'sonos') {
+        await api('/sonos/discover', { method: 'POST', body: { host: entry.host } });
+      } else {
+        await api('/integrations', {
+          method: 'POST',
+          body: { type: entry.type, host: entry.host, importRooms: true },
+        });
+      }
+      ok.push(entry.name);
+    } catch (err) {
+      failed.push(`${entry.name}: ${err?.message ?? 'unbekannter Fehler'}`);
+    }
+  }
+
+  button.disabled = false;
+  button.textContent = label;
+
+  if (ok.length > 0) {
+    toast(`${plural(ok.length, 'Gerät verbunden', 'Geräte verbunden')}.`, {
+      kind: 'success',
+      hint: ok.join(', '),
+      timeout: 6000,
+    });
+  }
+  if (failed.length > 0) {
+    toast(`${plural(failed.length, 'Gerät ließ', 'Geräte ließen')} sich nicht verbinden.`, {
+      kind: 'warn',
+      hint: failed.join(' · '),
+      timeout: 12000,
+    });
+  }
+
+  await onConnected?.();
 }

@@ -157,6 +157,15 @@ export interface Household {
    * Bridge mit dreißig Lampen hat, will sie nicht alle fünf Sekunden fragen.
    */
   pollIntervalSeconds: number;
+  /**
+   * Adresse der FRITZ!Box-Oberfläche, z. B. `http://fritz.box`.
+   *
+   * Der Notausgang für den Fall, dass die Anmeldung über die
+   * Smart-Home-Schnittstelle partout nicht will: Der Hub zeigt dann die
+   * Oberfläche der Box selbst an, statt so zu tun, als gäbe es keinen Weg.
+   * Leer heißt: nicht anzeigen.
+   */
+  fritzboxUrl: string;
   /** Firmware-Updates automatisch installieren. */
   autoUpdate: boolean;
   /** Zeitfenster für automatische Updates, lokale Zeit `HH:MM`. */

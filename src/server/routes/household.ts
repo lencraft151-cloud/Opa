@@ -30,6 +30,18 @@ export function householdRoutes(container: Container): Router {
            * Oberfläche tot – dazwischen darf jeder wählen.
            */
           pollIntervalSeconds: z.number().int().min(3).max(300).optional(),
+          /*
+           * Adresse der FRITZ!Box-Oberfläche für die eingebettete Ansicht.
+           * Nur `http`/`https` – ein `javascript:` in einem `src` wäre eine
+           * Einladung.
+           */
+          fritzboxUrl: z
+            .string()
+            .max(200)
+            .refine((value) => value === '' || /^https?:\/\/[^\s]+$/i.test(value), {
+              message: 'Adresse muss mit http:// oder https:// beginnen',
+            })
+            .optional(),
           // Firmware-Auto-Updates
           autoUpdate: z.boolean().optional(),
           autoUpdateFrom: z

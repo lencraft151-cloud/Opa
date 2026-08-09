@@ -1,5 +1,6 @@
 import { badRequest, errorSummary } from '../core/errors.js';
 import { createLogger } from '../core/logger.js';
+import type { DiscoverOptions, DiscoveredIntegration } from '../adapters/types.js';
 import type { MediaCommand, SonosPlayer, SonosPlayerState } from '../core/types.js';
 import type { Repositories } from '../storage/repositories.js';
 import { mapWithConcurrency } from '../util/http.js';
@@ -25,8 +26,11 @@ export interface DiscoveredPlayer {
   softwareVersion: string | null;
 }
 
-export interface DiscoverOptions {
-  /** Zusätzlich das Subnetz auf Port 1400 abklopfen, wenn SSDP nichts bringt. */
+export interface SonosFindOptions {
+  /**
+   * Das Subnetz auf Port 1400 abklopfen. `true` erzwingt es, `false`
+   * verbietet es; ohne Angabe geschieht es nur, wenn SSDP nichts gebracht hat.
+   */
   scan?: boolean;
   /** Adressen, die auf jeden Fall gefragt werden – etwa von Hand eingetragene. */
   hosts?: string[];
@@ -54,6 +58,10 @@ export interface SonosOverview {
  *    Räume zusammenlegt.
  */
 export class SonosService {
+  /** Kennung und Name für die gemeinsame Netzwerksuche (`ExtraDiscoverer`). */
+  readonly type = 'sonos';
+  readonly displayName = 'Sonos';
+
   constructor(private readonly repos: Repositories) {}
 
   list(householdId: string): SonosPlayer[] {
@@ -98,8 +106,37 @@ export class SonosService {
    */
   async discover(
     householdId: string,
-    options: DiscoverOptions = {},
+    options: SonosFindOptions = {},
   ): Promise<SonosPlayer[]> {
+    const found = await this.find({
+      ...options,
+      hosts: [...(options.hosts ?? []), ...this.list(householdId).map((player) => player.host)],
+    });
+
+    /*
+     * Ein Lautsprecher antwortet unter jeder Adresse, unter der man ihn
+     * fragt – über seine IP und über die aus der Gruppenauskunft. Ohne diese
+     * Zusammenfassung stünde am Ende „2 Lautsprecher gefunden", wo einer
+     * steht.
+     */
+    const unique = new Map<string, DiscoveredPlayer>();
+    for (const entry of found) if (!unique.has(entry.uuid)) unique.set(entry.uuid, entry);
+
+    const saved: SonosPlayer[] = [];
+    for (const entry of unique.values()) saved.push(await this.upsert(householdId, entry));
+
+    log.info('Sonos-Suche abgeschlossen', { gefunden: saved.length });
+    return saved.sort((a, b) => a.roomName.localeCompare(b.roomName, 'de'));
+  }
+
+  /**
+   * Sucht, ohne etwas zu speichern.
+   *
+   * Getrennt von `discover`, weil die allgemeine Netzwerksuche des Hubs sie
+   * ebenfalls braucht: Dort sollen Lautsprecher *auftauchen*, übernommen
+   * werden sie erst auf Knopfdruck.
+   */
+  async find(options: SonosFindOptions = {}): Promise<DiscoveredPlayer[]> {
     const hosts = new Set<string>();
 
     // Von Hand genannte Adressen zuerst: In Netzen, in denen Multicast nicht
@@ -115,11 +152,13 @@ export class SonosService {
     }
     log.debug('SSDP-Suche beendet', { gefunden: hosts.size });
 
-    // Bereits bekannte Lautsprecher immer mitfragen: Sie sind der schnellste
-    // Weg zurück zur Gruppenauskunft, wenn Multicast gerade nicht durchkommt.
-    for (const player of this.list(householdId)) hosts.add(player.host);
-
-    if (hosts.size === 0 && options.scan !== false) {
+    /*
+     * Abklopfen: erzwungen beim „gründlich suchen", sonst nur als letzter
+     * Ausweg. Bewusst über Port 1400 und nicht über die Liste der allgemeinen
+     * Netzsuche – die entsteht aus Port 80/443, und genau die hat ein
+     * Sonos-Lautsprecher zu.
+     */
+    if (options.scan === true || (hosts.size === 0 && options.scan !== false)) {
       const candidates = await reachableHosts(scannableHosts(), {
         ports: [SONOS_PORT],
         timeoutMs: 300,
@@ -143,15 +182,55 @@ export class SonosService {
       }
     }
 
-    const found = (
-      await mapWithConcurrency([...hosts], 8, (host) => this.describe(host))
-    ).filter((entry): entry is DiscoveredPlayer => entry !== null);
+    return (await mapWithConcurrency([...hosts], 8, (host) => this.describe(host))).filter(
+      (entry): entry is DiscoveredPlayer => entry !== null,
+    );
+  }
 
-    const saved: SonosPlayer[] = [];
-    for (const entry of found) saved.push(await this.upsert(householdId, entry));
+  /**
+   * Für die allgemeine Netzwerksuche: gefundene Lautsprecher in derselben
+   * Form, in der auch Bridges gemeldet werden.
+   *
+   * Damit stehen sie im Assistenten und unter „Gerät hinzufügen" neben Hue
+   * und Shelly – dort sucht man sie, und dort wurden sie bisher nie gefunden,
+   * weil Sonos gar nicht mitgesucht wurde.
+   */
+  async findAsCandidates(options: DiscoverOptions): Promise<DiscoveredIntegration[]> {
+    /*
+     * `scan: undefined` heißt „nur, wenn SSDP nichts gebracht hat" – und
+     * genau das ist hier der wichtige Fall. In Containern, hinter Repeatern
+     * und in manchen Router-Konfigurationen kommt Multicast nicht an; ein
+     * TCP-Durchgang über Port 1400 kostet für ein /24 unter einer Sekunde und
+     * findet die Lautsprecher trotzdem. Beim „gründlich suchen" wird er
+     * ohnehin erzwungen.
+     */
+    const found = await this.find({
+      ssdpTimeoutMs: Math.min(options.timeoutMs, 3000),
+      ...(options.allowScan === true ? { scan: true } : {}),
+      // Bereits übernommene Lautsprecher immer mitfragen: Sie sollen in der
+      // Trefferliste als „bereits verbunden" auftauchen und nicht fehlen.
+      hosts: this.repos.sonos.list().map((player) => player.host),
+    });
 
-    log.info('Sonos-Suche abgeschlossen', { gefunden: saved.length });
-    return saved.sort((a, b) => a.roomName.localeCompare(b.roomName, 'de'));
+    const known = new Set(this.repos.sonos.list().map((player) => player.uuid));
+    const unique = new Map<string, DiscoveredPlayer>();
+    for (const entry of found) if (!unique.has(entry.uuid)) unique.set(entry.uuid, entry);
+
+    return [...unique.values()].map((player) => ({
+      type: 'sonos' as const,
+      host: player.host,
+      externalId: player.uuid,
+      name: `${player.roomName}${player.model ? ` (${player.model})` : ''}`,
+      ...(player.model ? { model: player.model } : {}),
+      // Sonos braucht kein Konto und kein Passwort – der Lautsprecher steht
+      // im eigenen Netz und spricht mit jedem, der fragt.
+      authRequired: false,
+      requiresLinkButton: false,
+      source: 'mdns' as const,
+      // Schon übernommen? Dann steht in der Liste „bereits verbunden" statt
+      // eines Knopfes, der nichts Neues tut.
+      alreadyLinked: known.has(player.uuid),
+    }));
   }
 
   /** Führt einen Befehl aus – Transportbefehle gehen an den Koordinator. */

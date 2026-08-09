@@ -29,6 +29,7 @@ const household = (id: string): Household => ({
   setupStep: 'integrations',
   setupCompletedAt: null,
   pollIntervalSeconds: 15,
+  fritzboxUrl: '',
   pricePerKwh: 0.35,
   currency: 'EUR',
   basePricePerMonth: 0,

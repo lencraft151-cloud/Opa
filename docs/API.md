@@ -292,7 +292,7 @@ Schließt die Einrichtung ab. `400`, solange keine Integration verbunden ist.
 | Methode | Pfad | Beschreibung |
 | --- | --- | --- |
 | `GET` | `/household` | Stammdaten |
-| `PATCH` | `/household` | `pollIntervalSeconds` (3–300, gilt sofort), `name`, `timezone`, `locale`, `pricePerKwh`, `currency`, `basePricePerMonth`, `autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`, `appearance` |
+| `PATCH` | `/household` | `pollIntervalSeconds` (3–300, gilt sofort), `name`, `timezone`, `locale`, `pricePerKwh`, `currency`, `basePricePerMonth`, `autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`, `appearance`, `fritzboxUrl` |
 | `GET` | `/household/summary` | Kennzahlen fürs Dashboard inkl. gestörter Integrationen |
 | `GET` | `/household/tokens` | Tokens (ohne Hash) |
 | `POST` | `/household/tokens` | `{ "name": "Handy" }` → neues Token |
@@ -692,6 +692,13 @@ nicht unter `/devices`.
 | --- | --- | --- |
 | `GET` | `/sonos` | Alle Lautsprecher mit Zustand und Gruppenlage |
 | `POST` | `/sonos/discover` | `{ scan?, host? }` – sucht im Netz; `host` trägt einen von Hand ein |
+
+Sonos taucht außerdem in der allgemeinen Suche auf (`GET /integrations/discover`
+und der zugehörige Stream): Treffer kommen dort mit `"type": "sonos"`. Sie
+werden **nicht** über `POST /integrations` übernommen – dafür gibt es
+`POST /sonos/discover` mit ihrer Adresse. Ein Lautsprecher ist keine
+Integration: kein Passwort, keine Geräteliste, kein Zustand zum Pollen.
+
 | `POST` | `/sonos/:id/command` | Wiedergabebefehl (siehe unten) |
 | `PATCH` | `/sonos/:id` | `{ roomId }` – einem Raum des Hubs zuordnen |
 | `DELETE` | `/sonos/:id` | Lautsprecher vergessen |

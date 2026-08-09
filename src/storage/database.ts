@@ -163,6 +163,8 @@ function migrate(data: DatabaseShape): DatabaseShape {
     household.presence = { ...DEFAULT_PRESENCE, ...(household.presence ?? {}) };
     // Der Abfragetakt kam später dazu; vorher stand er nur in der Umgebung.
     household.pollIntervalSeconds ??= 15;
+    // Der Notausgang zur Box-Oberfläche kam später dazu.
+    household.fritzboxUrl ??= '';
   }
 
   // Benutzer, Sitzungen und Szenen kamen später dazu. Ein Datenstand ohne

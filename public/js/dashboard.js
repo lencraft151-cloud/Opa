@@ -1905,6 +1905,8 @@ async function renderSettings() {
 
     ${appearanceCard()}
 
+    ${fritzboxCard()}
+
     <div class="card">
       <h2>Integrationen</h2>
       <div class="row">
@@ -2767,6 +2769,54 @@ function diagnosticsReport(report) {
     ${skipped}`;
 }
 
+/**
+ * Die FRITZ!Box-Oberfläche im Hub.
+ *
+ * Der Notausgang für den Fall, dass die Smart-Home-Anbindung partout nicht
+ * will. Statt zu behaupten, es gäbe keinen Weg, zeigt der Hub die Oberfläche
+ * der Box selbst – dort funktioniert alles, was die Box kann.
+ *
+ * Ehrlich dazugesagt: Viele FRITZ!Boxen verbieten das Einbetten in fremde
+ * Seiten (`X-Frame-Options`). Ob es klappt, entscheidet die Box, nicht der
+ * Hub – deshalb steht „in neuem Fenster öffnen" gleichberechtigt daneben.
+ * Der Weg geht immer.
+ */
+function fritzboxCard() {
+  const url = store.household?.fritzboxUrl ?? '';
+
+  return `<div class="card" id="card-fritzbox">
+    <h2>FRITZ!Box-Oberfläche</h2>
+    <p class="muted small">
+      Trage hier die Adresse deiner Box ein, dann kannst du sie direkt aus dem Hub heraus
+      bedienen. Nützlich, solange die Smart-Home-Anbindung klemmt: In der Box-Oberfläche
+      funktioniert alles wie gewohnt.
+    </p>
+    <form id="form-fritzbox" class="form inline">
+      <input name="fritzboxUrl" class="grow" maxlength="200" placeholder="http://fritz.box"
+             value="${esc(url)}" />
+      <button type="submit" class="primary">Speichern</button>
+    </form>
+    ${
+      url
+        ? `<div class="row tight" style="margin:.6rem 0">
+             <a class="linkbutton" href="${esc(url)}" target="_blank" rel="noreferrer noopener">
+               In neuem Fenster öffnen ↗
+             </a>
+             <span class="muted small">Klappt immer – auch wenn die Box das Einbetten verbietet.</span>
+           </div>
+           <div class="embed-frame">
+             <iframe src="${esc(url)}" title="FRITZ!Box" loading="lazy"
+                     referrerpolicy="no-referrer"></iframe>
+           </div>
+           <p class="muted small">
+             Bleibt der Rahmen leer, verbietet deine Box das Einbetten. Dann führt nur der
+             Knopf darüber zum Ziel – das ist eine Einstellung der Box, keine des Hubs.
+           </p>`
+        : ''
+    }
+  </div>`;
+}
+
 // ---------------------------------------------------------------------------
 // Nextcloud
 // ---------------------------------------------------------------------------
@@ -3507,6 +3557,18 @@ function wireSettings(panel) {
         success: `Der Hub sieht jetzt alle ${seconds} Sekunden nach.`,
         successHint: 'Der neue Takt gilt sofort – kein Neustart nötig.',
       },
+    );
+    if (!updated) return;
+    store.household = updated;
+    void renderSettings();
+  });
+
+  panel.querySelector('#form-fritzbox')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const value = String(new FormData(event.target).get('fritzboxUrl') ?? '').trim();
+    const updated = await guard(
+      () => api('/household', { method: 'PATCH', body: { fritzboxUrl: value } }),
+      { success: value ? 'Adresse gespeichert.' : 'Ansicht ausgeblendet.' },
     );
     if (!updated) return;
     store.household = updated;

@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { upstreamError } from '../../core/errors.js';
 import { createLogger } from '../../core/logger.js';
 import { request } from '../../util/http.js';
-import { child, childText, parseXml, type XmlNode } from '../../util/xml.js';
+import { child, children, childText, parseXml, type XmlNode } from '../../util/xml.js';
 import { AuthenticationRequiredError } from '../types.js';
 
 const log = createLogger('fritzbox:client');
@@ -132,18 +132,61 @@ export class FritzboxClient {
       throw upstreamError('Die FRITZ!Box hat keine Anmeldeaufgabe geschickt.');
     }
 
+    /*
+     * Der Benutzername ist der Grund, warum „das Kennwort nie geht".
+     *
+     * Eine Box, die auf „Anmeldung nur mit Kennwort" steht, hat trotzdem
+     * einen Benutzer – sie hat ihn nur selbst angelegt und nennt ihn
+     * `fritz1234`. Wer nichts einträgt, schickte bisher eine **leere**
+     * Kennung, und die weist die Box ab: richtiges Kennwort, falscher (weil
+     * gar kein) Benutzer.
+     *
+     * Die Box verrät ihn selbst. In der Anmeldeaufgabe steht eine Liste ihrer
+     * Benutzer, und derjenige mit `last="1"` ist der zuletzt verwendete –
+     * genau der, den ihre eigene Anmeldemaske vorschlägt.
+     */
+    const users = listUsers(start);
+    const username = this.username.trim() || defaultUser(users) || '';
+
     const response = await solveChallenge(challenge, this.password);
-    const query = new URLSearchParams({ username: this.username, response });
+    const query = new URLSearchParams({ username, response });
     const result = await this.fetchSessionInfo(`?version=2&${query.toString()}`);
 
     const sid = childText(result, 'SID');
     if (!sid || sid === INVALID_SID) {
       const blockedFor = Number(childText(result, 'BlockTime') ?? '0');
+      if (blockedFor > 0) {
+        this.failAuth(
+          `Die FRITZ!Box sperrt weitere Anmeldeversuche noch ${blockedFor} Sekunden.`,
+          blockedFor * 1000,
+        );
+      }
+      /*
+       * Ohne Sperrzeit war schlicht etwas falsch. Welche Benutzer es gibt,
+       * weiß die Box – und damit auch, was hier einzutragen wäre. Das zu
+       * verschweigen wäre die zweite Hälfte desselben Fehlers.
+       */
       this.failAuth(
-        blockedFor > 0
-          ? `Die FRITZ!Box sperrt weitere Anmeldeversuche noch ${blockedFor} Sekunden.`
-          : `Anmeldung an der FRITZ!Box ${this.host} fehlgeschlagen.`,
-        blockedFor > 0 ? blockedFor * 1000 : undefined,
+        users.length > 1
+          ? `Die FRITZ!Box ${this.host} hat die Anmeldung als „${username || 'ohne Benutzer'}" abgelehnt. ` +
+              `Angelegt sind dort: ${users.map((user) => `„${user.name}"`).join(', ')}.`
+          : `Anmeldung an der FRITZ!Box ${this.host} fehlgeschlagen` +
+              (username ? ` (Benutzer „${username}").` : '.'),
+      );
+    }
+
+    /*
+     * Angemeldet heißt noch nicht berechtigt. Ohne das Recht „HomeAuto" ist
+     * die Smart-Home-Schnittstelle zu, und jeder Aufruf käme als nackter
+     * HTTP 403 zurück – ein Fehler, aus dem niemand schließen kann, dass ein
+     * Häkchen in der Benutzerverwaltung fehlt.
+     */
+    const rights = readRights(result);
+    if (rights.size > 0 && !rights.has('HomeAuto')) {
+      this.failAuth(
+        `Der Benutzer „${username}" darf an dieser FRITZ!Box keine Smart-Home-Geräte steuern. ` +
+          'In der Box unter „System → FRITZ!Box-Benutzer → (Benutzer) → Berechtigungen" ' +
+          '„Smart-Home-Geräte und Automatisierung steuern" anhaken.',
       );
     }
 
@@ -307,6 +350,57 @@ export async function solveChallenge(challenge: string, password: string): Promi
 /** Nur für Tests und Fehlersuche. */
 export function isValidSid(sid: string | undefined): boolean {
   return Boolean(sid) && sid !== INVALID_SID;
+}
+
+export interface FritzUser {
+  name: string;
+  /** Der zuletzt verwendete – ihn schlägt auch die Box selbst vor. */
+  last: boolean;
+}
+
+/**
+ * Die Benutzerliste aus der Anmeldeaufgabe.
+ *
+ * ```xml
+ * <Users><User last="1">fritz3000</User><User>anna</User></Users>
+ * ```
+ */
+export function listUsers(sessionInfo: XmlNode): FritzUser[] {
+  const container = child(sessionInfo, 'Users');
+  if (!container) return [];
+  return children(container, 'User')
+    .map((entry) => ({ name: entry.text.trim(), last: entry.attrs['last'] === '1' }))
+    .filter((entry) => entry.name.length > 0);
+}
+
+/**
+ * Wen die Box vorschlägt, wenn der Mensch keinen Namen eingetragen hat.
+ *
+ * Erst der zuletzt verwendete, sonst der einzige. Gibt es mehrere und keinen
+ * zuletzt verwendeten, wird geraten – und Raten wäre hier falsch: Dann bleibt
+ * es leer, und die Fehlermeldung nennt die Auswahl.
+ */
+export function defaultUser(users: readonly FritzUser[]): string | null {
+  const last = users.find((user) => user.last);
+  if (last) return last.name;
+  if (users.length === 1) return users[0]?.name ?? null;
+  return null;
+}
+
+/** Die Rechte der Sitzung, z. B. `HomeAuto`, `Dial`, `NAS`. */
+export function readRights(sessionInfo: XmlNode): Set<string> {
+  const container = child(sessionInfo, 'Rights');
+  if (!container) return new Set();
+  const names = children(container, 'Name')
+    .map((entry) => entry.text.trim())
+    .filter(Boolean);
+  const access = children(container, 'Access').map((entry) => entry.text.trim());
+  const granted = new Set<string>();
+  names.forEach((name, index) => {
+    // Zugriffsstufe 0 heißt „kein Zugriff“ – der Name allein genügt nicht.
+    if ((access[index] ?? '2') !== '0') granted.add(name);
+  });
+  return granted;
 }
 
 export { child, AHA_PATH, LOGIN_PATH };

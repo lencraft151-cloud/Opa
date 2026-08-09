@@ -400,6 +400,7 @@ const household = (id: string): Household => ({
   setupStep: 'done',
   setupCompletedAt: nowIso(),
   pollIntervalSeconds: 15,
+  fritzboxUrl: '',
   pricePerKwh: 0.35,
   currency: 'EUR',
   basePricePerMonth: 0,
@@ -502,6 +503,17 @@ describe('Sonos-Dienst', () => {
     assert.equal(players[0]?.uuid, 'RINCON_B8E93758A1E001400');
   });
 
+  it('zählt einen Lautsprecher einmal, auch wenn er unter zwei Adressen antwortet', async () => {
+    // Über die Gruppenauskunft kommt derselbe Lautsprecher ein zweites Mal
+    // herein. „2 Lautsprecher gefunden" wäre dann schlicht falsch.
+    const players = await service.discover('hh_1', {
+      hosts: [`127.0.0.1:${speaker.port}`, `localhost:${speaker.port}`],
+      scan: false,
+      ssdpTimeoutMs: 50,
+    });
+    assert.equal(players.length, 1);
+  });
+
   it('legt denselben Lautsprecher nach einem Adresswechsel nicht doppelt an', async () => {
     // Erkannt wird über die UUID – sonst stünde nach jedem Neustart des
     // Routers ein zweiter, toter Eintrag in der Liste.
@@ -543,6 +555,70 @@ describe('Sonos-Dienst', () => {
 
   it('erklärt einen Befehl an einen entfernten Lautsprecher', async () => {
     await assert.rejects(() => service.execute('snp_gibtesnicht', { type: 'play' }), /nicht \(mehr\)/);
+  });
+});
+
+/**
+ * Sonos in der allgemeinen Netzwerksuche.
+ *
+ * Der Fehler, um den es hier geht, war einfach: Wer „Netzwerk durchsuchen"
+ * drückte, fand alles außer Lautsprechern – Sonos wurde schlicht nicht
+ * mitgesucht. Jetzt meldet der Dienst seine Treffer in derselben Form wie ein
+ * Adapter, und die Suche nimmt ihn als Mitsucher auf.
+ */
+describe('Sonos in der Netzwerksuche', () => {
+  let dir: string;
+  let speaker: FakeSonos;
+  let service: SonosService;
+
+  before(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'smarthome-sonos-suche-'));
+    speaker = await startFakeSonos();
+    const db = new Database(path.join(dir, 'db.json'));
+    await db.load();
+    await db.update((data) => {
+      data.households.push(household('hh_1'));
+    });
+    service = new SonosService(createRepositories(db));
+  });
+
+  after(async () => {
+    await new Promise<void>((resolve) => speaker.server.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('meldet sich mit Kennung und Namen wie ein Adapter', () => {
+    assert.equal(service.type, 'sonos');
+    assert.equal(service.displayName, 'Sonos');
+  });
+
+  it('macht aus einem gefundenen Lautsprecher einen Treffer der Suche', async () => {
+    // Bereits übernommene Lautsprecher werden immer mitgefragt – so stehen
+    // sie in der Trefferliste, statt dort zu fehlen.
+    await service.discover('hh_1', {
+      hosts: [`127.0.0.1:${speaker.port}`],
+      scan: false,
+      ssdpTimeoutMs: 50,
+    });
+
+    const candidates = await service.findAsCandidates({
+      timeoutMs: 100,
+      allowCloud: false,
+      allowScan: false,
+    });
+
+    const entry = candidates.find((candidate) => candidate.host === `127.0.0.1:${speaker.port}`);
+    assert.ok(entry, 'der Lautsprecher steht in der Trefferliste');
+    // Schon übernommen – die Liste sagt das, statt einen Knopf anzubieten,
+    // der nichts Neues tut.
+    assert.equal(entry.alreadyLinked, true);
+    assert.equal(entry.type, 'sonos');
+    assert.match(entry.name, /Küche/);
+    // Kein Passwort, kein Knopfdruck – deshalb kann „Mit allen verbinden"
+    // ihn ohne Rückfrage übernehmen.
+    assert.equal(entry.authRequired, false);
+    assert.equal(entry.requiresLinkButton, false);
+    assert.equal(entry.externalId, 'RINCON_B8E93758A1E001400');
   });
 });
 

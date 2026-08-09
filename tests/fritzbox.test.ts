@@ -610,6 +610,110 @@ describe('Anmeldung ohne Benutzernamen', () => {
   });
 
   /**
+   * Der häufigste Grund für „das Kennwort geht nie".
+   *
+   * Eine Box mit „Anmeldung nur mit Kennwort" hat trotzdem einen Benutzer –
+   * sie hat ihn selbst angelegt und nennt ihn `fritz1234`. Wer nichts
+   * einträgt, schickte bisher eine leere Kennung, und die weist die Box ab.
+   * Den richtigen Namen nennt sie in derselben Antwort, in der auch die
+   * Aufgabe steht.
+   */
+  it('nimmt den Standardbenutzer, den die Box selbst nennt', async () => {
+    const challenge = '1234567z';
+    const password = 'boxkennwort';
+    let seenUsername: string | null = null;
+
+    const box = http.createServer(async (req, res) => {
+      const url = new URL(req.url ?? '/', 'http://box');
+      if (url.pathname === '/webservices/homeautoswitch.lua') {
+        res.writeHead(200, { 'content-type': 'text/xml' });
+        res.end('<devicelist version="1"></devicelist>');
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/xml' });
+
+      const response = url.searchParams.get('response');
+      if (!response) {
+        res.end(
+          `<?xml version="1.0"?><SessionInfo><SID>0000000000000000</SID>` +
+            `<Challenge>${challenge}</Challenge>` +
+            `<Users><User>gast</User><User last="1">fritz3000</User></Users></SessionInfo>`,
+        );
+        return;
+      }
+
+      seenUsername = url.searchParams.get('username');
+      const expected = await solveChallenge(challenge, password);
+      // Nur der zuletzt verwendete Benutzer wird angenommen.
+      const ok = response === expected && seenUsername === 'fritz3000';
+      res.end(
+        `<?xml version="1.0"?><SessionInfo>` +
+          `<SID>${ok ? 'abcdef0123456789' : '0000000000000000'}</SID>` +
+          `<Rights><Name>HomeAuto</Name><Access>2</Access></Rights></SessionInfo>`,
+      );
+    });
+
+    const port = await new Promise<number>((resolve) => {
+      box.listen(0, '127.0.0.1', () => resolve((box.address() as AddressInfo).port));
+    });
+
+    try {
+      // Kein Benutzername eingetragen – der Hub holt ihn sich bei der Box.
+      const client = new FritzboxClient(`127.0.0.1:${port}`, '', password);
+      await client.deviceList();
+      assert.equal(seenUsername, 'fritz3000');
+    } finally {
+      box.close();
+    }
+  });
+
+  /**
+   * Angemeldet heißt noch nicht berechtigt: Ohne das Recht „HomeAuto" ist die
+   * Smart-Home-Schnittstelle zu. Das als nackten HTTP 403 zu melden wäre eine
+   * Auskunft, aus der niemand auf ein fehlendes Häkchen schließen kann.
+   */
+  it('nennt eine fehlende Smart-Home-Berechtigung beim Namen', async () => {
+    const challenge = '1234567z';
+    const password = 'boxkennwort';
+
+    const box = http.createServer(async (req, res) => {
+      const url = new URL(req.url ?? '/', 'http://box');
+      res.writeHead(200, { 'content-type': 'text/xml' });
+      if (!url.searchParams.get('response')) {
+        res.end(
+          `<?xml version="1.0"?><SessionInfo><SID>0000000000000000</SID>` +
+            `<Challenge>${challenge}</Challenge><Users><User last="1">anna</User></Users></SessionInfo>`,
+        );
+        return;
+      }
+      // Anmeldung klappt – aber ohne HomeAuto.
+      res.end(
+        `<?xml version="1.0"?><SessionInfo><SID>abcdef0123456789</SID>` +
+          `<Rights><Name>Dial</Name><Access>2</Access><Name>NAS</Name><Access>2</Access></Rights>` +
+          `</SessionInfo>`,
+      );
+    });
+
+    const port = await new Promise<number>((resolve) => {
+      box.listen(0, '127.0.0.1', () => resolve((box.address() as AddressInfo).port));
+    });
+
+    try {
+      const client = new FritzboxClient(`127.0.0.1:${port}`, '', password);
+      await assert.rejects(
+        () => client.deviceList(),
+        (err: Error) => {
+          assert.match(err.message, /keine Smart-Home-Geräte steuern/);
+          assert.match(err.message, /Berechtigungen/);
+          return true;
+        },
+      );
+    } finally {
+      box.close();
+    }
+  });
+
+  /**
    * Meldet die Box schon in der Anmeldeaufgabe eine laufende Sperre, wird sie
    * gar nicht erst beantwortet – jeder Versuch währenddessen verlängert sie.
    */

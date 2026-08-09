@@ -14,6 +14,7 @@ import { createId, nowIso } from '../util/id.js';
 import { reachableHosts, scannableHosts } from '../util/net.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import type {
+  DiscoverOptions,
   AdapterDevice,
   DiscoveredIntegration,
   IntegrationContext,
@@ -41,9 +42,22 @@ export interface SyncResult {
  */
 export type DiscoveryEvent =
   | { kind: 'found'; entry: DiscoveredIntegration }
-  | { kind: 'progress'; pending: IntegrationType[]; message: string }
-  | { kind: 'failed'; adapter: IntegrationType; message: string }
+  | { kind: 'progress'; pending: string[]; message: string }
+  | { kind: 'failed'; adapter: string; message: string }
   | { kind: 'done'; count: number };
+
+/**
+ * Etwas, das mitsucht, ohne ein Adapter zu sein.
+ *
+ * Gebraucht für Sonos: Die Lautsprecher gehören in dieselbe Trefferliste,
+ * aber nicht in das Integrationsmodell – sie haben keine Zugangsdaten, keine
+ * Geräteliste im Sinne des Hubs und keinen Zustand, den man pollen müsste.
+ */
+export interface ExtraDiscoverer {
+  readonly type: string;
+  readonly displayName: string;
+  findAsCandidates(options: DiscoverOptions): Promise<DiscoveredIntegration[]>;
+}
 
 export interface AddIntegrationInput extends LinkRequest {
   type: IntegrationType;
@@ -58,6 +72,8 @@ export class IntegrationService {
     private readonly rooms: RoomService,
     private readonly telemetry: TelemetryService,
     private readonly config: AppConfig,
+    /** Mitsucher außerhalb des Adaptermodells – siehe `ExtraDiscoverer`. */
+    private readonly extras: readonly ExtraDiscoverer[] = [],
   ) {}
 
   list(householdId: string): Integration[] {
@@ -118,8 +134,9 @@ export class IntegrationService {
       seen.add(key);
 
       // Bereits eingebundene Geräte markieren statt ausblenden – so sieht der
-      // Nutzer im Assistenten, dass die Bridge gefunden wurde.
-      entry.alreadyLinked = existing.some(
+      // Nutzer im Assistenten, dass die Bridge gefunden wurde. Ein Mitsucher
+      // darf das selbst schon festgestellt haben; seine Angabe bleibt stehen.
+      entry.alreadyLinked ||= existing.some(
         (integration) =>
           integration.type === entry.type &&
           (externalIdOf(integration) === entry.externalId ||
@@ -157,18 +174,49 @@ export class IntegrationService {
       scanHosts,
     };
 
+    // Mitsucher gehören in dieselbe Runde – gefiltert wie die Adapter auch.
+    const extras = options.type
+      ? this.extras.filter((extra) => extra.type === options.type)
+      : this.extras;
+
     emit({
       kind: 'progress',
-      pending: adapters.map((adapter) => adapter.type),
+      pending: [...adapters.map((adapter) => adapter.type), ...extras.map((extra) => extra.type)],
       message: allowScan
         ? `${scanHosts?.length ?? 0} belegte Adressen im Netz – sie werden jetzt abgefragt.`
         : 'Der Hub horcht ins Netz.',
     });
 
     // Jeder Hersteller meldet für sich, sobald er fertig ist.
-    const pending = new Set(adapters.map((adapter) => adapter.type));
-    await Promise.all(
-      adapters.map(async (adapter) => {
+    const pending = new Set<string>([
+      ...adapters.map((adapter) => adapter.type),
+      ...extras.map((extra) => extra.type),
+    ]);
+
+    const finish = (type: string, displayName: string, started: number): void => {
+      pending.delete(type);
+      emit({
+        kind: 'progress',
+        pending: [...pending],
+        message: `${displayName}: fertig nach ${Math.round((Date.now() - started) / 100) / 10} s`,
+      });
+    };
+
+    const extraJobs = extras.map(async (extra) => {
+      const started = Date.now();
+      try {
+        for (const entry of await extra.findAsCandidates(discoverOptions)) publish(entry);
+      } catch (err) {
+        log.warn('Discovery fehlgeschlagen', { adapter: extra.type, error: errorMessage(err) });
+        emit({ kind: 'failed', adapter: extra.type, message: errorMessage(err) });
+      } finally {
+        finish(extra.type, extra.displayName, started);
+      }
+    });
+
+    await Promise.all([
+      ...extraJobs,
+      ...adapters.map(async (adapter) => {
         const started = Date.now();
         try {
           for (const entry of await adapter.discover(discoverOptions)) publish(entry);
@@ -179,17 +227,10 @@ export class IntegrationService {
           });
           emit({ kind: 'failed', adapter: adapter.type, message: errorMessage(err) });
         } finally {
-          pending.delete(adapter.type);
-          emit({
-            kind: 'progress',
-            pending: [...pending],
-            message: `${adapter.displayName}: fertig nach ${Math.round(
-              (Date.now() - started) / 100,
-            ) / 10} s`,
-          });
+          finish(adapter.type, adapter.displayName, started);
         }
       }),
-    );
+    ]);
 
     emit({ kind: 'done', count: seen.size });
   }
