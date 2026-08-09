@@ -11,10 +11,12 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { promisify } from 'node:util';
 import { inferKind } from '../src/adapters/homematic/mapping.ts';
 import { setLogLevel } from '../src/core/logger.ts';
 import {
@@ -25,11 +27,18 @@ import {
   type Integration,
 } from '../src/core/types.ts';
 import { BackupService, parseBackup } from '../src/services/backupService.ts';
-import { compareVersions, parseChangelog } from '../src/services/hubUpdateService.ts';
+import {
+  blockingChanges,
+  compareVersions,
+  HubUpdateService,
+  parseChangelog,
+} from '../src/services/hubUpdateService.ts';
 import { Database } from '../src/storage/database.ts';
 import { effectiveDevice } from '../src/storage/repositories.ts';
 
 setLogLevel('silent');
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 
@@ -136,6 +145,150 @@ describe('Fassungen vergleichen', () => {
     assert.equal(compareVersions('v1.3.0', '1.3.0'), 0);
     assert.equal(compareVersions('1.3', '1.3.0'), 0);
     assert.ok(compareVersions('1.3.1', '1.3') > 0);
+  });
+});
+
+describe('Was einer Aktualisierung im Weg steht', () => {
+  it('zählt geänderte verfolgte Dateien', () => {
+    const porcelain = [' M src/index.ts', 'M  package.json', 'D  README.md'].join('\n');
+    assert.deepEqual(blockingChanges(porcelain), ['src/index.ts', 'package.json', 'README.md']);
+  });
+
+  it('lässt Unverfolgtes durch', () => {
+    /*
+     * Der eigentliche Punkt dieser Funktion. `data/`, `.env` und
+     * `node_modules/` sind auf jeder normalen Installation vorhanden und
+     * unverfolgt; ein `git pull --ff-only` fasst sie nicht an. Die vorige
+     * Fassung wertete jede Zeile als Hindernis und verweigerte damit
+     * ausgerechnet dort die Aktualisierung, wo alles in Ordnung war.
+     */
+    const porcelain = ['?? data/', '?? .env', '?? node_modules/', '!! dist/'].join('\n');
+    assert.deepEqual(blockingChanges(porcelain), []);
+  });
+
+  it('nimmt bei Umbenennungen den neuen Namen', () => {
+    assert.deepEqual(blockingChanges('R  alt.ts -> neu.ts'), ['neu.ts']);
+  });
+
+  it('kommt mit leerer Ausgabe zurecht', () => {
+    assert.deepEqual(blockingChanges(''), []);
+    assert.deepEqual(blockingChanges('\n\n'), []);
+  });
+});
+
+describe('Arbeitskopie nachholen', () => {
+  let dir: string;
+  let upstream: string;
+  let install: string;
+
+  const git = async (cwd: string, ...args: string[]): Promise<string> => {
+    const { stdout } = await execFileAsync('git', args, { cwd });
+    return stdout;
+  };
+
+  before(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'sh-bootstrap-'));
+    upstream = path.join(dir, 'upstream');
+    install = path.join(dir, 'install');
+
+    // Ein winziges „Repository" mit zwei Fassungen.
+    await mkdir(path.join(upstream, 'src'), { recursive: true });
+    await writeFile(path.join(upstream, 'src', 'index.js'), "console.log('alt')\n");
+    await writeFile(path.join(upstream, '.gitignore'), 'data/\n.env\n');
+    await git(upstream, 'init', '-q', '-b', 'main');
+    await git(upstream, 'config', 'user.email', 'test@example.invalid');
+    await git(upstream, 'config', 'user.name', 'Test');
+    await git(upstream, 'add', '-A');
+    await git(upstream, 'commit', '-qm', 'erste Fassung');
+    await writeFile(path.join(upstream, 'src', 'index.js'), "console.log('neu')\n");
+    await git(upstream, 'add', '-A');
+    await git(upstream, 'commit', '-qm', 'zweite Fassung');
+
+    // Eine Installation ohne `.git`: alter Quelltext, daneben die Daten.
+    await mkdir(path.join(install, 'src'), { recursive: true });
+    await mkdir(path.join(install, 'data'), { recursive: true });
+    await writeFile(path.join(install, 'src', 'index.js'), "console.log('alt')\n");
+    await writeFile(path.join(install, '.gitignore'), 'data/\n.env\n');
+    await writeFile(path.join(install, 'data', 'smarthome.json'), '{"households":[]}\n');
+    await writeFile(path.join(install, '.env'), 'SECRET_KEY=geheim\n');
+  });
+
+  after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('meldet „bootstrap", wenn keine Arbeitskopie da ist', async () => {
+    const service = new HubUpdateService('1.0.0', {
+      checkUrl: null,
+      root: install,
+      repoUrl: upstream,
+      branch: 'main',
+      dataDir: path.join(install, 'data'),
+    });
+    const info = await service.info();
+    assert.equal(info.mode, 'bootstrap');
+    assert.equal(info.canUpdate, true, 'fehlende Arbeitskopie ist kein Hindernis mehr');
+    assert.match(String(info.reason), /holt sie sich/);
+  });
+
+  it('verweigert ohne hinterlegte Adresse – aber sagt, welche fehlt', async () => {
+    const service = new HubUpdateService('1.0.0', {
+      checkUrl: null,
+      root: install,
+      repoUrl: null,
+    });
+    const info = await service.info();
+    assert.equal(info.mode, 'none');
+    assert.equal(info.canUpdate, false);
+    assert.match(String(info.reason), /HUB_REPO_URL/);
+  });
+
+  it('zieht den Quelltext und lässt die Daten liegen', async () => {
+    const service = new HubUpdateService('1.0.0', {
+      checkUrl: null,
+      root: install,
+      repoUrl: upstream,
+      branch: 'main',
+      dataDir: path.join(install, 'data'),
+    });
+
+    // `npm install` und `npm run build` gehören nicht in einen Test – geprüft
+    // wird der Schritt, der die Daten gefährden könnte.
+    await service.fetchSources();
+
+    assert.equal(
+      await readFile(path.join(install, 'src', 'index.js'), 'utf8'),
+      "console.log('neu')\n",
+      'der Quelltext ist die neue Fassung',
+    );
+    assert.equal(
+      await readFile(path.join(install, 'data', 'smarthome.json'), 'utf8'),
+      '{"households":[]}\n',
+      'die Datenbank ist unangetastet',
+    );
+    assert.equal(
+      await readFile(path.join(install, '.env'), 'utf8'),
+      'SECRET_KEY=geheim\n',
+      'der Schlüssel ist unangetastet',
+    );
+
+    // Und danach ist es eine gewöhnliche Arbeitskopie.
+    const after = await service.info();
+    assert.equal(after.mode, 'pull');
+    assert.equal(after.canUpdate, true);
+  });
+
+  it('bricht ab, wenn die Daten unter einem Pfad des Quelltexts liegen', async () => {
+    // `DATA_DIR=./src` wäre eine unglückliche, aber mögliche Einstellung –
+    // und ein `checkout -f` würde die Datenbank überschreiben.
+    const service = new HubUpdateService('1.0.0', {
+      checkUrl: null,
+      root: install,
+      repoUrl: upstream,
+      branch: 'main',
+      dataDir: path.join(install, 'src'),
+    });
+    await assert.rejects(() => service.fetchSources(), /überschreiben/);
   });
 });
 

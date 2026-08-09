@@ -125,16 +125,28 @@ unter `/updates`.
 
 ```json
 { "currentVersion": "1.3.0", "latestVersion": "1.3.0", "updateAvailable": false,
-  "pending": [], "current": { "version": "1.3.0", "date": "2026-08-08",
+  "pending": [], "current": { "version": "1.3.0", "date": "2026-08-09",
   "body": "**FRITZ!Box (experimentell).** …" },
-  "checkedAt": null, "canUpdate": false,
-  "reason": "In der Arbeitskopie liegen ungespeicherte Änderungen. …" }
+  "checkedAt": null, "canUpdate": true, "mode": "pull", "reason": null }
 ```
 
 `pending` sind alle Abschnitte zwischen der laufenden und der neuesten Fassung –
-was eine Aktualisierung brächte, *bevor* man sie auslöst. `canUpdate` sagt, ob
-der Hub sich hier überhaupt selbst aktualisieren kann; `reason` sagt, warum
-nicht.
+was eine Aktualisierung brächte, *bevor* man sie auslöst.
+
+`mode` sagt, was beim Aktualisieren passieren würde:
+
+| Wert | Bedeutung |
+| --- | --- |
+| `pull` | Es gibt eine Arbeitskopie, sie wird nachgezogen |
+| `bootstrap` | Es gibt keine – der Hub holt sie sich zuerst selbst |
+| `none` | Geht nicht; `reason` sagt, warum |
+
+`reason` steht bei `bootstrap` ebenfalls – dort als Ankündigung, nicht als
+Absage.
+
+Als Hindernis zählen nur **geänderte verfolgte** Dateien. Unverfolgtes (`data/`,
+`.env`, `node_modules/`) fasst ein `git pull --ff-only` nicht an und blockiert
+deshalb nichts.
 
 ### `GET /system/changelog`
 Das vollständige Änderungsprotokoll, neueste Fassung zuerst:
@@ -150,7 +162,13 @@ Hause.
 
 ### `POST /system/version/install`
 Führt `git pull --ff-only`, `npm install --omit=dev` und `npm run build` aus.
-Nur Administratoren; nur aus einer sauberen Git-Arbeitskopie, sonst `400`.
+Nur Administratoren.
+
+Bei `mode: "bootstrap"` gehen `git init`, `git remote add`, `git fetch` und
+`git checkout -f` voraus – der Hub macht aus der Installation zuerst eine
+Arbeitskopie. Git fasst dabei nur verfolgte Dateien an; `DATA_DIR`, `.env` und
+`node_modules/` bleiben liegen. Führt das Repository einen Pfad, unter dem
+`DATA_DIR` liegt, bricht er vorher ab.
 
 Antwort `202`: `{ "log": ["$ git pull --ff-only", "…"], "restartRequired": true }`.
 Den Neustart des Dienstes übernimmt der Hub **nicht** – das ist Sache von

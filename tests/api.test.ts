@@ -36,6 +36,8 @@ function testConfig(dataDir: string): AppConfig {
     allowCloudDiscovery: false,
     discoveryTimeoutMs: 500,
     hubUpdateCheckUrl: null,
+    hubRepoUrl: null,
+    hubBranch: 'main',
     logLevel: 'silent',
   };
 }

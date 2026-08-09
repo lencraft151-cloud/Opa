@@ -449,16 +449,35 @@ aus dem eigenen Verzeichnis. Steht eine neuere Fassung bereit, stehen deren
 Änderungen **vor** dem Knopf, nicht dahinter – eine Aktualisierung, deren Inhalt
 man erst danach erfährt, ist eine Zumutung.
 
+**Fehlt die Arbeitskopie, holt er sie sich.** Läuft der Hub aus einem entpackten
+Archiv oder einem Abbild ohne `.git`, macht der erste Aktualisierungsknopfdruck
+zunächst eine Arbeitskopie daraus: `git init`, `git fetch`, `git checkout -f`.
+
+Der Punkt dabei ist, was dabei *nicht* passiert. Git fasst nur an, was es selbst
+führt – die Datenbank, die Messwerte, `.env` und `node_modules` sind unverfolgt
+und bleiben unberührt liegen. Deshalb wird auch nicht woandershin geklont und
+zurückkopiert: Was nicht bewegt wird, kann nicht verlorengehen. Vorher prüft der
+Hub zusätzlich, ob das Repository einen Pfad führt, unter dem `DATA_DIR` liegt;
+wäre das so, bricht er ab, statt die Daten zu überschreiben.
+
+Woher der Quelltext kommt, steht in `HUB_REPO_URL` (mit sinnvoller Vorgabe),
+welcher Zweig in `HUB_BRANCH`.
+
 Drei Dinge tut der Hub bewusst nicht:
 
 - **Ungefragt nach Hause telefonieren.** Ohne gesetztes `HUB_UPDATE_CHECK_URL`
   fragt er niemanden.
-- **Heimlich aktualisieren.** Die Aktualisierung läuft nur auf Knopfdruck und
-  nur aus einer sauberen Git-Arbeitskopie – liegt dort etwas Ungespeichertes,
-  lehnt er ab, statt es zu überschreiben.
+- **Heimlich aktualisieren.** Die Aktualisierung läuft nur auf Knopfdruck. Sind
+  am Quelltext selbst Änderungen offen, lehnt er ab und nennt die Dateien –
+  eigene Anpassungen werden nicht überschrieben. Unverfolgtes stört dabei nicht:
+  `data/`, `.env` und `node_modules/` liegen auf jeder Installation herum und
+  werden von einem `git pull` gar nicht angefasst.
 - **Behaupten, er sei fertig.** Nach `git pull`, `npm install` und `npm run
   build` sagt er, dass ein Neustart des Dienstes fehlt. Den erledigt systemd,
   Docker oder pm2 – nicht er selbst.
+
+Und einen Fall kann er nicht lösen: Ist `git` auf dem System gar nicht
+installiert, sagt er das und nennt den Befehl, der es nachholt.
 
 ---
 
@@ -529,6 +548,8 @@ Alle Werte kommen aus Umgebungsvariablen oder `.env` (siehe `.env.example`):
 | `ALLOW_CLOUD_DISCOVERY` | `true` | `discovery.meethue.com` nutzen |
 | `DISCOVERY_TIMEOUT_MS` | `5000` | Timeout der Gerätesuche |
 | `HUB_UPDATE_CHECK_URL` | – | Adresse für die Prüfung auf eine neuere Fassung des Hubs. Leer heißt: gar nicht fragen |
+| `HUB_REPO_URL` | Projekt-Repository | Woher der Quelltext kommt, wenn keine Arbeitskopie da ist |
+| `HUB_BRANCH` | `main` | Zweig, der dabei gezogen wird |
 | `LOG_LEVEL` | `info` | `trace`…`error`, `silent` |
 
 ---
@@ -628,7 +649,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 378 Tests, node:test
+npm test        # 386 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 

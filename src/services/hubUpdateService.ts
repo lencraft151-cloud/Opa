@@ -43,6 +43,22 @@ export interface ChangelogEntry {
   body: string;
 }
 
+/**
+ * Wie eine Aktualisierung hier ablaufen würde.
+ *
+ * - `pull` – es gibt eine Arbeitskopie, es wird nachgezogen.
+ * - `bootstrap` – es gibt keine, der Hub holt sie sich zuerst.
+ * - `none` – geht nicht; `reason` sagt, warum.
+ */
+export const UPDATE_MODES = ['pull', 'bootstrap', 'none'] as const;
+export type UpdateMode = (typeof UPDATE_MODES)[number];
+
+export interface Updatability {
+  canUpdate: boolean;
+  mode: UpdateMode;
+  reason: string | null;
+}
+
 export interface HubVersionInfo {
   currentVersion: string;
   latestVersion: string | null;
@@ -52,27 +68,48 @@ export interface HubVersionInfo {
   /** Der Abschnitt der laufenden Fassung – „was ist neu". */
   current: ChangelogEntry | null;
   checkedAt: string | null;
-  /** Läuft der Hub aus einer Git-Arbeitskopie? Sonst geht kein Update. */
   canUpdate: boolean;
+  /** Was beim Aktualisieren passieren würde – siehe `UpdateMode`. */
+  mode: UpdateMode;
   reason: string | null;
+}
+
+export interface HubUpdateOptions {
+  checkUrl: string | null;
+  /** Wurzel der Installation. Standard: das Verzeichnis über `src`/`dist`. */
+  root?: string;
+  /**
+   * Woher der Quelltext kommt, wenn noch keine Arbeitskopie da ist.
+   * Ohne diese Adresse bleibt `bootstrap` verschlossen.
+   */
+  repoUrl?: string | null;
+  /** Zweig, der gezogen wird. */
+  branch?: string;
+  /**
+   * Verzeichnis mit Datenbank und Messwerten. Wird beim Ziehen der
+   * Arbeitskopie geschützt: Liegt dort ein Pfad, den auch das Repository
+   * führt, bricht der Hub ab, statt die Daten zu überschreiben.
+   */
+  dataDir?: string;
 }
 
 export class HubUpdateService {
   private lastCheckedAt: string | null = null;
   private latestVersion: string | null = null;
   private busy = false;
-  private updatabilityCache: {
-    at: number;
-    value: { canUpdate: boolean; reason: string | null };
-  } | null = null;
+  private updatabilityCache: { at: number; value: Updatability } | null = null;
 
   constructor(
     private readonly currentVersion: string,
-    private readonly options: { checkUrl: string | null; root?: string } = { checkUrl: null },
+    private readonly options: HubUpdateOptions = { checkUrl: null },
   ) {}
 
   private get root(): string {
     return this.options.root ?? PROJECT_ROOT;
+  }
+
+  private get branch(): string {
+    return this.options.branch || 'main';
   }
 
   /** Zustand für die Oberfläche. */
@@ -90,7 +127,7 @@ export class HubUpdateService {
         )
       : [];
 
-    const { canUpdate, reason } = await this.updatability();
+    const { canUpdate, mode, reason } = await this.updatability();
 
     return {
       currentVersion: this.currentVersion,
@@ -100,6 +137,7 @@ export class HubUpdateService {
       current,
       checkedAt: this.lastCheckedAt,
       canUpdate,
+      mode,
       reason,
     };
   }
@@ -157,16 +195,16 @@ export class HubUpdateService {
   /**
    * Stößt die Aktualisierung an.
    *
-   * Läuft nur aus einer Git-Arbeitskopie und nur, wenn dort nichts
-   * Ungespeichertes liegt – sonst würden eigene Änderungen überschrieben.
-   * Der Neustart ist Sache des Betriebssystems (systemd, Docker, pm2); der
-   * Hub sagt das auch, statt so zu tun, als hätte er ihn erledigt.
+   * Fehlt die Arbeitskopie, holt der Hub sie sich zuerst selbst (siehe
+   * `bootstrapWorkingCopy`). Der Neustart bleibt Sache des Betriebssystems
+   * (systemd, Docker, pm2); der Hub sagt das auch, statt so zu tun, als hätte
+   * er ihn erledigt.
    */
   async install(householdId = ''): Promise<{ log: string[]; restartRequired: true }> {
     if (this.busy) {
       throw badRequest('Es läuft bereits eine Aktualisierung.');
     }
-    const { canUpdate, reason } = await this.updatability();
+    const { canUpdate, mode, reason } = await this.updatability();
     if (!canUpdate) {
       throw badRequest(
         'Der Hub kann sich hier nicht selbst aktualisieren.',
@@ -177,18 +215,21 @@ export class HubUpdateService {
 
     this.busy = true;
     const output: string[] = [];
+    const step = async (command: string, args: string[]): Promise<void> => {
+      log.info('Aktualisierung', { command, args });
+      const { stdout, stderr } = await run(command, args, {
+        cwd: this.root,
+        timeout: 10 * 60 * 1000,
+        maxBuffer: 4 * 1024 * 1024,
+      });
+      output.push(`$ ${command} ${args.join(' ')}`);
+      const combined = `${stdout}${stderr}`.trim();
+      if (combined) output.push(combined);
+    };
+
     try {
-      for (const [command, args] of UPDATE_STEPS) {
-        log.info('Aktualisierung', { command, args });
-        const { stdout, stderr } = await run(command, args, {
-          cwd: this.root,
-          timeout: 10 * 60 * 1000,
-          maxBuffer: 4 * 1024 * 1024,
-        });
-        output.push(`$ ${command} ${args.join(' ')}`);
-        const combined = `${stdout}${stderr}`.trim();
-        if (combined) output.push(combined);
-      }
+      if (mode === 'bootstrap') await this.fetchSources(step);
+      for (const [command, args] of UPDATE_STEPS) await step(command, args);
     } catch (err) {
       const message = errorMessage(err);
       output.push(`Fehlgeschlagen: ${message}`);
@@ -200,6 +241,8 @@ export class HubUpdateService {
       );
     } finally {
       this.busy = false;
+      // Aus „keine Arbeitskopie" ist gerade eine geworden.
+      this.updatabilityCache = null;
     }
 
     // Auch die anderen offenen Fenster sollen es erfahren – wer gerade in
@@ -215,13 +258,102 @@ export class HubUpdateService {
   }
 
   /**
+   * Holt die Arbeitskopie nach, ohne die Daten anzufassen.
+   *
+   * Der Trick ist, dass Git nur *verfolgte* Dateien anfasst. Ein `git init`
+   * im bestehenden Verzeichnis, ein flacher `fetch` und ein `checkout -f`
+   * ersetzen den Quelltext – und lassen alles unberührt, was das Repository
+   * nicht führt: `data/`, `.env`, `node_modules/`. Genau deshalb wird hier
+   * nicht woandershin geklont und umkopiert: Was nicht bewegt wird, kann auch
+   * nicht verlorengehen.
+   *
+   * Vorher wird geprüft, ob das Repository einen Pfad führt, unter dem die
+   * Daten liegen. Wäre das so, würde `checkout -f` sie überschreiben – dann
+   * bricht der Hub ab, statt es zu tun.
+   */
+  async fetchSources(
+    step: (command: string, args: string[]) => Promise<void> = async (command, args) => {
+      await run(command, args, { cwd: this.root, timeout: 10 * 60 * 1000 });
+    },
+  ): Promise<void> {
+    const url = this.options.repoUrl;
+    if (!url) throw new Error('Keine Adresse für den Quelltext hinterlegt.');
+
+    log.info('Arbeitskopie wird nachgeholt', { url, branch: this.branch });
+
+    await step('git', ['init']);
+    // Ein zweiter Anlauf nach einem Fehlschlag soll nicht daran scheitern,
+    // dass die Gegenstelle schon eingetragen ist.
+    await step('git', ['remote', 'remove', 'origin']).catch(() => undefined);
+    await step('git', ['remote', 'add', 'origin', url]);
+
+    /*
+     * Bewusst ohne `--depth 1`, obwohl das schneller wäre: Nach einem flachen
+     * Erstabruf hat die nächste Aktualisierung keinen gemeinsamen Vorfahren
+     * mehr und `git pull --ff-only` bricht mit „Not possible to fast-forward"
+     * ab. Der Hub wäre also genau einmal aktualisierbar. Die vollständige
+     * Historie einmal zu holen kostet ein paar Sekunden und spart diesen
+     * Fehler für immer.
+     */
+    await step('git', ['fetch', 'origin', this.branch]);
+
+    await this.assertDataSafe();
+
+    // `-f` überschreibt verfolgte Dateien; unverfolgte bleiben liegen.
+    await step('git', ['checkout', '-f', '-B', this.branch, 'FETCH_HEAD']);
+    await step('git', ['branch', `--set-upstream-to=origin/${this.branch}`, this.branch]).catch(
+      () => undefined,
+    );
+
+    // Aus „keine Arbeitskopie" ist gerade eine geworden.
+    this.updatabilityCache = null;
+  }
+
+  /**
+   * Führt das Repository einen Pfad, unter dem die Daten liegen?
+   *
+   * Der übliche Fall ist `DATA_DIR=./data` – im Repository steht `data/` in
+   * `.gitignore` und wird nicht geführt, alles gut. Wer aber `DATA_DIR` auf
+   * `./public` oder `./src` gesetzt hat, verlöre beim `checkout -f` seine
+   * Datenbank. Lieber einmal zu viel nachgesehen.
+   */
+  private async assertDataSafe(): Promise<void> {
+    const dataDir = this.options.dataDir;
+    if (!dataDir) return;
+
+    const relative = path.relative(this.root, path.resolve(dataDir));
+    // Außerhalb der Installation (oder ein anderes Laufwerk) – unerreichbar
+    // für den Checkout und damit sicher.
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
+
+    const { stdout } = await run('git', ['ls-tree', '-r', '--name-only', 'FETCH_HEAD'], {
+      cwd: this.root,
+      timeout: 30_000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+
+    const prefix = `${relative.split(path.sep).join('/')}/`;
+    const collides = stdout
+      .split('\n')
+      .some((line) => line === relative || line.startsWith(prefix));
+
+    if (collides) {
+      throw new Error(
+        `Die Daten liegen unter "${relative}" – einem Pfad, den auch der Quelltext führt. ` +
+          'Ein Nachziehen würde sie überschreiben. Setze DATA_DIR auf ein Verzeichnis ' +
+          'außerhalb der Installation und starte den Dienst neu.',
+      );
+    }
+  }
+
+  /**
    * Kann sich der Hub hier überhaupt selbst aktualisieren?
    *
    * Ruft `git` auf, deshalb kurz gepuffert: Die Oberfläche fragt den Zustand
    * bei jedem Öffnen der Einstellungen ab, und ein Prozessstart pro Klick
    * wäre für eine Antwort, die sich selten ändert, verschwendet.
    */
-  private async updatability(): Promise<{ canUpdate: boolean; reason: string | null }> {
+  private async updatability(): Promise<Updatability> {
     const cached = this.updatabilityCache;
     if (cached && Date.now() - cached.at < 60_000) return cached.value;
 
@@ -230,29 +362,89 @@ export class HubUpdateService {
     return value;
   }
 
-  private async probeUpdatability(): Promise<{ canUpdate: boolean; reason: string | null }> {
+  private async probeUpdatability(): Promise<Updatability> {
+    // Ohne Git geht gar nichts – und das ist der eine Fall, den der Hub
+    // wirklich nicht selbst lösen kann.
     try {
-      const { stdout } = await run('git', ['status', '--porcelain'], {
-        cwd: this.root,
-        timeout: 10_000,
-      });
-      if (stdout.trim()) {
-        return {
-          canUpdate: false,
-          reason:
-            'In der Arbeitskopie liegen ungespeicherte Änderungen. Eine Aktualisierung würde sie überschreiben.',
-        };
-      }
-      return { canUpdate: true, reason: null };
+      await run('git', ['--version'], { cwd: this.root, timeout: 10_000 });
     } catch {
       return {
         canUpdate: false,
+        mode: 'none',
         reason:
-          'Der Hub läuft nicht aus einer Git-Arbeitskopie – etwa in einem fertigen Docker-Abbild. ' +
-          'Dort aktualisiert man ihn über das Abbild.',
+          'Auf diesem System ist git nicht installiert. Ohne git kommt der Hub nicht an ' +
+          'seinen eigenen Quelltext. Unter Debian/Ubuntu: "apt install git".',
       };
     }
+
+    let porcelain: string;
+    try {
+      const result = await run('git', ['status', '--porcelain'], {
+        cwd: this.root,
+        timeout: 10_000,
+      });
+      porcelain = result.stdout;
+    } catch {
+      // Keine Arbeitskopie – etwa ein entpacktes Archiv oder ein Abbild ohne
+      // `.git`. Der Hub holt sie sich, sofern er weiß, woher.
+      if (!this.options.repoUrl) {
+        return {
+          canUpdate: false,
+          mode: 'none',
+          reason:
+            'Der Hub läuft nicht aus einer Git-Arbeitskopie, und es ist keine Adresse für ' +
+            'den Quelltext hinterlegt. Trage HUB_REPO_URL ein – dann holt er sie sich beim ' +
+            'nächsten Mal selbst.',
+        };
+      }
+      return {
+        canUpdate: true,
+        mode: 'bootstrap',
+        reason:
+          'Der Hub läuft nicht aus einer Git-Arbeitskopie. Er holt sie sich beim ' +
+          'Aktualisieren selbst; Datenbank, Messwerte und Einstellungen bleiben dabei liegen.',
+      };
+    }
+
+    const blocking = blockingChanges(porcelain);
+    if (blocking.length > 0) {
+      return {
+        canUpdate: false,
+        mode: 'none',
+        reason:
+          `In der Arbeitskopie liegen geänderte Dateien (${blocking.slice(0, 3).join(', ')}` +
+          `${blocking.length > 3 ? ` und ${blocking.length - 3} weitere` : ''}). ` +
+          'Eine Aktualisierung würde sie überschreiben. Deine Daten sind davon nicht ' +
+          'betroffen – gemeint sind Änderungen am Quelltext selbst.',
+      };
+    }
+
+    return { canUpdate: true, mode: 'pull', reason: null };
   }
+}
+
+/**
+ * Welche Einträge aus `git status --porcelain` einer Aktualisierung wirklich
+ * im Weg stehen.
+ *
+ * Nur geänderte **verfolgte** Dateien. Unverfolgtes (`??`) fasst ein
+ * `git pull --ff-only` nicht an – und unverfolgt ist alles, was einen Hub
+ * ausmacht, aber nicht zum Quelltext gehört: `data/`, `.env`, `node_modules/`,
+ * ein dort abgelegtes Skript. Die vorige Fassung hat das alles als Hindernis
+ * gewertet und damit auf einer ganz normalen Installation jede Aktualisierung
+ * verweigert.
+ */
+export function blockingChanges(porcelain: string): string[] {
+  const files: string[] = [];
+  for (const line of porcelain.split('\n')) {
+    if (line.length < 4) continue;
+    if (line.startsWith('??') || line.startsWith('!!')) continue;
+    // Format: XY<Leerzeichen>Pfad, bei Umbenennungen "alt -> neu".
+    const file = line.slice(3).trim();
+    const renamed = file.split(' -> ').pop();
+    if (renamed) files.push(renamed);
+  }
+  return files;
 }
 
 /**

@@ -80,7 +80,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const energy = new EnergyService(repos, telemetry, households);
   const backup = new BackupService(db);
   const updates = new UpdateService(repos, registry, integrations, households);
-  const hubUpdate = new HubUpdateService(VERSION, { checkUrl: config.hubUpdateCheckUrl });
+  const hubUpdate = new HubUpdateService(VERSION, {
+    checkUrl: config.hubUpdateCheckUrl,
+    repoUrl: config.hubRepoUrl,
+    branch: config.hubBranch,
+    dataDir: config.dataDir,
+  });
   const scenes = new SceneService(repos, devices);
   const presence = new PresenceService(repos, devices, households);
 

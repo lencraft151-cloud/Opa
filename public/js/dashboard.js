@@ -2461,6 +2461,23 @@ function hubVersionCard() {
       : ''
     : '';
 
+  /*
+   * Der Hinweis ist zweierlei: eine Erklärung, wenn es nicht geht, und eine
+   * Ankündigung, wenn es geht, aber mehr passiert als sonst. „Der Hub holt
+   * sich erst eine Arbeitskopie" gehört vor den Klick, nicht danach.
+   */
+  const note =
+    info.reason && (info.updateAvailable || !info.canUpdate)
+      ? `<div class="callout ${info.canUpdate ? '' : 'warn'}">
+           <strong>${
+             info.canUpdate
+               ? 'Beim ersten Mal dauert es etwas länger'
+               : 'Der Hub kann sich hier nicht selbst aktualisieren'
+           }</strong>
+           <span>${esc(info.reason)}</span>
+         </div>`
+      : '';
+
   return `<h2>Diese Fassung ${badge}</h2>
     <div class="list">
       <div class="item">
@@ -2482,12 +2499,7 @@ function hubVersionCard() {
     </div>
 
     ${pending}
-    ${
-      info.updateAvailable && !info.canUpdate && info.reason
-        ? `<div class="callout"><strong>Der Hub kann sich hier nicht selbst aktualisieren</strong>
-             <span>${esc(info.reason)}</span></div>`
-        : ''
-    }
+    ${note}
     ${current}
 
     <details data-section="changelog-all">
@@ -2547,9 +2559,14 @@ function wireHubVersion(card) {
   });
 
   card.querySelector('#btn-hub-install')?.addEventListener('click', async (event) => {
+    const bootstrap = store.hubVersion?.mode === 'bootstrap';
     if (
       !confirm(
-        'Der Hub lädt die neue Fassung und baut sie. Das dauert ein paar Minuten; ' +
+        (bootstrap
+          ? 'Der Hub holt sich zuerst den Quelltext und legt danach die neue Fassung an. ' +
+            'Datenbank, Messwerte und Einstellungen bleiben dabei unangetastet.\n\n'
+          : '') +
+          'Er lädt die neue Fassung und baut sie. Das dauert ein paar Minuten; ' +
           'danach muss der Dienst neu gestartet werden. Fortfahren?',
       )
     ) {

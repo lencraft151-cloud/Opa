@@ -27,6 +27,16 @@ export function loadDotEnv(file = '.env'): void {
   }
 }
 
+/**
+ * Wo dieser Hub herkommt.
+ *
+ * Steht als Vorgabe hier, damit eine Installation ohne `.git` – ein
+ * entpacktes Archiv, ein Abbild ohne Historie – sich trotzdem aktualisieren
+ * kann, ohne dass jemand erst eine Adresse eintragen muss. Wer einen eigenen
+ * Abzug betreibt, überschreibt sie mit `HUB_REPO_URL`.
+ */
+const DEFAULT_REPO_URL = 'https://github.com/lencraft151-cloud/Opa';
+
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -67,6 +77,14 @@ export interface AppConfig {
    * Haushalts-Hub telefoniert nicht ungefragt nach Hause.
    */
   hubUpdateCheckUrl: string | null;
+  /**
+   * Woher der Hub seinen Quelltext holt, wenn keine Git-Arbeitskopie da ist
+   * (entpacktes Archiv, Abbild ohne `.git`). Er zieht sie dann beim
+   * Aktualisieren selbst nach – die Daten bleiben unangetastet.
+   */
+  hubRepoUrl: string | null;
+  /** Zweig, der dabei gezogen wird. */
+  hubBranch: string;
   logLevel: LogLevel;
 }
 
@@ -102,6 +120,8 @@ export function loadConfig(): AppConfig {
     allowCloudDiscovery: bool('ALLOW_CLOUD_DISCOVERY', true),
     discoveryTimeoutMs: Math.max(500, num('DISCOVERY_TIMEOUT_MS', 5000)),
     hubUpdateCheckUrl: str('HUB_UPDATE_CHECK_URL', '') || null,
+    hubRepoUrl: str('HUB_REPO_URL', DEFAULT_REPO_URL) || null,
+    hubBranch: str('HUB_BRANCH', 'main'),
     logLevel,
   };
 }

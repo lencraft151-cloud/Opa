@@ -33,7 +33,16 @@ noch einmal drücken, ohne Geräte, Räume und Automationen zu verlieren.
 und zurückspielen.
 
 **Diese Übersicht.** Der Hub prüft, ob eine neuere Fassung vorliegt, und zeigt
-die Änderungen an, bevor er sie installiert.
+die Änderungen an, bevor er sie installiert. Fehlt die Arbeitskopie – etwa weil
+der Hub aus einem entpackten Archiv läuft –, holt er sie sich beim ersten Mal
+selbst. Datenbank, Messwerte, `.env` und `node_modules` bleiben dabei liegen:
+Git fasst nur an, was es selbst führt.
+
+**Behoben:** Die Aktualisierung verweigerte sich auf jeder gewöhnlichen
+Installation. Sie wertete jede Zeile von `git status` als Hindernis – auch die
+unverfolgten Verzeichnisse `data/`, `node_modules/` und `.env`, die ein
+`git pull` gar nicht anfasst. Jetzt zählen nur geänderte verfolgte Dateien, und
+die Meldung nennt sie beim Namen.
 
 ## 1.2.0 – 2026-08-08
 
