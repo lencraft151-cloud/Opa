@@ -496,6 +496,32 @@ legend {
   margin: 0.4rem 0 0;
 }
 
+/*
+ * Der Eintrag, der während einer laufenden Suche unten steht. Bewusst als
+ * gewöhnlicher Listeneintrag und nicht als Overlay: Die schon gefundenen
+ * Geräte darüber bleiben bedienbar, man muss nicht warten, bis alles fertig
+ * ist.
+ */
+.item.searching {
+  background: var(--surface);
+  border-style: dashed;
+}
+.spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  vertical-align: -0.1em;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Ein Listeneintrag mit aufklappbarem Zusatz darunter. */
 .item-block {
   display: flex;

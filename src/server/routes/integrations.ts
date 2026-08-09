@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { errorMessage } from '../../core/errors.js';
+import type { IntegrationType } from '../../core/types.js';
 import { IntegrationRepository } from '../../storage/repositories.js';
 import type { Container } from '../../container.js';
 import { asyncHandler, booleanQuery, parseBody, parseQuery } from '../http.js';
@@ -39,6 +41,58 @@ export function integrationRoutes(container: Container): Router {
         query.scan ?? false,
       );
       res.json({ found, scanned: query.scan ?? false });
+    }),
+  );
+
+  /**
+   * Dieselbe Suche, aber laufend berichtet.
+   *
+   * Die Wartezeit lässt sich nicht wegoptimieren – eine mDNS-Suche muss die
+   * volle Zeit lauschen, wenn auf einen Diensttyp niemand antwortet. Was sich
+   * ändern lässt, ist, wann der Mensch etwas davon sieht: Jeder Treffer geht
+   * sofort raus, und dazwischen steht, worauf noch gewartet wird.
+   */
+  router.get(
+    '/integrations/discover/stream',
+    asyncHandler(async (req, res) => {
+      const household = container.households.require();
+      const query = parseQuery(
+        z.object({ type: integrationTypeSchema.optional(), scan: booleanQuery }),
+        req,
+      );
+
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        // Ohne diesen Kopf puffert ein vorgeschalteter nginx den Strom –
+        // und dann kommt alles doch erst am Ende an.
+        'x-accel-buffering': 'no',
+      });
+
+      let open = true;
+      req.on('close', () => {
+        open = false;
+      });
+
+      const options: { type?: IntegrationType; allowScan: boolean } = {
+        allowScan: query.scan ?? false,
+      };
+      if (query.type) options.type = query.type;
+
+      try {
+        await container.integrations.discoverStream(household.id, options, (event) => {
+          if (!open) return;
+          res.write(`event: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`);
+        });
+      } catch (err) {
+        if (open) {
+          res.write(
+            `event: failed\ndata: ${JSON.stringify({ message: errorMessage(err) })}\n\n`,
+          );
+        }
+      }
+      res.end();
     }),
   );
 

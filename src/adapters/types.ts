@@ -72,6 +72,14 @@ export interface DiscoverOptions {
   allowCloud: boolean;
   /** Subnetz-Scan erlauben (langsamer, findet aber auch stumme Geräte). */
   allowScan: boolean;
+  /**
+   * Adressen, die für den Scan überhaupt in Frage kommen.
+   *
+   * Wird einmal für alle Hersteller ermittelt (siehe `reachableHosts`) und
+   * dann geteilt. Ohne diese Liste klopfte jeder Adapter das ganze Subnetz
+   * selbst ab – bei vier Herstellern viermal dasselbe.
+   */
+  scanHosts?: readonly string[];
 }
 
 export type StateUpdateHandler = (externalId: string, state: DeviceState) => void;

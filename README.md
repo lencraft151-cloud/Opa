@@ -221,6 +221,27 @@ Der Hub geht nicht davon aus, dass ein Gerät neu ist:
   der Hub anhand der gelesenen Werte – nicht anhand einer Modellliste, die bei
   unbekannten Geräten versagen würde.
 
+### Wie lange die Suche dauert
+
+Zwei Dinge machten sie langsam, und sie brauchten verschiedene Antworten.
+
+**Der gründliche Scan lief viermal.** Jeder Hersteller klopfte dasselbe Subnetz
+einzeln mit einer HTTP-Anfrage ab: vier mal 254 Adressen, gemessene 54 Sekunden.
+Jetzt stellt der Hub einmal per TCP-Verbindungsversuch fest, welche Adressen
+überhaupt belegt sind – das dauert unter einer Sekunde –, und gibt diese Liste
+allen Herstellern. Aus 54 Sekunden werden knapp 6.
+
+**Der Rest ist Physik.** Eine mDNS-Suche muss lauschen, und wenn auf einen
+Diensttyp niemand antwortet, muss sie die volle Zeit lauschen: Ein schlafender
+Batteriesensor darf sich auch spät noch melden. Verkürzt wird deshalb nur der
+Fall, in dem tatsächlich jemand geantwortet hat – ebbt die Antwortwelle ab,
+ist die Suche fertig.
+
+Was bleibt, wird gezeigt statt versteckt: Treffer erscheinen sofort, darunter
+läuft eine Uhr und steht, auf welchen Hersteller noch gewartet wird. Ein
+Kasten, in dem fünf Sekunden lang nichts passiert, sieht aus wie ein Fehler –
+und wurde auch als einer gemeldet.
+
 ### Warum manche Geräte früher nicht gefunden wurden
 
 Antworten auf eine mDNS-Anfrage gehen per Multicast an `224.0.0.251:5353`. Ein
@@ -664,7 +685,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 391 Tests, node:test
+npm test        # 396 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 

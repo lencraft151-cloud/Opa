@@ -11,6 +11,7 @@ import type {
 } from '../core/types.js';
 import { decryptJson, encryptJson } from '../util/crypto.js';
 import { createId, nowIso } from '../util/id.js';
+import { reachableHosts, scannableHosts } from '../util/net.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import type {
   AdapterDevice,
@@ -31,6 +32,18 @@ export interface SyncResult {
   removed: number;
   devices: Device[];
 }
+
+/**
+ * Was während einer laufenden Suche gemeldet wird.
+ *
+ * `progress` sagt, wer noch sucht – damit die Oberfläche zeigen kann, worauf
+ * gerade gewartet wird, statt nur „bitte warten".
+ */
+export type DiscoveryEvent =
+  | { kind: 'found'; entry: DiscoveredIntegration }
+  | { kind: 'progress'; pending: IntegrationType[]; message: string }
+  | { kind: 'failed'; adapter: IntegrationType; message: string }
+  | { kind: 'done'; count: number };
 
 export interface AddIntegrationInput extends LinkRequest {
   type: IntegrationType;
@@ -68,43 +81,117 @@ export class IntegrationService {
     type?: IntegrationType,
     allowScan = false,
   ): Promise<DiscoveredIntegration[]> {
-    const adapters = type ? [this.registry.get(type)] : this.registry.list();
-    const options = {
-      timeoutMs: this.config.discoveryTimeoutMs,
-      allowCloud: this.config.allowCloudDiscovery,
-      allowScan,
-    };
-
-    const settled = await Promise.allSettled(
-      adapters.map(async (adapter) => adapter.discover(options)),
-    );
-
     const results: DiscoveredIntegration[] = [];
-    for (const [index, outcome] of settled.entries()) {
-      const adapter = adapters[index];
-      if (outcome.status === 'fulfilled') {
-        results.push(...outcome.value);
-      } else {
-        log.warn('Discovery fehlgeschlagen', {
-          adapter: adapter?.type,
-          error: errorMessage(outcome.reason),
-        });
-      }
-    }
+    await this.discoverStream(householdId, { type, allowScan }, (event) => {
+      if (event.kind === 'found') results.push(event.entry);
+    });
+    return results.sort((a, b) => Number(a.alreadyLinked) - Number(b.alreadyLinked));
+  }
 
-    // Bereits eingebundene Geräte markieren statt ausblenden – so sieht der
-    // Nutzer im Assistenten, dass die Bridge gefunden wurde.
+  /**
+   * Wie `discover`, meldet aber jeden Treffer sofort.
+   *
+   * Der Grund ist Wartezeit, die sich nicht wegoptimieren lässt: Eine
+   * mDNS-Suche muss die volle Zeit lauschen, wenn auf einen Diensttyp
+   * *niemand* antwortet – ein schlafender Batteriesensor darf sich auch spät
+   * noch melden. Fünf Sekunden vor einem leeren Kasten fühlen sich aber an wie
+   * ein Fehler, und genau so wurde es auch gemeldet: „dauert lange oder geht
+   * nicht".
+   *
+   * Also wird nicht schneller gesucht, sondern früher berichtet: Jeder
+   * Hersteller meldet, sobald er fertig ist, und was er gefunden hat, steht
+   * sofort auf dem Bildschirm.
+   */
+  async discoverStream(
+    householdId: string,
+    options: { type?: IntegrationType; allowScan?: boolean },
+    emit: (event: DiscoveryEvent) => void,
+  ): Promise<void> {
+    const allowScan = options.allowScan ?? false;
+    const adapters = options.type ? [this.registry.get(options.type)] : this.registry.list();
     const existing = this.list(householdId);
-    for (const entry of results) {
+    const seen = new Set<string>();
+
+    const publish = (entry: DiscoveredIntegration): void => {
+      const key = `${entry.type}:${entry.host}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      // Bereits eingebundene Geräte markieren statt ausblenden – so sieht der
+      // Nutzer im Assistenten, dass die Bridge gefunden wurde.
       entry.alreadyLinked = existing.some(
         (integration) =>
           integration.type === entry.type &&
           (externalIdOf(integration) === entry.externalId ||
             (integration.config as { host?: string }).host === entry.host),
       );
+      emit({ kind: 'found', entry });
+    };
+
+    /*
+     * Beim gründlichen Suchen einmal feststellen, welche Adressen überhaupt
+     * belegt sind – und die Liste allen Herstellern geben.
+     *
+     * Vorher klopfte jeder Adapter das ganze Subnetz selbst mit einer
+     * HTTP-Anfrage ab: vier Hersteller × 254 Adressen, gemessene 54 Sekunden.
+     * Ein TCP-Verbindungsversuch ist um Größenordnungen billiger als eine
+     * HTTP-Anfrage mit Zeitüberschreitung, und danach bleiben statt 254
+     * Adressen die paar übrig, hinter denen wirklich ein Gerät steht.
+     */
+    let scanHosts: string[] | undefined;
+    if (allowScan) {
+      const started = Date.now();
+      const candidates = scannableHosts();
+      scanHosts = await reachableHosts(candidates);
+      log.info('Netz abgeklopft', {
+        geprüft: candidates.length,
+        belegt: scanHosts.length,
+        ms: Date.now() - started,
+      });
     }
 
-    return results.sort((a, b) => Number(a.alreadyLinked) - Number(b.alreadyLinked));
+    const discoverOptions = {
+      timeoutMs: this.config.discoveryTimeoutMs,
+      allowCloud: this.config.allowCloudDiscovery,
+      allowScan,
+      scanHosts,
+    };
+
+    emit({
+      kind: 'progress',
+      pending: adapters.map((adapter) => adapter.type),
+      message: allowScan
+        ? `${scanHosts?.length ?? 0} belegte Adressen im Netz – sie werden jetzt abgefragt.`
+        : 'Der Hub horcht ins Netz.',
+    });
+
+    // Jeder Hersteller meldet für sich, sobald er fertig ist.
+    const pending = new Set(adapters.map((adapter) => adapter.type));
+    await Promise.all(
+      adapters.map(async (adapter) => {
+        const started = Date.now();
+        try {
+          for (const entry of await adapter.discover(discoverOptions)) publish(entry);
+        } catch (err) {
+          log.warn('Discovery fehlgeschlagen', {
+            adapter: adapter.type,
+            error: errorMessage(err),
+          });
+          emit({ kind: 'failed', adapter: adapter.type, message: errorMessage(err) });
+        } finally {
+          pending.delete(adapter.type);
+          emit({
+            kind: 'progress',
+            pending: [...pending],
+            message: `${adapter.displayName}: fertig nach ${Math.round(
+              (Date.now() - started) / 100,
+            ) / 10} s`,
+          });
+        }
+      }),
+    );
+
+    emit({ kind: 'done', count: seen.size });
   }
 
   // -------------------------------------------------------------------------

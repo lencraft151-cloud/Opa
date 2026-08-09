@@ -78,7 +78,7 @@ export class HomematicAdapter implements IntegrationAdapter {
 
     // Die alte CCU2 kennt kein mDNS – ohne Scan findet man sie nicht.
     if (options.allowScan) {
-      for (const host of scannableHosts()) hosts.add(host);
+      for (const host of options.scanHosts ?? scannableHosts()) hosts.add(host);
     }
 
     const results = await mapWithConcurrency([...hosts], 24, async (host) => {

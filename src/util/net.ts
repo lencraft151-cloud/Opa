@@ -1,3 +1,4 @@
+import { Socket } from 'node:net';
 import { networkInterfaces } from 'node:os';
 
 export interface LocalSubnet {
@@ -84,6 +85,91 @@ export function scannableHosts(maxHostsPerSubnet = 254): string[] {
     for (const host of enumerateHosts(subnet, maxHostsPerSubnet)) seen.add(host);
   }
   return [...seen];
+}
+
+/**
+ * Welche Adressen im Netz überhaupt jemand belegt.
+ *
+ * Der Grund für diese Funktion ist eine Rechnung: Vier Hersteller, die
+ * jeweils 254 Adressen mit einer HTTP-Anfrage abklopfen, ergeben gut tausend
+ * Anfragen – und knapp eine Minute Wartezeit, in der die Oberfläche stillsteht.
+ * Dabei sind in einem Haushalt vielleicht zwanzig Adressen belegt; die
+ * übrigen zweihundertdreißig kosten nur Zeit.
+ *
+ * Deshalb zuerst ein einziger, billiger Durchgang: eine TCP-Verbindung
+ * aufbauen und sofort wieder auflegen. Wer antwortet, kommt in die Liste, die
+ * sich dann alle Hersteller teilen.
+ *
+ * Ein abgewiesener Verbindungsversuch (`ECONNREFUSED`) zählt dabei als
+ * Treffer: Da ist ein Gerät, es hört nur auf diesem Port nicht. Nur
+ * Zeitüberschreitungen bedeuten „niemand da“ – so verhalten sich unbelegte
+ * Adressen im lokalen Netz.
+ */
+export async function reachableHosts(
+  hosts: readonly string[],
+  options: { ports?: number[]; timeoutMs?: number; concurrency?: number } = {},
+): Promise<string[]> {
+  const ports = options.ports ?? [80, 443];
+  const timeoutMs = options.timeoutMs ?? 400;
+  // Ein TCP-Verbindungsversuch kostet fast nichts; die Grenze schützt nur
+  // davor, dem Betriebssystem die Dateideskriptoren auszugehen.
+  const concurrency = options.concurrency ?? 128;
+
+  const alive: string[] = [];
+  let index = 0;
+
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const current = index++;
+      if (current >= hosts.length) return;
+      const host = hosts[current] as string;
+      if (await anyPortAnswers(host, ports, timeoutMs)) alive.push(host);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, hosts.length) }, worker));
+  return alive.sort();
+}
+
+function anyPortAnswers(host: string, ports: number[], timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let open = 0;
+    let settled = false;
+    const finish = (value: boolean): void => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    for (const port of ports) {
+      open++;
+      const socket = new Socket();
+      const close = (): void => {
+        socket.removeAllListeners();
+        socket.destroy();
+        if (--open === 0) finish(false);
+      };
+
+      socket.setTimeout(timeoutMs);
+      socket.once('connect', () => {
+        socket.removeAllListeners();
+        socket.destroy();
+        finish(true);
+      });
+      socket.once('timeout', close);
+      socket.once('error', (err: NodeJS.ErrnoException) => {
+        // Abgewiesen heißt: Da ist jemand, nur nicht auf diesem Port.
+        if (err.code === 'ECONNREFUSED') {
+          socket.removeAllListeners();
+          socket.destroy();
+          finish(true);
+          return;
+        }
+        close();
+      });
+      socket.connect(port, host);
+    }
+  });
 }
 
 const PRIVATE_RANGES: Array<[string, number]> = [

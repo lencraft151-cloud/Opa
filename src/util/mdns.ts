@@ -166,6 +166,11 @@ export interface MdnsBrowseOptions {
   timeoutMs?: number;
   /** Wie oft die Anfrage wiederholt wird (Pakete können verloren gehen). */
   queryCount?: number;
+  /**
+   * Ruhezeit nach der letzten neuen Antwort, nach der die Suche endet.
+   * Gilt erst, wenn überhaupt etwas geantwortet hat – siehe `browse`.
+   */
+  quietMs?: number;
 }
 
 /**
@@ -196,6 +201,7 @@ export async function browse(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (quiet) clearTimeout(quiet);
       try {
         socket.close();
       } catch {
@@ -206,12 +212,39 @@ export async function browse(
 
     const timer = setTimeout(done, timeoutMs);
 
+    /*
+     * Früher fertig, wenn die Antwortwelle abgeebbt ist.
+     *
+     * mDNS-Antworten kommen im lokalen Netz als Schwall innerhalb weniger
+     * hundert Millisekunden. Trotzdem wurde bisher immer die volle Zeit
+     * abgewartet – fünf Sekunden Stillstand in der Oberfläche, obwohl nach
+     * einer halben Sekunde schon alles da war.
+     *
+     * Bleibt es dagegen von Anfang an still, wird weiter voll gewartet: Ein
+     * schlafender Batteriesensor darf sich auch spät noch melden. Verkürzt
+     * wird also nur der Fall, in dem tatsächlich jemand geantwortet hat.
+     */
+    const quietMs = options.quietMs ?? 700;
+    let quiet: NodeJS.Timeout | undefined;
+    const heard = (): void => {
+      if (settled) return;
+      if (quiet) clearTimeout(quiet);
+      quiet = setTimeout(done, quietMs);
+      quiet.unref?.();
+    };
+
     socket.on('error', (err) => {
       log.debug('mDNS-Socket-Fehler', { error: err.message });
       done();
     });
 
-    socket.on('message', (msg, rinfo) => collector.add(msg, rinfo.address));
+    socket.on('message', (msg, rinfo) => {
+      const before = collector.size;
+      collector.add(msg, rinfo.address);
+      // Nur echte Neuigkeiten verlängern das Fenster – im Netz plappert
+      // ständig irgendein Gerät, das uns nicht betrifft.
+      if (collector.size > before) heard();
+    });
 
     /*
      * Die Unicast-Antwort wird nur angefordert, wenn wir NICHT auf dem
@@ -316,6 +349,11 @@ class ServiceCollector {
   private readonly hostAddresses = new Map<string, string[]>();
 
   constructor(private readonly serviceName: string) {}
+
+  /** Wie viele Dienste bisher zusammengekommen sind. */
+  get size(): number {
+    return this.services.size;
+  }
 
   add(message: Buffer, responderAddress: string): void {
     let decoded: DnsMessage;

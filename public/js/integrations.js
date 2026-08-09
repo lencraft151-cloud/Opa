@@ -66,37 +66,136 @@ export function discoveryItem(entry) {
 }
 
 /**
- * Sucht im Netzwerk und schreibt das Ergebnis in `target`.
+ * Sucht im Netz und zeigt jeden Treffer sofort.
+ *
+ * Die Wartezeit selbst lässt sich nur begrenzt verkürzen: Eine mDNS-Suche
+ * muss die volle Zeit lauschen, wenn auf einen Diensttyp niemand antwortet.
+ * Was sich ändern lässt, ist der Eindruck – und der war der eigentliche
+ * Fehler. Ein Kasten, in dem fünf Sekunden lang „Suche läuft…" steht und
+ * sonst nichts, sieht aus wie ein Hänger. Jetzt erscheint das erste Gerät
+ * nach Bruchteilen einer Sekunde, und darunter steht, auf wen noch gewartet
+ * wird.
+ *
  * @param {HTMLElement} target
- * @param {boolean} scan Auch das Subnetz absuchen (dauert länger).
+ * @param {boolean} scan Auch das Netz abklopfen (findet stumme Geräte).
  * @param {() => Promise<void>} onConnected
  */
-export async function runDiscovery(target, scan, onConnected) {
-  target.innerHTML = `<div class="item"><span class="sub">Suche läuft${
-    scan ? ' – der Subnetz-Scan dauert bis zu einer Minute' : ''
-  }…</span></div>`;
+export function runDiscovery(target, scan, onConnected) {
+  const found = new Map();
+  const started = Date.now();
+  let stream;
 
-  const result = await guard(() => api(`/integrations/discover?scan=${scan ? 'true' : 'false'}`));
-  if (!result) {
-    target.innerHTML = '';
-    return;
-  }
+  const seconds = () => `${Math.round((Date.now() - started) / 100) / 10} s`;
 
-  if (result.found.length === 0) {
+  const render = (status) => {
+    const list = [...found.values()].map(discoveryItem).join('');
+    target.innerHTML = `${list}${status}`;
+    target.querySelectorAll('[data-connect]').forEach((button) => {
+      if (button.dataset.wired) return;
+      button.dataset.wired = 'yes';
+      button.addEventListener('click', () => void connectFound(button, onConnected));
+    });
+  };
+
+  /*
+   * Die Uhr läuft weiter, auch wenn gerade nichts passiert.
+   *
+   * Zwischen zwei Meldungen liegen mehrere Sekunden – eine stehende Anzeige
+   * sieht darin genauso aus wie ein Hänger. Eine Zahl, die sich bewegt, ist
+   * der Unterschied zwischen „es arbeitet" und „es ist abgestürzt".
+   */
+  const ticker = setInterval(() => {
+    const clock = target.querySelector('[data-elapsed]');
+    if (clock) clock.textContent = seconds();
+  }, 200);
+
+  const searching = (message) =>
+    `<div class="item searching">
+       <div>
+         <div class="title"><span class="spinner" aria-hidden="true"></span>
+           Suche läuft… <span data-elapsed>${esc(seconds())}</span></div>
+         <div class="sub">${esc(message)}</div>
+       </div>
+       <button class="small" data-stop-discovery>Abbrechen</button>
+     </div>`;
+
+  render(
+    searching(
+      scan
+        ? 'Der Hub klopft zuerst ab, welche Adressen im Netz belegt sind.'
+        : 'Der Hub horcht ins Netz.',
+    ),
+  );
+
+  const stop = () => {
+    clearInterval(ticker);
+    stream?.close();
+    render('');
+  };
+
+  const wireStop = () => {
+    target.querySelector('[data-stop-discovery]')?.addEventListener('click', stop);
+  };
+  wireStop();
+
+  stream = new EventSource(`/api/integrations/discover/stream?scan=${scan ? 'true' : 'false'}`);
+
+  stream.addEventListener('found', (event) => {
+    const { entry } = JSON.parse(event.data);
+    found.set(`${entry.type}:${entry.host}`, entry);
+    render(searching(`${plural(found.size, 'Gerät gefunden', 'Geräte gefunden')} – es läuft weiter.`));
+    wireStop();
+  });
+
+  stream.addEventListener('progress', (event) => {
+    const { pending, message } = JSON.parse(event.data);
+    if (pending.length === 0) return;
+    render(
+      searching(
+        `${message} · es fehlen noch: ${pending
+          .map((type) => VENDOR_LABEL[type] ?? type)
+          .join(', ')}`,
+      ),
+    );
+    wireStop();
+  });
+
+  stream.addEventListener('done', () => {
+    clearInterval(ticker);
+    stream.close();
+    if (found.size > 0) {
+      render(
+        `<p class="muted small">${plural(
+          found.size,
+          'Gerät gefunden',
+          'Geräte gefunden',
+        )} in ${seconds()}.</p>`,
+      );
+      return;
+    }
     target.innerHTML = emptyState(
       '🔍',
       'Nichts gefunden.',
       scan
-        ? 'Auch der Subnetz-Scan war leer. Läuft der Hub im selben Netz wie deine Geräte? In Docker braucht er "--network host".'
+        ? 'Auch das Abklopfen des Netzes war leer. Läuft der Hub im selben Netz wie deine Geräte? In Docker braucht er "--network host".'
         : 'Versuche es mit „Gründlich suchen“ – oder trage die IP-Adresse unten manuell ein.',
     );
-    return;
-  }
-
-  target.innerHTML = result.found.map(discoveryItem).join('');
-  target.querySelectorAll('[data-connect]').forEach((button) => {
-    button.addEventListener('click', () => void connectFound(button, onConnected));
   });
+
+  stream.onerror = () => {
+    clearInterval(ticker);
+    stream.close();
+    // Kein `done` mehr zu erwarten – zeigen, was da ist, statt hängen zu bleiben.
+    render(
+      found.size > 0
+        ? `<p class="muted small">Verbindung zur Suche abgebrochen – ${plural(
+            found.size,
+            'Gerät',
+            'Geräte',
+          )} bis dahin gefunden.</p>`
+        : '<p class="muted small">Die Suche wurde unterbrochen. Versuche es noch einmal.</p>',
+    );
+  };
 }
 
 /** Verbindet ein gefundenes Gerät und fragt dabei nach Anmeldedaten. */

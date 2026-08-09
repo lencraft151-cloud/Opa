@@ -50,7 +50,7 @@ export async function discoverShellyDevices(
   }
 
   if (options.allowScan) {
-    const remaining = scannableHosts().filter((host) => !found.has(host));
+    const remaining = (options.scanHosts ?? scannableHosts()).filter((host) => !found.has(host));
     log.info('Starte Subnetz-Scan nach Shelly-Geräten', { hosts: remaining.length });
     for (const entry of await probeHosts(remaining, Math.min(options.timeoutMs, 1200), 'scan', 32)) {
       found.set(entry.host, entry);

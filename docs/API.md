@@ -122,7 +122,7 @@ Zwischenspeicher und lädt sich neu. Gleicher Stand ⇒ gleiche Kennung, jede
 Änderung ⇒ neue Kennung. Der Wert wird 15 Sekunden lang zwischengespeichert.
 
 ```json
-{ "name": "Smart-Home-Hub", "version": "1.3.1", "build": "9617df2505a1",
+{ "name": "Smart-Home-Hub", "version": "1.3.2", "build": "9617df2505a1",
   "node": "v22.22.0", "hasHousehold": true, "setupCompleted": true,
   "authRequired": true,
   "adapters": [ { "type": "homematic", "displayName": "Homematic",
@@ -334,6 +334,28 @@ aber schlafende Geräte). Antwort:
   "source": "mdns", "alreadyLinked": false
 } ], "scanned": false }
 ```
+
+### `GET /integrations/discover/stream?type=…&scan=true`
+Dieselbe Suche als Server-Sent-Events-Strom, damit Treffer nicht erst am Ende
+erscheinen.
+
+| Ereignis | Nutzlast |
+| --- | --- |
+| `found` | `{ entry }` – ein gefundenes Gerät, sobald es da ist |
+| `progress` | `{ pending: [...], message }` – wer noch sucht |
+| `failed` | `{ adapter, message }` – ein Hersteller ist gescheitert; die übrigen suchen weiter |
+| `done` | `{ count }` – fertig |
+
+```js
+const stream = new EventSource('/api/integrations/discover/stream?scan=true');
+stream.addEventListener('found', (e) => console.log(JSON.parse(e.data).entry));
+stream.addEventListener('done', () => stream.close());
+```
+
+Beim gründlichen Suchen stellt der Hub zuerst per TCP-Verbindungsversuch fest,
+welche Adressen belegt sind, und teilt die Liste allen Herstellern – vorher
+klopfte jeder das Subnetz einzeln mit HTTP-Anfragen ab (gemessene 54 Sekunden,
+jetzt knapp 6).
 
 ### `POST /integrations`
 ```json

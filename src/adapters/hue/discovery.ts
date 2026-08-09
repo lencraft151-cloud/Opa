@@ -64,8 +64,12 @@ export async function discoverHueBridges(
    */
   if (options.allowScan) {
     const known = new Set([...found.values()].map((entry) => entry.host));
-    log.info('Starte Subnetz-Scan nach Hue Bridges', { bereitsGefunden: known.size });
-    for (const entry of await discoverViaScan(options.timeoutMs, known)) add(entry);
+    const hosts = (options.scanHosts ?? scannableHosts()).filter((host) => !known.has(host));
+    log.info('Starte Subnetz-Scan nach Hue Bridges', {
+      bereitsGefunden: known.size,
+      hosts: hosts.length,
+    });
+    for (const entry of await discoverViaScan(hosts, options.timeoutMs)) add(entry);
   }
 
   return [...found.values()];
@@ -103,12 +107,11 @@ async function discoverViaCloud(timeoutMs: number): Promise<DiscoveredIntegratio
 }
 
 async function discoverViaScan(
+  hosts: readonly string[],
   timeoutMs: number,
-  skip: ReadonlySet<string> = new Set(),
 ): Promise<DiscoveredIntegration[]> {
-  const hosts = scannableHosts().filter((host) => !skip.has(host));
   // Kurzes Timeout pro Host, sonst dauert ein /24-Scan Minuten.
-  return probeHosts(hosts, Math.min(timeoutMs, 1200), 'scan', 32);
+  return probeHosts([...hosts], Math.min(timeoutMs, 1200), 'scan', 32);
 }
 
 async function probeHosts(

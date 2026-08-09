@@ -55,7 +55,7 @@ export class FritzboxAdapter implements IntegrationAdapter {
     // Im Zweifel auch das eigene Subnetz – manche Boxen laufen unter einer
     // anderen Adresse, etwa hinter einem zweiten Router.
     if (options.allowScan) {
-      for (const host of scannableHosts()) hosts.add(host);
+      for (const host of options.scanHosts ?? scannableHosts()) hosts.add(host);
     }
 
     const found = await mapWithConcurrency([...hosts], 16, async (host) => {

@@ -8,6 +8,27 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.3.2 – 2026-08-09
+
+**Die Netzwerksuche dauerte lange und sah aus, als hinge sie.** Beides ist
+behoben, und zwar getrennt voneinander.
+
+*Schneller:* Beim gründlichen Suchen klopfte jeder der vier Hersteller dasselbe
+Subnetz einzeln mit einer HTTP-Anfrage ab – vier mal 254 Adressen, gemessene
+**54 Sekunden**. Jetzt stellt der Hub einmal per TCP-Verbindungsversuch fest,
+welche Adressen überhaupt belegt sind, und gibt die Liste allen Herstellern:
+**5,9 Sekunden**. Eine mDNS-Suche hört außerdem auf zu warten, sobald die
+Antwortwelle abgeebbt ist – lief vorher immer die vollen fünf Sekunden aus.
+Meldet sich niemand, wird weiterhin voll gewartet: Ein schlafender
+Batteriesensor darf sich auch spät noch melden.
+
+*Sichtbar:* Der Rest der Wartezeit lässt sich nicht wegoptimieren – er lässt
+sich aber zeigen. Jeder Treffer erscheint jetzt sofort, statt am Ende
+gesammelt; darunter läuft eine Uhr und steht, auf welchen Hersteller noch
+gewartet wird. Und es gibt einen Abbrechen-Knopf. Ein Kasten, in dem fünf
+Sekunden lang nichts passiert, sieht aus wie ein Fehler – genau so wurde es
+auch gemeldet.
+
 ## 1.3.1 – 2026-08-09
 
 **Behoben: Der Hub konnte sich beim Einrichten selbst aussperren.** Wurde das
