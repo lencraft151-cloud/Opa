@@ -148,6 +148,15 @@ export interface Household {
   currency: string;
   /** Grundgebühr pro Monat, fließt in die Hochrechnung ein. */
   basePricePerMonth: number;
+  /**
+   * Wie oft der Hub die Geräte abfragt, in Sekunden.
+   *
+   * Steht am Haushalt und nicht nur in der Umgebung, weil es die eine
+   * Einstellung ist, die man wirklich nachjustieren will: Wer den Rollladen
+   * von Hand bewegt, will das schneller auf dem Bildschirm sehen; wer eine
+   * Bridge mit dreißig Lampen hat, will sie nicht alle fünf Sekunden fragen.
+   */
+  pollIntervalSeconds: number;
   /** Firmware-Updates automatisch installieren. */
   autoUpdate: boolean;
   /** Zeitfenster für automatische Updates, lokale Zeit `HH:MM`. */

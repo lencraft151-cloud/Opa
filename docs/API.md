@@ -122,7 +122,7 @@ Zwischenspeicher und lädt sich neu. Gleicher Stand ⇒ gleiche Kennung, jede
 Änderung ⇒ neue Kennung. Der Wert wird 15 Sekunden lang zwischengespeichert.
 
 ```json
-{ "name": "Smart-Home-Hub", "version": "1.3.2", "build": "9617df2505a1",
+{ "name": "Smart-Home-Hub", "version": "1.4.0", "build": "9617df2505a1",
   "node": "v22.22.0", "hasHousehold": true, "setupCompleted": true,
   "authRequired": true,
   "adapters": [ { "type": "homematic", "displayName": "Homematic",
@@ -288,7 +288,7 @@ Schließt die Einrichtung ab. `400`, solange keine Integration verbunden ist.
 | Methode | Pfad | Beschreibung |
 | --- | --- | --- |
 | `GET` | `/household` | Stammdaten |
-| `PATCH` | `/household` | `name`, `timezone`, `locale`, `pricePerKwh`, `currency`, `basePricePerMonth`, `autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`, `appearance` |
+| `PATCH` | `/household` | `pollIntervalSeconds` (3–300, gilt sofort), `name`, `timezone`, `locale`, `pricePerKwh`, `currency`, `basePricePerMonth`, `autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`, `appearance` |
 | `GET` | `/household/summary` | Kennzahlen fürs Dashboard inkl. gestörter Integrationen |
 | `GET` | `/household/tokens` | Tokens (ohne Hash) |
 | `POST` | `/household/tokens` | `{ "name": "Handy" }` → neues Token |

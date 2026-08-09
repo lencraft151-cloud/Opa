@@ -355,6 +355,7 @@ describe('Sicherung und Wiederherstellung', () => {
     pricePerKwh: 0.35,
     currency: 'EUR',
     basePricePerMonth: 12,
+    pollIntervalSeconds: 15,
     autoUpdate: false,
     autoUpdateFrom: '03:00',
     autoUpdateTo: '05:00',

@@ -24,6 +24,12 @@ export function householdRoutes(container: Container): Router {
           pricePerKwh: z.number().min(0).max(10).optional(),
           currency: z.string().min(1).max(8).optional(),
           basePricePerMonth: z.number().min(0).max(1000).optional(),
+          /*
+           * Wie oft die Geräte abgefragt werden. Unter drei Sekunden fangen
+           * ältere Bridges an zu klemmen, über fünf Minuten wirkt die
+           * Oberfläche tot – dazwischen darf jeder wählen.
+           */
+          pollIntervalSeconds: z.number().int().min(3).max(300).optional(),
           // Firmware-Auto-Updates
           autoUpdate: z.boolean().optional(),
           autoUpdateFrom: z
@@ -41,7 +47,13 @@ export function householdRoutes(container: Container): Router {
         }),
         req,
       );
-      res.json(await container.households.update(changes));
+      const updated = await container.households.update(changes);
+
+      // Ein geänderter Takt greift sofort, nicht erst beim nächsten Neustart.
+      if (changes.pollIntervalSeconds !== undefined) {
+        await container.polling.applyInterval(updated.id, updated.pollIntervalSeconds);
+      }
+      res.json(updated);
     }),
   );
 

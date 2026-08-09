@@ -1720,6 +1720,29 @@ async function renderSettings() {
     </div>
 
     <div class="card">
+      <h2>Wie oft der Hub nachsieht</h2>
+      <p class="muted small">
+        In diesem Takt fragt der Hub alle Geräte nach ihrem Zustand. Kurz heißt: Was du
+        am Lichtschalter oder von Hand am Rollladen machst, steht schneller auf dem
+        Bildschirm. Lang heißt: weniger Last für Bridges und Batteriegeräte.
+        Push-fähige Verbindungen – die Hue Bridge – melden Änderungen ohnehin sofort;
+        für sie ändert der Takt wenig.
+      </p>
+      <form id="form-polling" class="form">
+        <div class="chips">${POLL_PRESETS.map(
+          (preset) => `<button type="button" class="chip ${
+            (household?.pollIntervalSeconds ?? 15) === preset.seconds ? 'active' : ''
+          }" data-poll="${preset.seconds}">${esc(preset.label)}</button>`,
+        ).join('')}</div>
+        <label>Eigener Takt in Sekunden (3 – 300)
+          <input type="number" name="pollIntervalSeconds" min="3" max="300" step="1"
+                 class="narrow" value="${household?.pollIntervalSeconds ?? 15}" />
+        </label>
+        <button type="submit" class="primary">Speichern</button>
+      </form>
+    </div>
+
+    <div class="card">
       <h2>Stromtarif</h2>
       <form id="form-tariff" class="form">
         <div class="field-row">
@@ -2782,6 +2805,21 @@ function wireHubVersion(card) {
   );
 }
 
+/**
+ * Vorschläge für den Abfragetakt.
+ *
+ * Die Zahlen sind nicht beliebig: Unter drei Sekunden fangen ältere Bridges
+ * an zu klemmen, über fünf Minuten wirkt die Oberfläche tot. Dazwischen ist
+ * es Geschmackssache – deshalb ein paar Vorschläge und ein Feld für alles
+ * andere.
+ */
+const POLL_PRESETS = [
+  { seconds: 5, label: '5 s – sehr flott' },
+  { seconds: 15, label: '15 s – Standard' },
+  { seconds: 30, label: '30 s – sparsam' },
+  { seconds: 60, label: '1 min – sehr sparsam' },
+];
+
 function updateItem(entry) {
   const info = entry.updateInfo;
   const badge = !entry.supported
@@ -2996,6 +3034,32 @@ function wireSettings(panel) {
       store.updates = await api('/updates');
       void renderSettings();
     });
+  });
+
+  const pollForm = panel.querySelector('#form-polling');
+  const pollField = pollForm?.querySelector('[name="pollIntervalSeconds"]');
+  pollForm?.querySelectorAll('[data-poll]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      pollField.value = chip.dataset.poll;
+      pollForm.querySelectorAll('[data-poll]').forEach((other) => {
+        other.classList.toggle('active', other === chip);
+      });
+    });
+  });
+  pollForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const seconds = Number(pollField.value);
+    const updated = await guard(
+      () =>
+        api('/household', { method: 'PATCH', body: { pollIntervalSeconds: seconds } }),
+      {
+        success: `Der Hub sieht jetzt alle ${seconds} Sekunden nach.`,
+        successHint: 'Der neue Takt gilt sofort – kein Neustart nötig.',
+      },
+    );
+    if (!updated) return;
+    store.household = updated;
+    void renderSettings();
   });
 
   panel.querySelector('#form-tariff').addEventListener('submit', async (event) => {

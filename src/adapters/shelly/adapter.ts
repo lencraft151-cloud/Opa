@@ -26,6 +26,7 @@ import type {
   IntegrationContext,
   LinkRequest,
   LinkResult,
+  SkippedEntry,
 } from '../types.js';
 
 const log = createLogger('shelly:adapter');
@@ -220,15 +221,17 @@ export class ShellyAdapter implements IntegrationAdapter {
       }
 
       case 'setTargetTemperature': {
-        if (kind !== 'thermostat') {
+        // `thermostat` ist der Regler im Gerät, `blutrv` das Ventil am
+        // Bluetooth-Zugang – beide nehmen eine Solltemperatur an.
+        if (kind !== 'thermostat' && kind !== 'blutrv') {
           throw badRequest(
             `Die Komponente "${externalId}" ist keine Heizung.`,
             undefined,
-            'Solltemperaturen nehmen nur Thermostate wie der Shelly TRV an.',
+            'Solltemperaturen nehmen nur Thermostate an – etwa der Shelly TRV oder ein BLU TRV.',
           );
         }
         const target = clamp(command.targetTemperatureC, 4, 35);
-        await client.setThermostatTarget(channel, target);
+        await client.setThermostatTarget(channel, target, kind);
         return { targetTemperatureC: target };
       }
 
@@ -307,9 +310,25 @@ export class ShellyAdapter implements IntegrationAdapter {
     naming: ShellyNaming,
   ): Promise<ShellyComponent[]> {
     const status = await this.clientFor(ctx).getStatus();
-    return ctx.config.generation === 2
-      ? parseGen2Status(status, naming)
-      : parseGen1Status(status, naming);
+    if (ctx.config.generation !== 2) return parseGen1Status(status, naming);
+
+    // Was der Hub nicht deuten konnte, wird gemerkt statt verschwiegen –
+    // die Diagnose beantwortet damit „wo ist mein Gerät?" auch für Shelly.
+    const skipped: Array<{ id: string; reason: string }> = [];
+    const components = parseGen2Status(status, naming, skipped);
+    this.skipped.set(ctx.integration.id, skipped);
+    return components;
+  }
+
+  /** Übersprungene Bauteile der letzten Abfrage, je Integration. */
+  private readonly skipped = new Map<string, Array<{ id: string; reason: string }>>();
+
+  diagnostics(ctx: ShellyContext): SkippedEntry[] {
+    return (this.skipped.get(ctx.integration.id) ?? []).map((entry) => ({
+      address: entry.id,
+      channelType: entry.id.split(':')[0] ?? entry.id,
+      reason: entry.reason,
+    }));
   }
 
   private async readComponentState(ctx: ShellyContext, externalId: string): Promise<DeviceState> {

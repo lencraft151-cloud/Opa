@@ -8,6 +8,28 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.4.0 – 2026-08-09
+
+**Shelly: Heizungen und Sensoren, die vorher fehlten.** Ein BLU TRV hängt per
+Bluetooth an einem Gen3-Shelly und kommt als eigener Bauteiltyp herein – der
+Hub kannte ihn nicht, also fehlte im Haushalt schlicht die Heizung. Ebenso die
+BLU-Sensoren (Temperatur, Luftfeuchte, Batterie, Bewegung) und
+Helligkeitsmesser. Solltemperaturen gehen jetzt auch an ein BLU TRV, eingepackt
+über den Zugang, an dem es hängt.
+
+**Und was Shelly morgen herausbringt.** Ein unbekannter Bauteiltyp verschwand
+bisher wortlos – dieselbe Falle, die bei Homematic schon zugeschlagen hatte.
+Jetzt entscheiden die Werte statt des Namens: Solltemperatur ⇒ Heizung,
+Position mit Fahrzustand ⇒ Rollladen, schaltbarer Ausgang ⇒ Schalter. Was
+trotzdem übrig bleibt, steht mit Begründung in der Diagnose.
+
+**Der Abfragetakt lässt sich einstellen.** Bisher stand er nur in der
+Umgebungsvariable `POLL_INTERVAL_SECONDS`, also außerhalb der Reichweite des
+Bewohners. Jetzt steht er unter Einstellungen: 3 bis 300 Sekunden, mit ein paar
+Vorschlägen. Kurz heißt, dass ein von Hand bewegter Rollladen schneller auf dem
+Bildschirm steht; lang heißt weniger Last für Bridges und Batteriegeräte. Der
+neue Takt gilt sofort, ohne Neustart.
+
 ## 1.3.2 – 2026-08-09
 
 **Die Netzwerksuche dauerte lange und sah aus, als hinge sie.** Beides ist

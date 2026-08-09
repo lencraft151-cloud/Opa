@@ -578,7 +578,7 @@ Alle Werte kommen aus Umgebungsvariablen oder `.env` (siehe `.env.example`):
 | `DATA_DIR` | `./data` | Datenbank und Messwerte |
 | `SECRET_KEY` | – | **Pflicht.** Schlüssel für die Zugangsdaten |
 | `AUTH_DISABLED` | `false` | Token-Prüfung abschalten (nur lokal) |
-| `POLL_INTERVAL_SECONDS` | `15` | Abfrageintervall der Geräte |
+| `POLL_INTERVAL_SECONDS` | `15` | Abfrageintervall der Geräte (Startwert; änderbar in den Einstellungen) |
 | `TELEMETRY_RETENTION_DAYS` | `90` | Aufbewahrung der Messwerte |
 | `TELEMETRY_MIN_INTERVAL_SECONDS` | `60` | Mindestabstand zweier Messwerte je Sensor |
 | `ALLOW_CLOUD_DISCOVERY` | `true` | `discovery.meethue.com` nutzen |
@@ -685,7 +685,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 396 Tests, node:test
+npm test        # 401 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 

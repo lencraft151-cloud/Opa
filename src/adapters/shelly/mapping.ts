@@ -53,7 +53,11 @@ function label(naming: ShellyNaming, externalId: string, fallback: string): stri
 // Gen2 / Gen3 / Gen4 (JSON-RPC)
 // ---------------------------------------------------------------------------
 
-export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyComponent[] {
+export function parseGen2Status(
+  status: Json,
+  naming: ShellyNaming,
+  skipped: Array<{ id: string; reason: string }> = [],
+): ShellyComponent[] {
   const components: ShellyComponent[] = [];
 
   for (const [key, rawValue] of Object.entries(status)) {
@@ -170,21 +174,20 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
         break;
       }
 
-      case 'thermostat': {
-        // Wall Display und BLU TRV melden Soll- und Istwert getrennt.
-        const target = num(value['target_C']) ?? num(obj(value['target_t'])?.['value']);
-        const current = num(value['current_C']) ?? num(value['tC']);
-        if (target === undefined && current === undefined) break;
-        const state: DeviceState = {};
-        if (target !== undefined) state.targetTemperatureC = round(target, 1);
-        if (current !== undefined) state.temperatureC = round(current, 2);
-        const capabilities: Capability[] = ['thermostat'];
-        if (current !== undefined) capabilities.push('sensor.temperature');
+      /*
+       * `thermostat` ist der Wall-Display-Regler, `blutrv` das
+       * Bluetooth-Heizkörperventil, das über einen Gen3-Shelly als Zugang
+       * hereinkommt. Beide melden Soll- und Istwert getrennt, nur unter
+       * verschiedenen Namen – deshalb hier zusammen.
+       */
+      case 'thermostat':
+      case 'blutrv': {
+        const component = thermostatComponent(value);
+        if (!component) break;
         components.push({
           externalId: key,
           name: label(naming, key, `Heizung ${channel + 1}`),
-          capabilities,
-          state,
+          ...component,
         });
         break;
       }
@@ -224,12 +227,179 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
         break;
       }
 
-      default:
+      case 'illuminance': {
+        const lux = num(value['lux']) ?? num(value['illumination']);
+        if (lux === undefined) break;
+        components.push({
+          externalId: key,
+          name: label(naming, key, `Helligkeit ${channel + 1}`),
+          capabilities: ['sensor.illuminance'],
+          state: { illuminanceLux: round(lux, 1) },
+        });
         break;
+      }
+
+      /*
+       * BLU-Geräte (H&T, Motion, Tür/Fenster) hängen per Bluetooth an einem
+       * Gen3-Shelly, der sie als `bthomesensor` weiterreicht. Ein solcher
+       * Sensor führt genau einen Wert – welchen, sagt er selbst.
+       */
+      case 'bthomesensor': {
+        const component = bthomeSensor(value);
+        if (!component) break;
+        components.push({
+          externalId: key,
+          name: label(naming, key, str(value['name']) || `Sensor ${channel + 1}`),
+          ...component,
+        });
+        break;
+      }
+
+      /*
+       * Ein unbekannter Bauteiltyp verschwand bisher wortlos – dieselbe Falle
+       * wie früher bei Homematic. Shelly bringt laufend neue heraus, und ein
+       * Heizkörperventil, das der Hub nicht kennt, ist für den Bewohner
+       * schlicht nicht da. Also wird geraten: nicht nach dem Namen, sondern
+       * nach den Werten, die das Bauteil führt.
+       */
+      default: {
+        const component = inferComponent(value);
+        if (!component) {
+          skipped.push({ id: key, reason: `Bauteiltyp "${kind}" führt keine bekannten Werte` });
+          break;
+        }
+        components.push({
+          externalId: key,
+          name: label(naming, key, str(value['name']) || `${kind} ${channel + 1}`),
+          ...component,
+        });
+        break;
+      }
     }
   }
 
   return components;
+}
+
+/**
+ * Soll- und Isttemperatur eines Reglers, egal wie er sie nennt.
+ *
+ * Wall Display schreibt `target_C`, das BLU TRV `target_t.value`, ältere
+ * Firmware `targetTemp`. Alle meinen dasselbe.
+ */
+function thermostatComponent(
+  value: Json,
+): Pick<ShellyComponent, 'capabilities' | 'state'> | undefined {
+  const target =
+    num(value['target_C']) ??
+    num(obj(value['target_t'])?.['value']) ??
+    num(value['targetTemp']) ??
+    num(value['target_t']);
+  const current =
+    num(value['current_C']) ??
+    num(obj(value['current_t'])?.['value']) ??
+    num(value['tC']) ??
+    num(value['currentTemp']);
+  if (target === undefined && current === undefined) return undefined;
+
+  const state: DeviceState = {};
+  if (target !== undefined) state.targetTemperatureC = round(target, 1);
+  if (current !== undefined) state.temperatureC = round(current, 2);
+
+  // Das Ventil sagt, wie weit es offen steht – nützlich, um zu sehen, ob
+  // wirklich geheizt wird.
+  const valve = num(value['pos']) ?? num(value['valve_pos']) ?? num(value['current_pos']);
+  if (valve !== undefined) state.valvePosition = round(valve, 0);
+
+  const capabilities: Capability[] = ['thermostat'];
+  if (current !== undefined) capabilities.push('sensor.temperature');
+  return { capabilities, state };
+}
+
+/** Ein einzelner Messwert eines BLU-Geräts. */
+function bthomeSensor(value: Json): Pick<ShellyComponent, 'capabilities' | 'state'> | undefined {
+  const reading = num(value['value']);
+  if (reading === undefined) return undefined;
+
+  switch (str(value['obj_id']) ?? str(value['sensor_type'])) {
+    case 'temperature':
+      return { capabilities: ['sensor.temperature'], state: { temperatureC: round(reading, 2) } };
+    case 'humidity':
+      return { capabilities: ['sensor.humidity'], state: { humidity: round(reading, 1) } };
+    case 'illuminance':
+      return { capabilities: ['sensor.illuminance'], state: { illuminanceLux: round(reading, 1) } };
+    case 'battery':
+      return { capabilities: ['sensor.battery'], state: { batteryPercent: round(reading, 0) } };
+    case 'motion':
+      return { capabilities: ['sensor.motion'], state: { motion: reading > 0 } };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Was ein unbekanntes Bauteil ist – geraten aus dem, was es kann.
+ *
+ * Dieselbe Überlegung wie bei Homematic: Die Namensliste deckt ab, was wir
+ * kennen, aber nicht, was noch kommt. Ein Bauteil mit Soll- und
+ * Isttemperatur ist eine Heizung, egal wie es heißt; eines mit Position und
+ * Fahrzustand ein Rollladen.
+ */
+export function inferComponent(
+  value: Json,
+): Pick<ShellyComponent, 'capabilities' | 'state'> | undefined {
+  // Solltemperatur ist eindeutig.
+  const asThermostat = thermostatComponent(value);
+  if (asThermostat && asThermostat.state.targetTemperatureC !== undefined) return asThermostat;
+
+  // Position plus Fahrzustand – ein Antrieb, kein Dimmer.
+  const position = num(value['current_pos']);
+  if (position !== undefined && value['state'] !== undefined) {
+    const state: DeviceState = {
+      position,
+      coverState: normalizeCoverState(str(value['state']), position, 2),
+    };
+    const capabilities: Capability[] = ['cover'];
+    const tilt = num(value['slat_pos']) ?? num(obj(value['slat'])?.['pos']);
+    if (tilt !== undefined) {
+      state.tilt = tilt;
+      capabilities.push('cover.tilt');
+    }
+    return { capabilities, state };
+  }
+
+  // Ein schaltbarer Ausgang.
+  const on = bool(value['output']) ?? bool(value['ison']);
+  if (on !== undefined) {
+    const state: DeviceState = { on };
+    const capabilities: Capability[] = ['switch'];
+    const brightness = num(value['brightness']);
+    if (brightness !== undefined) {
+      state.brightness = round(brightness, 1);
+      capabilities.push('dimmer');
+    }
+    return { capabilities, state };
+  }
+
+  // Reine Messwerte.
+  const temperature = num(value['tC']) ?? num(obj(value['tC'])?.['value']);
+  const humidity = num(value['rh']);
+  const lux = num(value['lux']);
+  const state: DeviceState = {};
+  const capabilities: Capability[] = [];
+  if (temperature !== undefined) {
+    state.temperatureC = round(temperature, 2);
+    capabilities.push('sensor.temperature');
+  }
+  if (humidity !== undefined) {
+    state.humidity = round(humidity, 1);
+    capabilities.push('sensor.humidity');
+  }
+  if (lux !== undefined) {
+    state.illuminanceLux = round(lux, 1);
+    capabilities.push('sensor.illuminance');
+  }
+  return capabilities.length > 0 ? { capabilities, state } : undefined;
 }
 
 // ---------------------------------------------------------------------------

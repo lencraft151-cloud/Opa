@@ -288,8 +288,28 @@ export class ShellyClient {
    * Solltemperatur einer Heizung. Der Gen1-TRV nimmt sie als Query-Parameter,
    * Gen2-Thermostate über die RPC-Schnittstelle.
    */
-  async setThermostatTarget(channel: number, targetC: number): Promise<void> {
+  /**
+   * Solltemperatur setzen.
+   *
+   * @param kind Bauteilart – `blutrv` geht einen anderen Weg als `thermostat`.
+   */
+  async setThermostatTarget(channel: number, targetC: number, kind = 'thermostat'): Promise<void> {
     const target = Math.round(targetC * 10) / 10;
+
+    /*
+     * Ein BLU TRV hängt per Bluetooth an einem Gen3-Shelly, der als Zugang
+     * dient. Befehle gehen deshalb nicht direkt an das Ventil, sondern
+     * eingepackt über `BluTrv.Call` an den Zugang, der sie weiterreicht.
+     */
+    if (kind === 'blutrv') {
+      await this.rpc('BluTrv.Call', {
+        id: channel,
+        method: 'Trv.SetTarget',
+        params: { id: 0, target_C: target },
+      });
+      return;
+    }
+
     if (this.generation === 2) {
       await this.rpc('Thermostat.SetConfig', {
         id: channel,

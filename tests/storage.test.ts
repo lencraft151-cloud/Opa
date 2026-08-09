@@ -28,6 +28,7 @@ const household = (id: string): Household => ({
   locale: 'de-DE',
   setupStep: 'integrations',
   setupCompletedAt: null,
+  pollIntervalSeconds: 15,
   pricePerKwh: 0.35,
   currency: 'EUR',
   basePricePerMonth: 0,

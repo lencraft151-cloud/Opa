@@ -152,6 +152,8 @@ function migrate(data: DatabaseShape): DatabaseShape {
   for (const household of data.households) {
     household.appearance = { ...DEFAULT_APPEARANCE, ...(household.appearance ?? {}) };
     household.presence = { ...DEFAULT_PRESENCE, ...(household.presence ?? {}) };
+    // Der Abfragetakt kam später dazu; vorher stand er nur in der Umgebung.
+    household.pollIntervalSeconds ??= 15;
   }
 
   // Benutzer, Sitzungen und Szenen kamen später dazu. Ein Datenstand ohne

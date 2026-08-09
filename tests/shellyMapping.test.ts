@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  inferComponent,
   namingFromConfig,
   parseComponentId,
   parseGen1Status,
@@ -164,5 +165,79 @@ describe('Hilfsfunktionen', () => {
     assert.equal(result.deviceName, 'Flur');
     assert.equal(result.channelNames.get('switch:0'), 'Deckenlicht');
     assert.equal(result.channelNames.has('switch:1'), false);
+  });
+});
+
+describe('Shelly Gen2/Gen3: Heizungen, Sensoren und Unbekanntes', () => {
+  const naming = { deviceName: 'Shelly', channelNames: new Map<string, string>() };
+  const find = (list: ReturnType<typeof parseGen2Status>, id: string) =>
+    list.find((entry) => entry.externalId === id);
+
+  it('erkennt ein BLU TRV als Heizung', () => {
+    /*
+     * Das Ventil hängt per Bluetooth an einem Gen3-Shelly und kommt als
+     * eigener Bauteiltyp herein. Ohne diesen Zweig fehlte im Haushalt
+     * schlicht die Heizung.
+     */
+    const [entry] = parseGen2Status(
+      { 'blutrv:200': { id: 200, target_C: 21.5, current_C: 19.8, pos: 40 } },
+      naming,
+    );
+    assert.deepEqual(entry?.capabilities, ['thermostat', 'sensor.temperature']);
+    assert.equal(entry?.state.targetTemperatureC, 21.5);
+    assert.equal(entry?.state.temperatureC, 19.8);
+    assert.equal(entry?.state.valvePosition, 40, 'die Ventilstellung zeigt, ob wirklich geheizt wird');
+  });
+
+  it('zerlegt die Messwerte eines BLU-Sensors', () => {
+    const components = parseGen2Status(
+      {
+        'bthomesensor:201': { id: 201, obj_id: 'temperature', value: 18.4 },
+        'bthomesensor:202': { id: 202, obj_id: 'humidity', value: 55 },
+        'bthomesensor:203': { id: 203, obj_id: 'battery', value: 88 },
+        'bthomesensor:204': { id: 204, obj_id: 'motion', value: 1 },
+      },
+      naming,
+    );
+    assert.deepEqual(find(components, 'bthomesensor:201')?.capabilities, ['sensor.temperature']);
+    assert.equal(find(components, 'bthomesensor:202')?.state.humidity, 55);
+    assert.equal(find(components, 'bthomesensor:203')?.state.batteryPercent, 88);
+    assert.equal(find(components, 'bthomesensor:204')?.state.motion, true);
+  });
+
+  it('erkennt unbekannte Bauteile an ihren Werten', () => {
+    /*
+     * Shelly bringt laufend neue Bauteiltypen heraus. Bisher verschwand alles
+     * Unbekannte wortlos – dieselbe Falle wie früher bei Homematic. Jetzt
+     * entscheiden die Werte: Solltemperatur ⇒ Heizung, Position mit
+     * Fahrzustand ⇒ Rollladen.
+     */
+    const components = parseGen2Status(
+      {
+        'gibtesnochnicht:0': { id: 0, target_C: 23, current_C: 21 },
+        'auchneu:1': { id: 1, current_pos: 30, state: 'opening' },
+        'schalterartig:2': { id: 2, output: true, brightness: 40 },
+      },
+      naming,
+    );
+    assert.ok(find(components, 'gibtesnochnicht:0')?.capabilities.includes('thermostat'));
+    assert.deepEqual(find(components, 'auchneu:1')?.capabilities, ['cover']);
+    assert.deepEqual(find(components, 'schalterartig:2')?.capabilities, ['switch', 'dimmer']);
+  });
+
+  it('merkt sich, was es trotzdem nicht deuten konnte', () => {
+    // „Rollladen fehlt" ist keine Auskunft; „Bauteiltyp X führt keine
+    // bekannten Werte" schon.
+    const skipped: Array<{ id: string; reason: string }> = [];
+    const components = parseGen2Status({ 'raetsel:0': { id: 0, text: 'hallo' } }, naming, skipped);
+    assert.equal(components.length, 0);
+    assert.equal(skipped.length, 1);
+    assert.match(skipped[0]?.reason ?? '', /raetsel/);
+  });
+
+  it('deutet dasselbe Bauteil auch ohne Namen richtig', () => {
+    assert.ok(inferComponent({ target_C: 20 })?.capabilities.includes('thermostat'));
+    assert.ok(inferComponent({ tC: 19.5 })?.capabilities.includes('sensor.temperature'));
+    assert.equal(inferComponent({ nur: 'text' }), undefined, 'ohne Anhaltspunkt wird nicht geraten');
   });
 });

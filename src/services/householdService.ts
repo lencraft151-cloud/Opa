@@ -18,6 +18,7 @@ export interface CreateHouseholdInput {
   pricePerKwh?: number;
   currency?: string;
   basePricePerMonth?: number;
+  pollIntervalSeconds?: number;
 }
 
 /** In den Einstellungen änderbare Felder. */
@@ -30,6 +31,7 @@ export type HouseholdUpdate = Partial<
     | 'pricePerKwh'
     | 'currency'
     | 'basePricePerMonth'
+    | 'pollIntervalSeconds'
     | 'autoUpdate'
     | 'autoUpdateFrom'
     | 'autoUpdateTo'
@@ -84,6 +86,7 @@ export class HouseholdService {
       pricePerKwh: input.pricePerKwh ?? 0.35,
       currency: input.currency?.trim() || 'EUR',
       basePricePerMonth: input.basePricePerMonth ?? 0,
+      pollIntervalSeconds: input.pollIntervalSeconds ?? 15,
       autoUpdate: false,
       autoUpdateFrom: '03:00',
       autoUpdateTo: '05:00',
