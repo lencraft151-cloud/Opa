@@ -11,6 +11,8 @@ import type {
   Room,
   Scene,
   Session,
+  SonosPlayer,
+  SpotifyAccount,
   User,
 } from '../core/types.js';
 import { nowIso } from '../util/id.js';
@@ -367,6 +369,34 @@ export class NextcloudRepository extends BaseRepository<NextcloudAccount> {
   }
 }
 
+/** Sonos-Lautsprecher. Erkannt wird ein Gerät an seiner UUID, nicht an der IP. */
+export class SonosRepository extends BaseRepository<SonosPlayer> {
+  constructor(db: Database) {
+    super(db, 'sonos');
+  }
+
+  listByHousehold(householdId: string): SonosPlayer[] {
+    return this.all().filter((player) => player.householdId === householdId);
+  }
+
+  findByUuid(householdId: string, uuid: string): SonosPlayer | undefined {
+    return this.all().find(
+      (player) => player.householdId === householdId && player.uuid === uuid,
+    );
+  }
+}
+
+/** Spotify-Konto – höchstens eines je Haushalt. */
+export class SpotifyRepository extends BaseRepository<SpotifyAccount> {
+  constructor(db: Database) {
+    super(db, 'spotify');
+  }
+
+  findByHousehold(householdId: string): SpotifyAccount | undefined {
+    return this.all().find((account) => account.householdId === householdId);
+  }
+}
+
 export interface Repositories {
   households: HouseholdRepository;
   rooms: RoomRepository;
@@ -378,6 +408,8 @@ export interface Repositories {
   sessions: SessionRepository;
   scenes: SceneRepository;
   nextcloud: NextcloudRepository;
+  sonos: SonosRepository;
+  spotify: SpotifyRepository;
 }
 
 export function createRepositories(db: Database): Repositories {
@@ -392,5 +424,7 @@ export function createRepositories(db: Database): Repositories {
     sessions: new SessionRepository(db),
     scenes: new SceneRepository(db),
     nextcloud: new NextcloudRepository(db),
+    sonos: new SonosRepository(db),
+    spotify: new SpotifyRepository(db),
   };
 }

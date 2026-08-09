@@ -17,6 +17,8 @@ import { PresenceService } from './services/presenceService.js';
 import { RoomService } from './services/roomService.js';
 import { SceneService } from './services/sceneService.js';
 import { SetupService } from './services/setupService.js';
+import { SonosService } from './services/sonosService.js';
+import { SpotifyService } from './services/spotifyService.js';
 import { TelemetryService } from './services/telemetryService.js';
 import { UpdateService } from './services/updateService.js';
 import { UserService } from './services/userService.js';
@@ -48,6 +50,10 @@ export interface Container {
   scenes: SceneService;
   /** Benachrichtigungen aus der eigenen Nextcloud. */
   nextcloud: NextcloudService;
+  /** Lautsprecher im eigenen Netz. */
+  sonos: SonosService;
+  /** Wiedergabe bei Spotify. */
+  spotify: SpotifyService;
   presence: PresenceService;
   /** Startet Hintergrunddienste, sobald ein Haushalt existiert. */
   startBackgroundServices: () => Promise<void>;
@@ -94,6 +100,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const scenes = new SceneService(repos, devices);
   const presence = new PresenceService(repos, devices, households);
   const nextcloud = new NextcloudService(repos, config.secretKey);
+  const sonos = new SonosService(repos);
+  const spotify = new SpotifyService(repos, config.secretKey);
 
   const startBackgroundServices = async (): Promise<void> => {
     const household = households.current();
@@ -156,6 +164,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     scenes,
     presence,
     nextcloud,
+    sonos,
+    spotify,
     startBackgroundServices,
     stopBackgroundServices,
     shutdown,

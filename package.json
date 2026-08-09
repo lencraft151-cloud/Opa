@@ -1,6 +1,6 @@
 {
   "name": "smarthome-hub",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "type": "module",
   "description": "Vendor-neutraler Smart-Home-Hub: Philips Hue und Shelly in einer App, inkl. Haushalts-Einrichtung, Temperaturmessung und Automationen.",

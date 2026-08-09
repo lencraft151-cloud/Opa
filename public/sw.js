@@ -9,7 +9,7 @@
  * Schaltzustand wäre schlimmer als eine ehrliche Fehlermeldung.
  */
 
-const CACHE = 'smarthome-shell-v6';
+const CACHE = 'smarthome-shell-v7';
 
 const SHELL = [
   '/',
@@ -30,6 +30,7 @@ const SHELL = [
   '/js/integrations.js',
   '/js/lightpreview.js',
   '/js/login.js',
+  '/js/music.js',
   '/js/selfupdate.js',
 ];
 

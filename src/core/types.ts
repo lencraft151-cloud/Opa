@@ -592,6 +592,134 @@ export interface NextcloudNotification {
   datetime: string;
 }
 
+// ---------------------------------------------------------------------------
+// Musik: Sonos und Spotify
+// ---------------------------------------------------------------------------
+
+/**
+ * Was man mit einer Wiedergabe machen kann – bei Sonos wie bei Spotify.
+ *
+ * Bewusst getrennt von `DeviceCommand`: Ein Lautsprecher ist kein Schalter mit
+ * Extras. „Weiter" hat bei einer Lampe keine Bedeutung, und `setPower` hat bei
+ * einem Lautsprecher keine.
+ */
+export type MediaCommand =
+  | { type: 'play' }
+  | { type: 'pause' }
+  | { type: 'next' }
+  | { type: 'previous' }
+  | { type: 'setVolume'; volume: number }
+  | { type: 'setMute'; muted: boolean };
+
+/**
+ * Ein Sonos-Lautsprecher im eigenen Netz.
+ *
+ * Kein Gerät im Sinne von `Device`: Sonos spricht UPnP statt einer der
+ * Hersteller-APIs, kennt keine der Fähigkeiten des Gerätemodells und hat
+ * dafür Dinge, die dort nichts zu suchen haben – einen Titel, eine
+ * Abspielposition, eine Gruppe.
+ */
+export interface SonosPlayer {
+  id: string;
+  householdId: string;
+  /** IP oder Hostname. Der Steuerport ist bei Sonos immer 1400. */
+  host: string;
+  /** `RINCON_…` – die Kennung, die auch einen Adresswechsel übersteht. */
+  uuid: string;
+  /** Der Raumname aus der Sonos-App („Küche"). */
+  roomName: string;
+  model: string | null;
+  softwareVersion: string | null;
+  /** Zuordnung zu einem Raum des Hubs – rein für die Anzeige. */
+  roomId: string | null;
+  lastSeenAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const TRANSPORT_STATES = ['playing', 'paused', 'stopped', 'transitioning'] as const;
+export type TransportState = (typeof TRANSPORT_STATES)[number];
+
+/** Was ein Lautsprecher gerade tut. */
+export interface SonosPlayerState {
+  playerId: string;
+  reachable: boolean;
+  transport: TransportState | null;
+  volume: number | null;
+  muted: boolean;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  artworkUrl: string | null;
+  durationSeconds: number | null;
+  positionSeconds: number | null;
+  /**
+   * Kennung des Gruppenkoordinators. Steht hier eine fremde UUID, hängt
+   * dieser Lautsprecher in der Gruppe eines anderen – Play/Pause gehen dann
+   * an diesen anderen, sonst antwortet Sonos mit Fehler 701.
+   */
+  coordinatorUuid: string | null;
+  /** Raumnamen aller Mitglieder der Gruppe, inklusive des eigenen. */
+  groupMembers: string[];
+  error: string | null;
+}
+
+/**
+ * Verbindung zu Spotify.
+ *
+ * Angemeldet wird sich mit **Authorization Code + PKCE**: Dabei braucht der
+ * Hub nur die Client-ID, kein Client-Geheimnis. Ein Geheimnis, das auf jedem
+ * Hub im Klartext derselben Anwendung liegt, ist keines.
+ */
+export interface SpotifyAccount {
+  id: string;
+  householdId: string;
+  clientId: string;
+  /** Muss im Spotify-Dashboard genau so eingetragen sein. */
+  redirectUri: string;
+  displayName: string | null;
+  /** `premium` oder `free` – Steuern geht nur mit Premium. */
+  product: string | null;
+  scopes: string[];
+  /** Zugriffs- und Erneuerungstoken, verschlüsselt. */
+  secretsEnc: string | null;
+  lastSeenAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PublicSpotifyAccount = Omit<SpotifyAccount, 'secretsEnc'> & {
+  /** Liegt eine abgeschlossene Anmeldung vor? */
+  connected: boolean;
+};
+
+/** Was gerade bei Spotify läuft. */
+export interface SpotifyPlayback {
+  playing: boolean;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  artworkUrl: string | null;
+  durationSeconds: number | null;
+  positionSeconds: number | null;
+  /** Gerät, auf dem gespielt wird – Handy, Rechner, Sonos … */
+  deviceName: string | null;
+  deviceId: string | null;
+  volume: number | null;
+  shuffle: boolean;
+}
+
+/** Ein bei Spotify angemeldetes Abspielgerät. */
+export interface SpotifyDevice {
+  id: string;
+  name: string;
+  type: string;
+  active: boolean;
+  volume: number | null;
+}
+
 /** Eine angemeldete Sitzung, üblicherweise ein Browser. */
 export interface Session {
   id: string;

@@ -7,6 +7,7 @@ import type {
   FritzboxIntegrationConfig,
   FritzboxIntegrationSecrets,
 } from '../../core/types.js';
+import { sha256Hex } from '../../util/crypto.js';
 import { mapWithConcurrency } from '../../util/http.js';
 import { browse, MDNS_SERVICES } from '../../util/mdns.js';
 import { defaultGateways, isIPv4, scannableHosts } from '../../util/net.js';
@@ -57,7 +58,7 @@ export class FritzboxAdapter implements IntegrationAdapter {
   readonly type = 'fritzbox' as const;
   readonly displayName = 'FRITZ!Box (experimentell)';
 
-  private readonly clients = new Map<string, FritzboxClient>();
+  private readonly clients = new Map<string, { client: FritzboxClient; fingerprint: string }>();
 
   async discover(options: DiscoverOptions): Promise<DiscoveredIntegration[]> {
     const hosts = new Set<string>(KNOWN_HOSTS);
@@ -312,10 +313,20 @@ export class FritzboxAdapter implements IntegrationAdapter {
     return devices;
   }
 
+  /**
+   * Der Sitzungshalter zu dieser Box.
+   *
+   * Wiederverwendet wird er aus einem handfesten Grund: Eine FRITZ!Box zählt
+   * Anmeldungen. Für jede Abfrage neu anzumelden – alle paar Sekunden – sieht
+   * für die Box aus wie ein Angriff, und sie sperrt irgendwann.
+   *
+   * Neu gebaut wird er, sobald sich Adresse, Benutzername oder Kennwort
+   * ändern. Ohne diesen Vergleich hätte ein „Erneut verbinden" mit
+   * berichtigtem Kennwort keine Wirkung: Der Hub liefe weiter mit dem alten,
+   * inklusive dessen Wartezeit.
+   */
   private clientFor(ctx: FritzboxContext): FritzboxClient {
     const key = ctx.integration?.id ?? ctx.config.host;
-    const existing = this.clients.get(key);
-    if (existing) return existing;
 
     if (!ctx.secrets?.password) {
       throw notFound(
@@ -324,12 +335,18 @@ export class FritzboxAdapter implements IntegrationAdapter {
       );
     }
 
+    const fingerprint = sha256Hex(
+      `${ctx.config.host}|${ctx.config.username}|${ctx.secrets.password}`,
+    );
+    const existing = this.clients.get(key);
+    if (existing && existing.fingerprint === fingerprint) return existing.client;
+
     const client = new FritzboxClient(
       ctx.config.host,
       ctx.config.username,
       ctx.secrets.password,
     );
-    this.clients.set(key, client);
+    this.clients.set(key, { client, fingerprint });
     return client;
   }
 }

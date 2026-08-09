@@ -8,6 +8,60 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.7.0 – 2026-08-09
+
+**Sonos und Spotify – im eigenen Reiter „Dienste".** Dort stehen jetzt die
+Dinge, die kein Gerät sind: Lautsprecher, Musik und die Nextcloud, die aus den
+Einstellungen dorthin umgezogen ist. Bei einer Lampe gibt es an, aus und eine
+Helligkeit; bei einem Lautsprecher einen Titel, eine Warteschlange und eine
+Gruppe. Beides in dieselbe Kachel zu pressen hätte beiden geschadet.
+
+**Sonos** findet der Hub selbst (SSDP, sonst Port 1400 im Subnetz, sonst von
+Hand eingetragen) und braucht dafür kein Konto – Sonos spricht UPnP im eigenen
+Netz. Angezeigt werden Titel, Interpret, Titelbild und Lautstärke, bedienbar
+sind Play, Pause, vor, zurück und die Lautstärke.
+
+Ein Detail, an dem eine Sonos-Steuerung sonst scheitert: **Gruppen.** Sind zwei
+Lautsprecher zusammengefasst, nimmt nur der Koordinator Play und Pause an – der
+andere antwortet mit Fehler 701. Wer „Küche" drückt, während die Küche im
+Wohnzimmer-Verbund hängt, dessen Befehl geht deshalb ans Wohnzimmer. Die
+Lautstärke bleibt beim einzelnen Lautsprecher, denn dort will man sie auch
+einzeln haben.
+
+**Spotify** meldet sich mit Authorization Code + **PKCE** an: Der Hub braucht
+nur die Client-ID, kein Client-Geheimnis. Ein Geheimnis, das bei jedem Nutzer
+derselben Anwendung auf der Platte liegt, ist keines. Angezeigt wird, was
+gerade läuft; steuern erlaubt Spotify nur mit Premium – das ist deren Regel,
+der Hub sagt es nur deutlich, statt einen 403 durchzureichen.
+
+**Die Seite blitzt nicht mehr im Abfragetakt.** Nach jeder Geräteabfrage wurde
+bisher die ganze Ansicht neu geschrieben – auch wenn kein einziger Wert anders
+war. Zwei Dinge gingen dabei kaputt: angefangene Eingaben verschwanden, und
+jede neu eingesetzte Karte startete ihre Einblendung von vorn, die bei
+Deckkraft 0 beginnt. Auf hellem Hintergrund sah das aus, als würde die Seite
+kurz weiß. Jetzt wird verglichen, bevor geschrieben wird: Ändert sich nichts,
+passiert auch nichts. Gemessen bei einem Takt von drei Sekunden: **null
+DOM-Änderungen in zwanzig Sekunden** statt sieben vollständiger Neuaufbauten.
+Und wenn sich doch etwas ändert, läuft die Einstiegsanimation nicht erneut –
+die gehört zum Betreten einer Ansicht, nicht zu einem neuen Messwert.
+
+**Die FRITZ!Box sperrt keine Anmeldeversuche mehr aus.** Eine abgelehnte
+Anmeldung wurde bisher im Abfragetakt wiederholt. Genau das erzeugt die Sperre,
+die AVM gegen Durchprobieren eingebaut hat – und die dann auch die
+Weboberfläche der Box aussperrt. Nach einer Ablehnung wartet der Hub jetzt: die
+von der Box genannte Sperrzeit, sonst 30 Sekunden, danach jeweils doppelt so
+lang bis zu einer Viertelstunde. Meldet die Box beim Abholen der Anmeldeaufgabe
+bereits eine laufende Sperre, wird die Aufgabe gar nicht erst beantwortet.
+Ebenfalls berichtigt: Nach einem „Erneut verbinden" mit anderem Kennwort lief
+der Hub weiter mit dem alten – die Sitzung wird jetzt verworfen, sobald sich
+Adresse, Benutzername oder Kennwort ändern.
+
+**Anfragen an tote Adressen hängen nicht mehr.** `req.setTimeout` in Node wirkt
+erst, wenn die Verbindung *steht*. Eine Adresse, an der niemand ist und deren
+Pakete stillschweigend verworfen werden – jede unbenutzte IP im Subnetz –, lief
+deshalb nicht in den eingestellten Timeout, sondern in den des Betriebssystems:
+gut zwei Minuten. Jetzt läuft eine zweite Uhr ab dem Absenden.
+
 ## 1.6.0 – 2026-08-09
 
 **Die eigene Nextcloud meldet sich.** Neue Talk-Nachricht, geteilte Datei,

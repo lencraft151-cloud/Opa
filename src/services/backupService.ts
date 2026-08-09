@@ -244,6 +244,9 @@ export async function resetHousehold(
     // Auch das Nextcloud-Konto samt App-Passwort. Ein gelöschter Haushalt,
     // der weiter Benachrichtigungen abholt, wäre das Gegenteil von gelöscht.
     data.nextcloud = [];
+    // Lautsprecher und Spotify-Anmeldung hängen ebenso am Haushalt.
+    data.sonos = [];
+    data.spotify = [];
     return result;
   });
 

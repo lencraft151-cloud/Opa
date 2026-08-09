@@ -42,6 +42,8 @@ Geräte.
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
 | **Erneut verbinden** | Zugangsdaten erneuern oder den Knopf an der Hue Bridge noch einmal drücken – ohne Geräte, Räume, Szenen und Automationen zu verlieren |
+| **Sonos** | Lautsprecher im eigenen Netz finden und bedienen: Titel, Titelbild, Play/Pause/Weiter und Lautstärke – gruppenfest, ohne Konto |
+| **Spotify** | Was gerade läuft, samt Steuerung und Gerätewechsel; Anmeldung mit PKCE, ohne Client-Geheimnis |
 | **Nextcloud** | Benachrichtigungen der eigenen Nextcloud – Talk, Freigaben, Kalender – als Einblendung im Hub, mit Verweis auf die Sache selbst |
 | **Sicherung** | Einstellungen, Räume, Geräte, Szenen und Automationen als Datei sichern und zurückspielen – ohne Passwörter in der Datei |
 | **Fassung des Hubs** | Änderungsprotokoll in der Oberfläche, Prüfung auf eine neuere Fassung und Aktualisierung auf Knopfdruck |
@@ -448,6 +450,31 @@ erneuert, danach liest der Hub die Geräteliste neu ein; die Geräte werden übe
 ihre `externalId` wiedererkannt. Bei Hue heißt das: Knopf drücken, „Erneut
 verbinden“ wählen, fertig.
 
+### Sonos und Spotify
+
+*Dienste → Sonos* sucht die Lautsprecher im eigenen Netz. Ein Konto braucht es
+dafür nicht: Sonos spricht UPnP, alles bleibt im Haus. Gefunden wird per SSDP;
+kommt dort nichts an – hinter einem Repeater, in einem Gastnetz –, klopft der
+Hub Port 1400 im Subnetz ab, und zur Not trägt man die Adresse von Hand ein.
+Ist erst einer gefunden, kennt der bereits alle anderen.
+
+Zu sehen sind Titel, Interpret, Titelbild und Restlaufzeit; zu bedienen sind
+Play, Pause, vor, zurück und die Lautstärke.
+
+**Gruppen sind dabei der eigentliche Punkt.** Legt man in der Sonos-App zwei
+Räume zusammen, nimmt nur einer der beiden – der Koordinator – Play und Pause
+an; der andere lehnt ab. Wer also „Küche" drückt, während die Küche im
+Wohnzimmer-Verbund hängt, dessen Befehl schickt der Hub ans Wohnzimmer. Die
+Lautstärke bleibt beim einzelnen Lautsprecher: Wer die Küche leiser stellt,
+will nicht das Wohnzimmer mitnehmen.
+
+*Dienste → Spotify* zeigt, was gerade läuft, und steuert es. Die Einrichtung
+ist einmalig und läuft über das Spotify-Dashboard: dort eine App anlegen, die
+angezeigte Rückleitungsadresse zeichengenau eintragen, die Client-ID hier
+einsetzen. Ein **Client-Geheimnis wird nicht gebraucht** – der Hub meldet sich
+mit PKCE an. Steuern erlaubt Spotify nur mit Premium; anzeigen, was läuft, geht
+auch ohne.
+
 ### Nextcloud
 
 *Einstellungen → Nextcloud* verbindet den Hub mit der eigenen Nextcloud. Danach
@@ -719,7 +746,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 445 Tests, node:test
+npm test        # 496 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
@@ -762,6 +789,17 @@ Abgedeckt sind unter anderem:
   der Sonderfall einer neu aufgesetzten Instanz, und der ganze Weg gegen eine
   nachgebaute Nextcloud – vom Verbinden über das Ereignis, aus dem die
   Oberfläche ihre Einblendung baut, bis zum „gelesen“
+- Sonos: SSDP-Antworten, Gerätebeschreibung, DIDL-Lite (Datei *und* Radiostream
+  mit „Interpret - Titel"), Gruppenauskunft – und gegen zwei nachgebaute
+  Lautsprecher die Regel, an der es sonst scheitert: Pause landet beim
+  Koordinator, die Lautstärke beim angesprochenen Gerät
+- Spotify: die PKCE-Anmeldung (der mitgeschickte Verifier muss zur vorher
+  gezeigten Prüfsumme passen), das Erneuern abgelaufener Token samt der Frage,
+  was passiert, wenn Spotify kein neues Erneuerungstoken mitschickt, und die
+  Übersetzung von 403 und 404 in Sätze
+- FRITZ!Box-Sperre: dass nach einer abgelehnten Anmeldung **kein zweiter
+  Versuch** bei der Box ankommt, und dass eine gemeldete Sperrzeit die Aufgabe
+  gar nicht erst beantworten lässt
 - Szenen: was aus einem Zustand an Kommandos wird (und was bewusst nicht),
   Reihenfolge, ein stummes Gerät mitten in der Szene
 - Unbekannte Kanäle: dass ein Rollladen an Niveau und Fahrtrichtung erkannt wird,

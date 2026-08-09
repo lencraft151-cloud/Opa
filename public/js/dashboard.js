@@ -14,6 +14,7 @@ import {
   VENDOR_LABEL,
 } from './format.js';
 import { bindManualForm, manualForm, runDiscovery } from './integrations.js';
+import { loadMusic, renderMusic, startMusicTicker, stopMusicTicker } from './music.js';
 import { applyUpdate } from './selfupdate.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -142,6 +143,7 @@ const RENDERERS = {
   devices: renderDevices,
   scenes: renderScenes,
   insights: renderInsights,
+  services: renderServices,
   automations: renderAutomations,
   settings: renderSettings,
 };
@@ -164,7 +166,51 @@ export function renderPanel(name) {
   for (const key of Object.keys(RENDERERS)) {
     $(`#panel-${key}`)?.classList.toggle('hidden', key !== name);
   }
+  // Beim Betreten darf die Ansicht auffahren – das ist der Moment, für den
+  // die Animation gedacht ist.
+  $(`#panel-${name}`)?.classList.remove('quiet');
+
+  // Musik lebt nur, solange jemand hinsieht – siehe music.js.
+  if (name === 'services') startMusicTicker();
+  else stopMusicTicker();
+
   renderCurrent({ reason: 'manual' });
+}
+
+/**
+ * Schreibt HTML nur, wenn es sich geändert hat.
+ *
+ * Der Hub fragt seine Geräte im eingestellten Takt ab, und bis hierher wurde
+ * danach *immer* die ganze Ansicht neu geschrieben – auch wenn kein einziger
+ * Wert anders war. Zwei Dinge gingen dabei kaputt:
+ *
+ * 1. **Angefangene Eingaben.** Ein halb ausgefülltes Formular war weg, weil
+ *    seine Felder neue Elemente wurden.
+ * 2. **Das Bild.** Jede neu eingefügte Karte startet ihre Auffahr-Animation
+ *    von vorn, und die beginnt bei Deckkraft 0. Alle paar Sekunden wurde die
+ *    Seite deshalb kurz hell – das „Weißblitzen".
+ *
+ * Ein Zeichenkettenvergleich kostet nichts gegen einen DOM-Umbau. Ändert sich
+ * nichts, passiert jetzt auch nichts.
+ *
+ * Wichtig für Aufrufer: Gibt `paint` `false` zurück, steht im DOM noch
+ * *genau* das, was beim letzten Mal verdrahtet wurde. Dann darf auch nicht
+ * erneut verdrahtet werden – sonst hinge an jedem Knopf ein Zuhörer mehr und
+ * ein Klick löste die Aktion zweimal aus.
+ *
+ * @returns {boolean} ob wirklich geschrieben wurde
+ */
+const lastPainted = new WeakMap();
+
+export function paint(element, html) {
+  if (!element) return false;
+  // Verglichen wird gegen das, was wir geschrieben haben – nicht gegen
+  // `innerHTML`. Der Browser schreibt Attribute um, und dann wäre nie etwas
+  // gleich.
+  if (lastPainted.get(element) === html) return false;
+  element.innerHTML = html;
+  lastPainted.set(element, html);
+  return true;
 }
 
 /**
@@ -178,6 +224,16 @@ export function renderCurrent(options = {}) {
   if (options.reason === 'devices' && !DEVICE_DEPENDENT.has(current)) return;
   const panel = $(`#panel-${current}`);
   if (!panel) return;
+
+  /*
+   * Auffahren darf die Ansicht beim Betreten – dort ist die Bewegung
+   * Orientierung. Kommt nur ein neuer Messwert herein, wäre sie das Gegenteil:
+   * Die Karten begännen wieder bei Deckkraft 0, und die ganze Seite blitzte
+   * im Abfragetakt hell auf. `quiet` schaltet genau diese Einstiegsanimation
+   * ab und bleibt gesetzt, bis der Reiter erneut gewählt wird.
+   */
+  if (options.reason !== 'manual') panel.classList.add('quiet');
+
   withPreservedInput(panel, () => RENDERERS[current]?.());
 }
 
@@ -276,14 +332,43 @@ function renderOverview() {
   const panel = $('#panel-overview');
   const summary = store.summary;
   if (!summary) {
-    panel.innerHTML = skeletonGrid(4);
+    paint(panel, skeletonGrid(4));
     return;
   }
 
-  panel.innerHTML = '';
+  /*
+   * Zwei Bereiche, weil sie verschieden entstehen: Die Banner sind Elemente
+   * mit eigenen Zuhörern (der Knopf „Erneut versuchen" ruft etwas auf), der
+   * Rest ist reines HTML. Beide werden nur angefasst, wenn sich wirklich
+   * etwas geändert hat – der Abfragetakt allein ist kein Grund, die Übersicht
+   * neu aufzubauen.
+   */
+  if (!panel.querySelector('#overview-banners')) {
+    panel.innerHTML = '<div id="overview-banners"></div><div id="overview-body"></div>';
+  }
+  const banners = panel.querySelector('#overview-banners');
+  const body = panel.querySelector('#overview-body');
 
+  const problems = summary.integrations.problems ?? [];
+  const bannerKey = JSON.stringify([
+    problems.map((problem) => [problem.id, problem.error]),
+    store.updates?.updatesAvailable ?? 0,
+    store.updates?.autoUpdate?.enabled ?? false,
+  ]);
+
+  if (banners.dataset.key !== bannerKey) {
+    banners.dataset.key = bannerKey;
+    banners.innerHTML = '';
+    renderOverviewBanners(banners, problems);
+  }
+
+  renderOverviewBody(body, summary);
+}
+
+/** Die Meldungen, die einen Knopf tragen – deshalb Elemente statt HTML. */
+function renderOverviewBanners(panel, problems) {
   // Probleme zuerst – sie sind der Grund, warum jemand das Dashboard öffnet.
-  for (const problem of summary.integrations.problems ?? []) {
+  for (const problem of problems) {
     panel.append(
       errorBanner({
         title: `${problem.name} meldet ein Problem`,
@@ -315,7 +400,9 @@ function renderOverview() {
       }),
     );
   }
+}
 
+function renderOverviewBody(panel, summary) {
   const climateRooms = store.climate?.rooms ?? [];
   const gaugeHtml = gauge({
     value: summary.averageTemperatureC,
@@ -388,12 +475,9 @@ function renderOverview() {
     <button data-quick="covers-close">Rollläden zu</button>
     <button data-quick="refresh">Aktualisieren</button>`;
 
-  panel.append(hero, tiles, quick);
-
   const head = document.createElement('div');
   head.className = 'section-head';
   head.innerHTML = '<h2>Klima nach Raum</h2>';
-  panel.append(head);
 
   const grid = document.createElement('div');
   grid.className = 'grid';
@@ -404,9 +488,14 @@ function renderOverview() {
         'Noch keine Messwerte.',
         'Ordne Temperatursensoren einem Raum zu, dann erscheinen sie hier.',
       );
-  panel.append(grid);
 
-  wireQuickActions(quick);
+  // Erst zusammenbauen, dann einmal vergleichen und nur bei einer echten
+  // Änderung einsetzen.
+  const draft = document.createElement('div');
+  draft.append(hero, tiles, quick, head, grid);
+  if (!paint(panel, draft.innerHTML)) return;
+
+  wireQuickActions(panel.querySelector('.quick-actions'));
 }
 
 function greeting() {
@@ -560,7 +649,7 @@ function renderRooms() {
     </section>`);
   }
 
-  panel.innerHTML = groups.join('');
+  if (!paint(panel, groups.join(''))) return;
   bindDeviceControls(panel, sendCommand, deviceById);
   restoreOpenSections(panel);
 
@@ -608,7 +697,7 @@ function renderDevices() {
     return true;
   });
 
-  panel.innerHTML = `
+  const html = `
     <p class="intro">
       Alle eingebundenen Geräte an einem Ort – Hue, Shelly und Homematic nebeneinander,
       neue Geräte genauso wie alte. Unter jedem Namen steht, was das Gerät kann.
@@ -654,6 +743,8 @@ function renderDevices() {
         emptyState('🔍', 'Keine passenden Geräte.')
       }</div>
     </details>`;
+
+  if (!paint(panel, html)) return;
 
   bindDeviceControls(panel, sendCommand, deviceById);
   wireCapabilityFix(panel.querySelector('#device-types'));
@@ -1871,8 +1962,6 @@ async function renderSettings() {
       </div>
     </div>
 
-    <div class="card" id="card-nextcloud">${nextcloudCard()}</div>
-
     <div class="card" id="card-hub-version">${hubVersionCard()}</div>
 
     <details class="card danger-zone" data-section="danger">
@@ -1921,13 +2010,21 @@ async function renderSettings() {
   wireSettings(panel);
   wireAccount(panel);
   restoreOpenSections(panel);
-  await Promise.all([
-    renderTokens(),
-    renderSessions(),
-    renderUsers(),
-    loadHubVersion(),
-    loadNextcloud(),
-  ]);
+  await Promise.all([renderTokens(), renderSessions(), renderUsers(), loadHubVersion()]);
+}
+
+/**
+ * Der Reiter „Dienste": Sonos, Spotify, Nextcloud.
+ *
+ * Die Musik bringt ihre eigene Datei mit (`music.js`); die Nextcloud-Karte
+ * wohnte bis hierher in den Einstellungen und ist mit umgezogen – sie gehört
+ * zu denselben Nachbarn.
+ */
+async function renderServices() {
+  renderMusic();
+  await Promise.all([loadMusic(), loadNextcloud()]);
+  renderMusic();
+  renderNextcloudCard();
 }
 
 /** Konto, Personen und angemeldete Geräte bedienen. */

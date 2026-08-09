@@ -681,6 +681,96 @@ Abschalten geht alles wieder aus, was die Simulation eingeschaltet hat.
 
 ---
 
+## Musik: Sonos und Spotify
+
+Beides steht in der Oberfläche im Reiter „Dienste" – keine Geräte, deshalb
+nicht unter `/devices`.
+
+### Sonos
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/sonos` | Alle Lautsprecher mit Zustand und Gruppenlage |
+| `POST` | `/sonos/discover` | `{ scan?, host? }` – sucht im Netz; `host` trägt einen von Hand ein |
+| `POST` | `/sonos/:id/command` | Wiedergabebefehl (siehe unten) |
+| `PATCH` | `/sonos/:id` | `{ roomId }` – einem Raum des Hubs zuordnen |
+| `DELETE` | `/sonos/:id` | Lautsprecher vergessen |
+
+```json
+{
+  "players": [{
+    "id": "snp_…", "host": "192.168.1.42", "uuid": "RINCON_…",
+    "roomName": "Küche", "model": "Sonos One", "softwareVersion": "15.9",
+    "state": {
+      "reachable": true, "transport": "playing", "volume": 25, "muted": false,
+      "title": "Roads", "artist": "Portishead", "album": "Dummy",
+      "artworkUrl": "http://192.168.1.42:1400/getaa?u=…",
+      "durationSeconds": 225, "positionSeconds": 62,
+      "coordinatorUuid": "RINCON_WOHN", "groupMembers": ["Wohnzimmer", "Küche"],
+      "error": null
+    }
+  }],
+  "groups": 1
+}
+```
+
+Gefunden wird per **SSDP** (`urn:schemas-upnp-org:device:ZonePlayer:1`).
+Bringt das nichts – in manchen Netzen wird Multicast nicht weitergereicht –,
+klopft der Hub Port 1400 im Subnetz ab. Ist erst *ein* Lautsprecher gefunden,
+kennt der bereits alle anderen: Die Gruppenauskunft nennt jeden Mitspieler samt
+Adresse. Wiedererkannt wird ein Lautsprecher an seiner `uuid`, nicht an der IP –
+sonst stünde nach jedem Neustart des Routers ein zweiter, toter Eintrag da.
+
+**Gruppen sind Pflicht, nicht Kür.** Sind zwei Lautsprecher zusammengefasst,
+nimmt nur der Koordinator Transportbefehle an; ein Mitglied antwortet mit
+UPnP-Fehler 701. `play`, `pause`, `next` und `previous` gehen deshalb immer an
+den Koordinator der Gruppe, `setVolume` und `setMute` an den angesprochenen
+Lautsprecher selbst.
+
+### Spotify
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/spotify` | Konto, aktuelle Wiedergabe, verfügbare Abspielgeräte |
+| `POST` | `/spotify/authorize` | `{ clientId, redirectUri }` → `{ authorizeUrl }` |
+| `GET` | `/spotify/callback` | Rückleitung von Spotify (liefert eine Seite, keine JSON-Antwort) |
+| `POST` | `/spotify/command` | Wiedergabebefehl |
+| `POST` | `/spotify/transfer` | `{ deviceId, play? }` – Wiedergabe umziehen |
+| `DELETE` | `/spotify` | Verbindung trennen, Token löschen |
+
+Angemeldet wird sich mit **Authorization Code + PKCE**: Der Hub schickt eine
+SHA-256-Prüfsumme eines Zufallswerts mit und weist sich beim Tausch mit dem
+Wert selbst aus. Ein Client-Geheimnis wird nicht gebraucht und deshalb auch
+nicht gespeichert – eines, das bei jedem Nutzer derselben Anwendung auf der
+Platte liegt, wäre keines. Angefragt werden nur drei Rechte:
+`user-read-playback-state`, `user-modify-playback-state`,
+`user-read-currently-playing`.
+
+Die Rückleitungsadresse (`redirectUri`) muss im Spotify-Dashboard zeichengenau
+eingetragen sein; die Oberfläche schlägt `<Adresse des Hubs>/api/spotify/callback`
+vor.
+
+Steuerbefehle setzen **Premium** voraus. Ein 403 von Spotify wird als
+„erlaubt das Steuern nur mit Premium" gemeldet, ein 404 als „spielt gerade auf
+keinem Gerät" – beides mit Hinweis, statt den Statuscode durchzureichen.
+
+### Wiedergabebefehle
+
+Für beide gleich:
+
+```json
+{ "type": "play" }
+{ "type": "pause" }
+{ "type": "next" }
+{ "type": "previous" }
+{ "type": "setVolume", "volume": 35 }
+{ "type": "setMute", "muted": true }
+```
+
+Spotify kennt keine Stummschaltung; `setMute` setzt dort die Lautstärke.
+
+---
+
 ## Nextcloud
 
 Benachrichtigungen aus der eigenen Nextcloud. Keine Geräte – deshalb steht das

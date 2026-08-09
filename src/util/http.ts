@@ -101,7 +101,7 @@ export function openStream(rawUrl: string, options: RequestOptions = {}): Promis
     );
 
     if (timeoutMs > 0) {
-      req.setTimeout(timeoutMs, () => {
+      const giveUp = (): void => {
         req.destroy(
           timeoutError(
             `${url.host} hat nicht innerhalb von ${timeoutMs} ms geantwortet.`,
@@ -109,7 +109,29 @@ export function openStream(rawUrl: string, options: RequestOptions = {}): Promis
               'Bei dauerhaft nicht erreichbaren Geräten die IP-Adresse prüfen.',
           ),
         );
-      });
+      };
+
+      /*
+       * Zwei Uhren, und die zweite ist die wichtigere.
+       *
+       * `req.setTimeout` wirkt erst, wenn die Verbindung **steht** – so steht
+       * es in der Node-Dokumentation, und so verhält es sich auch. Eine
+       * Adresse, an der niemand ist und deren SYN-Pakete stillschweigend
+       * verworfen werden (jede unbenutzte IP im eigenen Subnetz, jedes
+       * abgeschaltete Gerät), hängt deshalb nicht im eingestellten Timeout,
+       * sondern in dem des Betriebssystems: gut zwei Minuten.
+       *
+       * Beim Abklopfen eines Subnetzes ist das der Unterschied zwischen
+       * „dauert kurz" und „hängt". Der harte Wecker unten läuft ab dem
+       * Absenden und kennt diesen Unterschied nicht.
+       */
+      req.setTimeout(timeoutMs, giveUp);
+      const hardTimer = setTimeout(giveUp, timeoutMs);
+      hardTimer.unref?.();
+      const clear = (): void => clearTimeout(hardTimer);
+      req.once('response', clear);
+      req.once('error', clear);
+      req.once('close', clear);
     }
 
     req.on('error', (err: NodeJS.ErrnoException) => {

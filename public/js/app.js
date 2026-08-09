@@ -28,6 +28,12 @@ const TABS = [
    * beides auf einem Bildschirm.
    */
   { id: 'insights', label: 'Auswertung', icon: icons.energy },
+  /*
+   * Sonos, Spotify und Nextcloud sind keine Geräte – es gibt nichts zu
+   * schalten und nichts zu messen. Sie in die Geräteliste zu stellen würde
+   * beide Begriffe verwischen, also haben sie einen eigenen Reiter.
+   */
+  { id: 'services', label: 'Dienste', icon: icons.music },
   { id: 'automations', label: 'Automationen', icon: icons.automation },
   { id: 'settings', label: 'Einstellungen', icon: icons.settings },
 ];

@@ -36,9 +36,28 @@ export interface FritzboxInfo {
   firmware: string;
 }
 
+/**
+ * Wie lange nach einer abgelehnten Anmeldung gewartet wird, wenn die Box
+ * selbst keine Sperrzeit nennt. Verdoppelt sich mit jedem Fehlversuch.
+ */
+const BACKOFF_START_MS = 30_000;
+const BACKOFF_MAX_MS = 15 * 60 * 1000;
+
 export class FritzboxClient {
   private sid: string | null = null;
   private sidAt = 0;
+  /**
+   * Bis wann keine Anmeldung mehr versucht wird.
+   *
+   * Das ist die eigentliche Sicherung gegen das Aussperren: Die FRITZ!Box
+   * zählt Fehlversuche und sperrt nach einigen davon die Anmeldung – für die
+   * Weboberfläche gleich mit. Ein Hub, der alle fünfzehn Sekunden mit einem
+   * falschen Passwort anklopft, produziert diese Sperre zuverlässig und hält
+   * sie danach am Leben. Also klopft er nicht mehr.
+   */
+  private blockedUntil = 0;
+  private failures = 0;
+  private lastAuthError: string | null = null;
 
   constructor(
     private readonly host: string,
@@ -83,7 +102,31 @@ export class FritzboxClient {
   private async ensureSession(): Promise<string> {
     if (this.sid && Date.now() - this.sidAt < SESSION_TTL_MS) return this.sid;
 
+    /*
+     * Vor jedem Versuch: Ist die Wartezeit aus dem letzten Fehlversuch
+     * vorbei? Wenn nicht, gar nicht erst anfassen. Ein Versuch während der
+     * Sperre verlängert sie bei AVM nur.
+     */
+    const waitMs = this.blockedUntil - Date.now();
+    if (waitMs > 0) {
+      throw new AuthenticationRequiredError(
+        `${this.lastAuthError ?? `Anmeldung an der FRITZ!Box ${this.host} fehlgeschlagen.`} ` +
+          `Der Hub versucht es in ${Math.ceil(waitMs / 1000)} Sekunden wieder.`,
+      );
+    }
+
     const start = await this.fetchSessionInfo();
+
+    // Die Box nennt eine laufende Sperre schon in der Anmeldeaufgabe. Sie zu
+    // beantworten wäre ein weiterer Fehlversuch – und verlängert die Sperre.
+    const blockedNow = Number(childText(start, 'BlockTime') ?? '0');
+    if (blockedNow > 0) {
+      this.failAuth(
+        `Die FRITZ!Box sperrt weitere Anmeldeversuche noch ${blockedNow} Sekunden.`,
+        blockedNow * 1000,
+      );
+    }
+
     const challenge = childText(start, 'Challenge');
     if (!challenge) {
       throw upstreamError('Die FRITZ!Box hat keine Anmeldeaufgabe geschickt.');
@@ -96,17 +139,48 @@ export class FritzboxClient {
     const sid = childText(result, 'SID');
     if (!sid || sid === INVALID_SID) {
       const blockedFor = Number(childText(result, 'BlockTime') ?? '0');
-      throw new AuthenticationRequiredError(
+      this.failAuth(
         blockedFor > 0
-          ? `Die FRITZ!Box sperrt weitere Versuche noch ${blockedFor} Sekunden.`
+          ? `Die FRITZ!Box sperrt weitere Anmeldeversuche noch ${blockedFor} Sekunden.`
           : `Anmeldung an der FRITZ!Box ${this.host} fehlgeschlagen.`,
+        blockedFor > 0 ? blockedFor * 1000 : undefined,
       );
     }
 
-    this.sid = sid;
+    this.sid = sid as string;
     this.sidAt = Date.now();
+    this.failures = 0;
+    this.blockedUntil = 0;
+    this.lastAuthError = null;
     log.debug('An der FRITZ!Box angemeldet', { host: this.host });
-    return sid;
+    return this.sid;
+  }
+
+  /**
+   * Merkt sich den Fehlversuch und wirft.
+   *
+   * Nennt die Box eine Sperrzeit, gilt genau die – sie weiß es besser als
+   * wir. Sonst wird gewartet, und zwar jedes Mal doppelt so lange: Der
+   * häufigste Grund für eine abgelehnte Anmeldung ist ein falsches Passwort,
+   * und das wird durch Wiederholen nicht richtig.
+   */
+  private failAuth(message: string, blockMs?: number): never {
+    this.failures += 1;
+    const backoff = Math.min(BACKOFF_MAX_MS, BACKOFF_START_MS * 2 ** (this.failures - 1));
+    this.blockedUntil = Date.now() + (blockMs ?? backoff);
+    this.lastAuthError = message;
+    this.sid = null;
+
+    log.warn('Anmeldung an der FRITZ!Box abgelehnt', {
+      host: this.host,
+      versuche: this.failures,
+      pauseSekunden: Math.round((this.blockedUntil - Date.now()) / 1000),
+    });
+
+    throw new AuthenticationRequiredError(
+      `${message} Prüfe das Kennwort der Box-Oberfläche und verbinde die Box in den ` +
+        'Einstellungen erneut – bis dahin fragt der Hub nicht weiter nach.',
+    );
   }
 
   private async fetchSessionInfo(query = '?version=2'): Promise<XmlNode> {

@@ -1952,6 +1952,114 @@ button.round {
   text-decoration: underline;
 }
 
+/* ------------------------------------------------------------------ Musik */
+
+.music-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+/*
+ * Ein Lautsprecher: Bild links, alles andere rechts.
+ *
+ * Das Titelbild ist quadratisch und bekommt eine feste Größe – ohne sie
+ * springt die Zeile in dem Moment, in dem das Bild geladen ist.
+ */
+.music-player {
+  display: flex;
+  gap: 0.9rem;
+  align-items: flex-start;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.music-player.offline {
+  opacity: 0.62;
+}
+.music-cover {
+  width: 4.5rem;
+  height: 4.5rem;
+  flex: none;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+}
+.music-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.music-info {
+  flex: 1;
+  min-width: 0;
+}
+.music-title {
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.music-controls {
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+.music-controls .volume {
+  flex: 1;
+  min-width: 6rem;
+}
+.music-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  margin: 0.45rem 0 0.2rem;
+  overflow: hidden;
+}
+.music-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.6s linear;
+}
+
+@media (max-width: 480px) {
+  .music-cover {
+    width: 3.4rem;
+    height: 3.4rem;
+  }
+}
+
+/*
+ * Ruhiges Neuzeichnen.
+ *
+ * Die Einstiegsanimationen sind für den Moment gedacht, in dem eine Ansicht
+ * *betreten* wird. Der Hub fragt seine Geräte aber im eingestellten Takt ab,
+ * und danach wurde bisher jede Karte neu eingesetzt – mitsamt Animation, die
+ * bei Deckkraft 0 beginnt. Auf hellem Hintergrund sah das aus, als würde die
+ * Seite im Takt kurz weiß.
+ *
+ * `quiet` setzt die Oberfläche für genau diese Fälle still. Laufende
+ * Anzeigen – Ladebalken, Wärmepuls, Ladeschimmer – bleiben unberührt; hier
+ * stehen nur die Animationen, die einmalig beim Erscheinen laufen.
+ */
+.tab-panel.quiet .card,
+.tab-panel.quiet .device-card,
+.tab-panel.quiet .tile,
+.tab-panel.quiet .item-block,
+.tab-panel.quiet .template-card,
+.tab-panel.quiet .hero,
+.tab-panel.quiet .callout,
+.tab-panel.quiet .section-head,
+.tab-panel.quiet .grid > *,
+.tab-panel.quiet .tiles > * {
+  animation-name: none;
+}
+
 /* ------------------------------------------------------------ Animationen */
 
 /* Karten kommen leicht von unten und werden dabei scharf. */

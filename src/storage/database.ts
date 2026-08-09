@@ -11,6 +11,8 @@ import type {
   Room,
   Scene,
   Session,
+  SonosPlayer,
+  SpotifyAccount,
   User,
 } from '../core/types.js';
 import { DEFAULT_APPEARANCE, DEFAULT_PRESENCE } from '../core/types.js';
@@ -31,6 +33,8 @@ export interface DatabaseShape {
   sessions: Session[];
   scenes: Scene[];
   nextcloud: NextcloudAccount[];
+  sonos: SonosPlayer[];
+  spotify: SpotifyAccount[];
 }
 
 function emptyDatabase(): DatabaseShape {
@@ -46,6 +50,8 @@ function emptyDatabase(): DatabaseShape {
     sessions: [],
     scenes: [],
     nextcloud: [],
+    sonos: [],
+    spotify: [],
   };
 }
 
@@ -165,6 +171,8 @@ function migrate(data: DatabaseShape): DatabaseShape {
   data.sessions ??= [];
   data.scenes ??= [];
   data.nextcloud ??= [];
+  data.sonos ??= [];
+  data.spotify ??= [];
 
   // Die Richtigstellung der Fähigkeiten kam später dazu.
   for (const device of data.devices) device.capabilityOverride ??= null;

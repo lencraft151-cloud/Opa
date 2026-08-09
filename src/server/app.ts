@@ -11,6 +11,7 @@ import { deviceRoutes } from './routes/devices.js';
 import { energyRoutes } from './routes/energy.js';
 import { householdRoutes } from './routes/household.js';
 import { integrationRoutes } from './routes/integrations.js';
+import { musicRoutes } from './routes/music.js';
 import { nextcloudRoutes } from './routes/nextcloud.js';
 import { roomRoutes } from './routes/rooms.js';
 import { sceneRoutes } from './routes/scenes.js';
@@ -77,6 +78,7 @@ export function createApp(container: Container): express.Express {
   api.use(updateRoutes(container));
   api.use(sceneRoutes(container));
   api.use(nextcloudRoutes(container));
+  api.use(musicRoutes(container));
   app.use('/api', api);
 
   app.use(express.static(PUBLIC_DIR, { index: 'index.html', maxAge: '1h' }));

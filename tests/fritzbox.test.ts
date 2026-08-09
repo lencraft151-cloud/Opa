@@ -539,4 +539,107 @@ describe('Anmeldung ohne Benutzernamen', () => {
       box.close();
     }
   });
+
+  /**
+   * Der Hub darf sich nicht selbst aussperren.
+   *
+   * Eine FRITZ!Box zählt Fehlversuche und sperrt danach die Anmeldung – für
+   * die Weboberfläche gleich mit. Ein Hub, der im Abfragetakt mit einem
+   * falschen Kennwort anklopft, erzeugt genau diese Sperre und hält sie
+   * danach am Leben. Nach einer Ablehnung wird deshalb gewartet, und zwar
+   * ohne die Box überhaupt anzufassen.
+   */
+  it('klopft nach einer abgelehnten Anmeldung nicht weiter an', async () => {
+    let loginAttempts = 0;
+
+    const box = http.createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://box');
+      if (url.pathname !== '/login_sid.lua') {
+        res.writeHead(404).end();
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/xml' });
+      if (!url.searchParams.get('response')) {
+        res.end(
+          `<?xml version="1.0"?><SessionInfo><SID>0000000000000000</SID>` +
+            `<Challenge>1234567z</Challenge><BlockTime>0</BlockTime></SessionInfo>`,
+        );
+        return;
+      }
+      // Jede beantwortete Aufgabe wird abgelehnt – falsches Kennwort.
+      loginAttempts += 1;
+      res.end(
+        `<?xml version="1.0"?><SessionInfo><SID>0000000000000000</SID>` +
+          `<BlockTime>8</BlockTime></SessionInfo>`,
+      );
+    });
+
+    const port = await new Promise<number>((resolve) => {
+      box.listen(0, '127.0.0.1', () => resolve((box.address() as AddressInfo).port));
+    });
+
+    try {
+      const client = new FritzboxClient(`127.0.0.1:${port}`, '', 'falsches-kennwort');
+
+      await assert.rejects(
+        () => client.deviceList(),
+        (err: Error) => {
+          assert.match(err.message, /sperrt weitere Anmeldeversuche noch 8 Sekunden/);
+          return true;
+        },
+      );
+      assert.equal(loginAttempts, 1);
+
+      // Der zweite Aufruf erreicht die Box gar nicht mehr.
+      await assert.rejects(
+        () => client.deviceList(),
+        (err: Error) => {
+          assert.match(err.message, /versucht es in \d+ Sekunden wieder/);
+          return true;
+        },
+      );
+      assert.equal(loginAttempts, 1, 'kein zweiter Anmeldeversuch an der Box');
+
+      // Auch ein dritter und vierter nicht.
+      await assert.rejects(() => client.deviceList(), /versucht es in/);
+      await assert.rejects(() => client.deviceList(), /versucht es in/);
+      assert.equal(loginAttempts, 1);
+    } finally {
+      box.close();
+    }
+  });
+
+  /**
+   * Meldet die Box schon in der Anmeldeaufgabe eine laufende Sperre, wird sie
+   * gar nicht erst beantwortet – jeder Versuch währenddessen verlängert sie.
+   */
+  it('beantwortet die Aufgabe nicht, solange die Box gesperrt meldet', async () => {
+    let answered = 0;
+
+    const box = http.createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://box');
+      res.writeHead(200, { 'content-type': 'text/xml' });
+      if (url.searchParams.get('response')) {
+        answered += 1;
+        res.end('<?xml version="1.0"?><SessionInfo><SID>0000000000000000</SID></SessionInfo>');
+        return;
+      }
+      res.end(
+        `<?xml version="1.0"?><SessionInfo><SID>0000000000000000</SID>` +
+          `<Challenge>1234567z</Challenge><BlockTime>30</BlockTime></SessionInfo>`,
+      );
+    });
+
+    const port = await new Promise<number>((resolve) => {
+      box.listen(0, '127.0.0.1', () => resolve((box.address() as AddressInfo).port));
+    });
+
+    try {
+      const client = new FritzboxClient(`127.0.0.1:${port}`, '', 'egal');
+      await assert.rejects(() => client.deviceList(), /noch 30 Sekunden/);
+      assert.equal(answered, 0, 'die Aufgabe wurde nicht beantwortet');
+    } finally {
+      box.close();
+    }
+  });
 });
