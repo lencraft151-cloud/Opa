@@ -25,8 +25,10 @@ export const BACKUP_VERSION = 1;
  * - **Drin:** Haushalt samt Einstellungen, Räume, Geräte (Namen,
  *   Raumzuordnung, Richtigstellungen), Automationen, Szenen und die
  *   Integrationen mit Adresse und Typ.
- * - **Nicht drin:** Zugangsdaten zu Bridges, Passwörter, Sitzungen und
- *   Zugriffstoken.
+ * - **Nicht drin:** Zugangsdaten zu Bridges, Passwörter, Sitzungen,
+ *   Zugriffstoken und das Nextcloud-Konto. Letzteres besteht praktisch nur
+ *   aus seinem App-Passwort – ohne das wäre die Adresse in der Sicherung
+ *   nichts wert, mit ihm wäre die Sicherung ein Schlüsselbund.
  *
  * Der zweite Punkt ist der wichtige. Eine Sicherung liegt am Ende in einem
  * Download-Ordner, auf einem USB-Stick oder in einer Cloud – und damit an
@@ -239,6 +241,9 @@ export async function resetHousehold(
     data.users = [];
     data.sessions = [];
     data.tokens = [];
+    // Auch das Nextcloud-Konto samt App-Passwort. Ein gelöschter Haushalt,
+    // der weiter Benachrichtigungen abholt, wäre das Gegenteil von gelöscht.
+    data.nextcloud = [];
     return result;
   });
 

@@ -42,6 +42,7 @@ Geräte.
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
 | **Erneut verbinden** | Zugangsdaten erneuern oder den Knopf an der Hue Bridge noch einmal drücken – ohne Geräte, Räume, Szenen und Automationen zu verlieren |
+| **Nextcloud** | Benachrichtigungen der eigenen Nextcloud – Talk, Freigaben, Kalender – als Einblendung im Hub, mit Verweis auf die Sache selbst |
 | **Sicherung** | Einstellungen, Räume, Geräte, Szenen und Automationen als Datei sichern und zurückspielen – ohne Passwörter in der Datei |
 | **Fassung des Hubs** | Änderungsprotokoll in der Oberfläche, Prüfung auf eine neuere Fassung und Aktualisierung auf Knopfdruck |
 | **Haushalt löschen** | Alles zurücksetzen – hinter fünf Bestätigungen, von denen die letzte den abgetippten Namen verlangt |
@@ -447,6 +448,37 @@ erneuert, danach liest der Hub die Geräteliste neu ein; die Geräte werden übe
 ihre `externalId` wiedererkannt. Bei Hue heißt das: Knopf drücken, „Erneut
 verbinden“ wählen, fertig.
 
+### Nextcloud
+
+*Einstellungen → Nextcloud* verbindet den Hub mit der eigenen Nextcloud. Danach
+erscheinen deren Benachrichtigungen – eine neue Talk-Nachricht, eine geteilte
+Datei, eine Kalendererinnerung – als Einblendung, mit einem Verweis auf die
+Sache selbst. Der Hub hängt ohnehin an der Wand und ist die Stelle, auf die man
+im Vorbeigehen schaut; das spart den Griff zum Telefon.
+
+Nötig sind drei Angaben: die Adresse, der Benutzername und ein
+**App-Passwort**. Letzteres ist kein Umweg. Es wird in Nextcloud unter
+*Einstellungen → Sicherheit → „Neues App-Passwort erstellen"* erzeugt,
+funktioniert auch bei Zwei-Faktor-Anmeldung und lässt sich einzeln widerrufen,
+ohne dass jemand sein Konto anfassen muss. Der Hub legt es verschlüsselt ab und
+gibt es nie wieder heraus.
+
+Zwei Feinheiten, die den Unterschied machen:
+
+- **Beim Verbinden bleibt es still.** Der erste Abruf zählt nur, was offen ist,
+  und meldet nichts. Sonst poppen dreißig alte Benachrichtigungen auf einmal auf.
+- **Ein Neustart fängt nicht von vorn an.** Der Hub merkt sich, was er schon
+  gezeigt hat. Fängt die Nextcloud selbst neu zu zählen an – weil sie neu
+  aufgesetzt wurde –, übernimmt er den neuen Stand stillschweigend, statt Altes
+  als Neues auszugeben.
+
+Wie oft nachgesehen wird, ist einstellbar (15 Sekunden bis 5 Minuten). Ist die
+Nextcloud gerade nicht erreichbar, steht das in der Karte – und nicht als
+Fehler-Popup alle 30 Sekunden auf dem Bildschirm.
+
+Die Nextcloud steht bewusst hier und nicht bei den Integrationen: Sie ist kein
+Gerät. Es gibt nichts zu schalten und nichts zu messen.
+
 ### Sicherung
 
 *Einstellungen → Sicherung* lädt Haushalt, Räume, Geräte, Szenen und
@@ -687,7 +719,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 412 Tests, node:test
+npm test        # 445 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
@@ -726,6 +758,10 @@ Abgedeckt sind unter anderem:
 - Passwörter: scrypt-Ableitung, zeitunabhängiger Vergleich, zusammengesetzte
   Umlaute, manipulierte Hashes, Sperre nach fünf Fehlversuchen und die Frage,
   ob die Fehlermeldung verrät, welcher Teil falsch war
+- Nextcloud: Adressen in allen Schreibweisen, OCS-Antworten samt Fehlercodes,
+  der Sonderfall einer neu aufgesetzten Instanz, und der ganze Weg gegen eine
+  nachgebaute Nextcloud – vom Verbinden über das Ereignis, aus dem die
+  Oberfläche ihre Einblendung baut, bis zum „gelesen“
 - Szenen: was aus einem Zustand an Kommandos wird (und was bewusst nicht),
   Reihenfolge, ein stummes Gerät mitten in der Szene
 - Unbekannte Kanäle: dass ein Rollladen an Niveau und Fahrtrichtung erkannt wird,

@@ -11,6 +11,7 @@ import { EnergyService } from './services/energyService.js';
 import { HouseholdService } from './services/householdService.js';
 import { HubUpdateService } from './services/hubUpdateService.js';
 import { IntegrationService } from './services/integrationService.js';
+import { NextcloudService } from './services/nextcloudService.js';
 import { PollingService } from './services/pollingService.js';
 import { PresenceService } from './services/presenceService.js';
 import { RoomService } from './services/roomService.js';
@@ -45,6 +46,8 @@ export interface Container {
   hubUpdate: HubUpdateService;
   users: UserService;
   scenes: SceneService;
+  /** Benachrichtigungen aus der eigenen Nextcloud. */
+  nextcloud: NextcloudService;
   presence: PresenceService;
   /** Startet Hintergrunddienste, sobald ein Haushalt existiert. */
   startBackgroundServices: () => Promise<void>;
@@ -90,6 +93,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   });
   const scenes = new SceneService(repos, devices);
   const presence = new PresenceService(repos, devices, households);
+  const nextcloud = new NextcloudService(repos, config.secretKey);
 
   const startBackgroundServices = async (): Promise<void> => {
     const household = households.current();
@@ -101,6 +105,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automations.start(household.id);
     updates.start(household.id);
     presence.start(household.id);
+    nextcloud.start(household.id);
   };
 
   /**
@@ -114,6 +119,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automations.stop();
     updates.stop();
     presence.stop();
+    nextcloud.stop();
     await polling.stop();
     log.info('Hintergrunddienste angehalten');
   };
@@ -122,6 +128,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automations.stop();
     updates.stop();
     presence.stop();
+    nextcloud.stop();
     await polling.stop();
     await telemetry.flush();
     await db.flush();
@@ -148,6 +155,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     users,
     scenes,
     presence,
+    nextcloud,
     startBackgroundServices,
     stopBackgroundServices,
     shutdown,

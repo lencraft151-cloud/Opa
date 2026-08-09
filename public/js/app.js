@@ -2,7 +2,13 @@
 
 import { api, setUnauthorizedHandler, showError, toast } from './api.js';
 import { applyAppearance, applyStoredAppearance } from './appearance.js';
-import { loadDashboardData, renderCurrent, renderPanel, store } from './dashboard.js';
+import {
+  loadDashboardData,
+  refreshNextcloudCard,
+  renderCurrent,
+  renderPanel,
+  store,
+} from './dashboard.js';
 import { icons } from './icons.js';
 import { hideLogin, showLogin } from './login.js';
 import { startSelfUpdate } from './selfupdate.js';
@@ -357,8 +363,16 @@ function connectEventStream() {
     toast(`Automation ausgelöst: ${ruleName}`, { kind: 'success', timeout: 4000 });
   });
   source.addEventListener('notification', (event) => {
-    const { message, level } = JSON.parse(event.data);
-    toast(message, { kind: level === 'error' ? 'error' : 'info', timeout: 8000 });
+    const { message, level, hint, link, source: origin } = JSON.parse(event.data);
+    toast(message, {
+      kind: level === 'error' ? 'error' : 'info',
+      hint: hint ?? '',
+      link: link ?? '',
+      // Eine Nachricht aus der Nextcloud will gelesen werden – dafür sind
+      // sechs Sekunden zu knapp, wenn man gerade nicht davorsteht.
+      timeout: origin === 'nextcloud' ? 15_000 : 8000,
+    });
+    if (origin === 'nextcloud') refreshNextcloudCard();
   });
 
   source.onerror = () => {

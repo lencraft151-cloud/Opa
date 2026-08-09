@@ -5,7 +5,9 @@ import type {
   Device,
   Household,
   Integration,
+  NextcloudAccount,
   PublicIntegration,
+  PublicNextcloudAccount,
   Room,
   Scene,
   Session,
@@ -345,6 +347,26 @@ export class SceneRepository extends BaseRepository<Scene> {
   }
 }
 
+/**
+ * Nextcloud-Konten. Aktuell höchstens eines je Haushalt – mehrere Instanzen
+ * gleichzeitig zu beobachten wäre eine Funktion ohne Fragesteller.
+ */
+export class NextcloudRepository extends BaseRepository<NextcloudAccount> {
+  constructor(db: Database) {
+    super(db, 'nextcloud');
+  }
+
+  findByHousehold(householdId: string): NextcloudAccount | undefined {
+    return this.all().find((account) => account.householdId === householdId);
+  }
+
+  /** Entfernt die verschlüsselten Zugangsdaten für die API-Ausgabe. */
+  static toPublic(account: NextcloudAccount): PublicNextcloudAccount {
+    const { secretsEnc, ...rest } = account;
+    return { ...rest, hasSecrets: secretsEnc !== null };
+  }
+}
+
 export interface Repositories {
   households: HouseholdRepository;
   rooms: RoomRepository;
@@ -355,6 +377,7 @@ export interface Repositories {
   users: UserRepository;
   sessions: SessionRepository;
   scenes: SceneRepository;
+  nextcloud: NextcloudRepository;
 }
 
 export function createRepositories(db: Database): Repositories {
@@ -368,5 +391,6 @@ export function createRepositories(db: Database): Repositories {
     users: new UserRepository(db),
     sessions: new SessionRepository(db),
     scenes: new SceneRepository(db),
+    nextcloud: new NextcloudRepository(db),
   };
 }

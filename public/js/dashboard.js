@@ -28,6 +28,12 @@ export const store = {
    * `git`-Prozess und hat auf jedem anderen Weg nichts zu suchen.
    */
   hubVersion: null,
+  /**
+   * Antwort von `/nextcloud` – verbundenes Konto und offene
+   * Benachrichtigungen. Wird wie die Fassung erst in den Einstellungen
+   * geholt; wer keine Nextcloud hat, soll dafür keine Anfrage bezahlen.
+   */
+  nextcloud: null,
   /** Angemeldeter Benutzer. */
   me: null,
   scenes: [],
@@ -1865,6 +1871,8 @@ async function renderSettings() {
       </div>
     </div>
 
+    <div class="card" id="card-nextcloud">${nextcloudCard()}</div>
+
     <div class="card" id="card-hub-version">${hubVersionCard()}</div>
 
     <details class="card danger-zone" data-section="danger">
@@ -1913,7 +1921,13 @@ async function renderSettings() {
   wireSettings(panel);
   wireAccount(panel);
   restoreOpenSections(panel);
-  await Promise.all([renderTokens(), renderSessions(), renderUsers(), loadHubVersion()]);
+  await Promise.all([
+    renderTokens(),
+    renderSessions(),
+    renderUsers(),
+    loadHubVersion(),
+    loadNextcloud(),
+  ]);
 }
 
 /** Konto, Personen und angemeldete Geräte bedienen. */
@@ -2323,7 +2337,7 @@ function dangerSteps() {
           counts.integrations,
           'Verbindung',
           'Verbindungen',
-        )}. ` +
+        )}${store.nextcloud?.account ? ' samt dem App-Passwort der Nextcloud' : ''}. ` +
         'Nach dem Löschen musst du dich neu einrichten und jede Bridge neu koppeln.',
       confirm: 'Ja, auch meinen Zugang',
     },
@@ -2654,6 +2668,300 @@ function diagnosticsReport(report) {
     ${devices}
     <h3>Übersprungen</h3>
     ${skipped}`;
+}
+
+// ---------------------------------------------------------------------------
+// Nextcloud
+// ---------------------------------------------------------------------------
+
+/** Auswahl für den Abruftakt der Benachrichtigungen. */
+const NEXTCLOUD_INTERVALS = [
+  { seconds: 15, label: '15 Sekunden' },
+  { seconds: 30, label: '30 Sekunden' },
+  { seconds: 60, label: '1 Minute' },
+  { seconds: 300, label: '5 Minuten' },
+];
+
+/**
+ * Verbindung zur eigenen Nextcloud und die offenen Benachrichtigungen.
+ *
+ * Warum das hier steht und nicht bei den Integrationen: Eine Nextcloud ist
+ * kein Gerät. Es gibt nichts zu schalten und nichts zu messen – sie erzählt
+ * nur, was passiert ist. Sie in dieselbe Liste wie eine Hue Bridge zu
+ * stellen, würde beide Begriffe verwischen.
+ */
+function nextcloudCard() {
+  const state = store.nextcloud;
+
+  if (!state) {
+    return `<h2>Nextcloud</h2>
+      <div class="list"><div class="item"><div>
+        <div class="title skeleton-line"></div>
+        <div class="sub skeleton-line short"></div>
+      </div></div></div>`;
+  }
+
+  if (!state.account) return nextcloudSetupCard();
+
+  const account = state.account;
+  const badge = account.lastError
+    ? '<span class="badge warn">Problem</span>'
+    : account.enabled
+      ? '<span class="badge ok">verbunden</span>'
+      : '<span class="badge">pausiert</span>';
+
+  const host = (() => {
+    try {
+      return new URL(account.baseUrl).host;
+    } catch {
+      return account.baseUrl;
+    }
+  })();
+
+  const problem = account.lastError
+    ? `<div class="callout warn">
+         <strong>Der letzte Abruf ging schief</strong>
+         <span>${esc(account.lastError)}</span>
+       </div>`
+    : '';
+
+  const notifications = state.notifications ?? [];
+  const list = notifications.length
+    ? notifications.map(nextcloudNotificationItem).join('')
+    : emptyState('📭', 'Nichts Offenes. Neue Meldungen erscheinen hier und als Einblendung.');
+
+  return `<h2>Nextcloud ${badge}</h2>
+    <div class="list">
+      <div class="item">
+        <div>
+          <div class="title">${esc(account.displayName || account.username)} @ ${esc(host)}</div>
+          <div class="sub">
+            ${account.serverVersion ? `Nextcloud ${esc(account.serverVersion)} · ` : ''}
+            Takt ${esc(String(account.pollIntervalSeconds))} s ·
+            ${
+              account.lastSeenAt
+                ? `zuletzt ${esc(fmt.relative(account.lastSeenAt))}`
+                : 'noch kein Abruf'
+            }
+          </div>
+        </div>
+        <div class="row tight">
+          <button class="small" id="btn-nextcloud-refresh">Jetzt nachsehen</button>
+        </div>
+      </div>
+    </div>
+
+    ${problem}
+
+    <h3>Offene Benachrichtigungen (${notifications.length})</h3>
+    <div class="list" id="nextcloud-notifications">${list}</div>
+    ${
+      notifications.length
+        ? '<button class="ghost small" id="btn-nextcloud-dismiss-all">Alle als gelesen markieren</button>'
+        : ''
+    }
+
+    <hr class="divider" />
+    <form id="form-nextcloud-settings" class="form">
+      <label class="row tight" style="flex-direction:row;align-items:center;gap:.6rem">
+        <span class="switch">
+          <input type="checkbox" name="enabled" ${account.enabled ? 'checked' : ''} />
+          <span></span>
+        </span>
+        Benachrichtigungen abholen
+      </label>
+      <label>Wie oft nachgesehen wird
+        <select name="pollIntervalSeconds">
+          ${NEXTCLOUD_INTERVALS.map(
+            (choice) =>
+              `<option value="${choice.seconds}" ${
+                account.pollIntervalSeconds === choice.seconds ? 'selected' : ''
+              }>${esc(choice.label)}</option>`,
+          ).join('')}
+        </select>
+      </label>
+      <button type="submit" class="primary">Speichern</button>
+    </form>
+
+    <details data-section="nextcloud-relink">
+      <summary>Verbindung ändern oder trennen</summary>
+      ${nextcloudForm()}
+      <hr class="divider" />
+      <button class="ghost small danger" id="btn-nextcloud-disconnect">Verbindung trennen</button>
+      <p class="muted small">
+        Dabei wird auch das gespeicherte App-Passwort gelöscht. In Nextcloud selbst
+        bleibt es bestehen – dort kannst du es unter „Sicherheit“ endgültig entfernen.
+      </p>
+    </details>`;
+}
+
+function nextcloudSetupCard() {
+  return `<h2>Nextcloud</h2>
+    <p class="muted small">
+      Neue Talk-Nachrichten, geteilte Dateien, Kalendererinnerungen: Der Hub holt die
+      Benachrichtigungen deiner Nextcloud ab und blendet sie hier ein – auf dem Tablet
+      an der Wand ebenso wie auf dem Handy.
+    </p>
+    <div class="callout">
+      <strong>Bitte ein App-Passwort verwenden, nicht dein Anmeldepasswort</strong>
+      <span>
+        In Nextcloud: Einstellungen → Sicherheit → ganz unten „Neues App-Passwort
+        erstellen“. Das funktioniert auch mit Zwei-Faktor-Anmeldung und lässt sich
+        einzeln widerrufen, ohne dass du dein Konto anfassen musst.
+      </span>
+    </div>
+    ${nextcloudForm()}`;
+}
+
+function nextcloudForm() {
+  const account = store.nextcloud?.account;
+  return `<form id="form-nextcloud" class="form">
+    <label>Adresse deiner Nextcloud
+      <input name="baseUrl" placeholder="https://cloud.example.de" maxlength="300"
+             value="${esc(account?.baseUrl ?? '')}" required />
+    </label>
+    <div class="field-row">
+      <label>Benutzername
+        <input name="username" maxlength="120" autocomplete="off"
+               value="${esc(account?.username ?? '')}" required />
+      </label>
+      <label>App-Passwort
+        <input name="appPassword" type="password" maxlength="300" autocomplete="new-password"
+               placeholder="xxxxx-xxxxx-xxxxx-xxxxx-xxxxx" required />
+      </label>
+    </div>
+    <button type="submit" class="primary">Verbinden</button>
+  </form>`;
+}
+
+function nextcloudNotificationItem(notification) {
+  const title = notification.subject || 'Neue Benachrichtigung';
+  const when = notification.datetime ? fmt.relative(notification.datetime) : '';
+  const open = notification.link
+    ? `<a class="linkbutton" href="${esc(notification.link)}" target="_blank" rel="noreferrer noopener">Öffnen ↗</a>`
+    : '';
+  return `<div class="item" data-notification="${esc(String(notification.id))}">
+    <div>
+      <div class="title">${esc(title)}</div>
+      <div class="sub">${esc(notification.app)}${when ? ` · ${esc(when)}` : ''}${
+        notification.message ? ` · ${esc(notification.message.slice(0, 120))}` : ''
+      }</div>
+    </div>
+    <div class="row tight">
+      ${open}
+      <button class="small" data-dismiss="${esc(String(notification.id))}">Gelesen</button>
+    </div>
+  </div>`;
+}
+
+/**
+ * Es ist eine neue Meldung eingetroffen – die Liste auffrischen, aber nur,
+ * wenn sie gerade jemand ansieht. Sonst wäre jedes Popup eine zusätzliche
+ * Anfrage für eine Karte, die niemand offen hat.
+ */
+export function refreshNextcloudCard() {
+  if (!$('#card-nextcloud')) return;
+  void loadNextcloud({ force: true });
+}
+
+async function loadNextcloud({ force = false } = {}) {
+  if (!store.nextcloud || force) {
+    const state = await guard(() => api('/nextcloud'));
+    if (state) store.nextcloud = state;
+  }
+  renderNextcloudCard();
+}
+
+function renderNextcloudCard() {
+  const card = $('#card-nextcloud');
+  if (!card) return;
+  card.innerHTML = nextcloudCard();
+  wireNextcloud(card);
+  restoreOpenSections(card);
+}
+
+function wireNextcloud(card) {
+  card.querySelector('#form-nextcloud')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const button = event.target.querySelector('button[type="submit"]');
+    button.disabled = true;
+    button.textContent = 'Verbinde …';
+    const account = await guard(
+      () =>
+        api('/nextcloud', {
+          method: 'POST',
+          body: {
+            baseUrl: String(form.get('baseUrl')).trim(),
+            username: String(form.get('username')).trim(),
+            appPassword: String(form.get('appPassword')),
+          },
+        }),
+      { success: 'Nextcloud verbunden.', successHint: 'Neue Benachrichtigungen erscheinen ab jetzt als Einblendung.' },
+    );
+    button.disabled = false;
+    button.textContent = 'Verbinden';
+    if (!account) return;
+    await loadNextcloud({ force: true });
+  });
+
+  card.querySelector('#form-nextcloud-settings')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const saved = await guard(
+      () =>
+        api('/nextcloud', {
+          method: 'PATCH',
+          body: {
+            enabled: form.get('enabled') === 'on',
+            pollIntervalSeconds: Number(form.get('pollIntervalSeconds')),
+          },
+        }),
+      { success: 'Gespeichert.' },
+    );
+    if (!saved) return;
+    await loadNextcloud({ force: true });
+  });
+
+  card.querySelector('#btn-nextcloud-refresh')?.addEventListener('click', async (event) => {
+    event.target.disabled = true;
+    const result = await guard(() => api('/nextcloud/refresh', { method: 'POST' }));
+    event.target.disabled = false;
+    if (!result) return;
+    await loadNextcloud({ force: true });
+  });
+
+  /*
+   * Die drei folgenden Aktionen antworten mit „204 – nichts zu sagen“. Der
+   * Rückgabewert taugt deshalb nicht als Erfolgsprüfung; Fehler hat `guard`
+   * bereits angezeigt. Danach wird schlicht der Stand vom Hub neu geholt –
+   * er ist die Wahrheit, nicht das, was hier gerade auf dem Bildschirm steht.
+   */
+  card.querySelector('#btn-nextcloud-dismiss-all')?.addEventListener('click', async () => {
+    await guard(() => api('/nextcloud/notifications', { method: 'DELETE' }), {
+      success: 'Alles als gelesen markiert.',
+    });
+    await loadNextcloud({ force: true });
+  });
+
+  card.querySelectorAll('[data-dismiss]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      const id = button.dataset.dismiss;
+      await guard(() => api(`/nextcloud/notifications/${id}`, { method: 'DELETE' }));
+      await loadNextcloud({ force: true });
+    });
+  });
+
+  card.querySelector('#btn-nextcloud-disconnect')?.addEventListener('click', async () => {
+    if (!confirm('Verbindung zur Nextcloud trennen? Das gespeicherte App-Passwort wird gelöscht.')) {
+      return;
+    }
+    await guard(() => api('/nextcloud', { method: 'DELETE' }), {
+      success: 'Verbindung getrennt.',
+    });
+    await loadNextcloud({ force: true });
+  });
 }
 
 // ---------------------------------------------------------------------------

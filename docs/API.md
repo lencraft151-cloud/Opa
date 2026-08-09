@@ -237,6 +237,10 @@ Server-Sent-Events-Strom. Ereignisse: `device.added`, `device.updated`,
 `device.removed`, `integration.updated`, `room.updated`, `telemetry.sample`,
 `automation.triggered`, `notification`.
 
+`notification` trägt `{ message, level, hint?, link?, source? }`. `source` ist
+`hub` (oder fehlt) für eigene Meldungen und `nextcloud` für das, was aus der
+verbundenen Nextcloud kommt; `link` zeigt dann auf die Sache selbst.
+
 ```js
 const source = new EventSource('/api/events?access_token=' + token);
 source.addEventListener('device.updated', (e) => console.log(JSON.parse(e.data)));
@@ -674,6 +678,62 @@ zwischen zwei Schaltvorgängen streuen zufällig zwischen der Hälfte und dem
 Anderthalbfachen des Mittelwerts – ein festes Muster wäre von außen schneller
 zu erkennen als gar kein Licht. Erlaubt sind 10 bis 120 Minuten. Beim
 Abschalten geht alles wieder aus, was die Simulation eingeschaltet hat.
+
+---
+
+## Nextcloud
+
+Benachrichtigungen aus der eigenen Nextcloud. Keine Geräte – deshalb steht das
+hier und nicht unter `/integrations`.
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/nextcloud` | Konto (ohne Zugangsdaten) und die offenen Benachrichtigungen |
+| `POST` | `/nextcloud` | `{ baseUrl, username, appPassword, pollIntervalSeconds? }` – verbindet |
+| `PATCH` | `/nextcloud` | `enabled`, `pollIntervalSeconds` (10 – 3600) |
+| `DELETE` | `/nextcloud` | Verbindung trennen, App-Passwort löschen |
+| `POST` | `/nextcloud/refresh` | Sofort nachsehen |
+| `DELETE` | `/nextcloud/notifications` | Alle als gelesen markieren |
+| `DELETE` | `/nextcloud/notifications/:id` | Eine als gelesen markieren |
+
+```json
+{
+  "account": {
+    "id": "ncl_…", "baseUrl": "https://cloud.example.de", "username": "anna",
+    "displayName": "Anna Beispiel", "serverVersion": "29.0.4",
+    "enabled": true, "pollIntervalSeconds": 30, "hasSecrets": true,
+    "lastSeenAt": "…", "lastError": null, "lastNotificationId": 812
+  },
+  "notifications": [
+    { "id": 812, "app": "spreed", "subject": "Anna hat geschrieben",
+      "message": "Kommst du heute Abend?",
+      "link": "https://cloud.example.de/call/abc123",
+      "datetime": "2026-08-09T11:20:00+00:00" }
+  ],
+  "polling": true
+}
+```
+
+Angesprochen wird die OCS-Schnittstelle der App „Benachrichtigungen“
+(`/ocs/v2.php/apps/notifications/api/v2/notifications`) mit Basic-Auth. Als
+Passwort gehört dort ein **App-Passwort** hinein (Nextcloud: Einstellungen →
+Sicherheit); es lässt sich einzeln widerrufen und funktioniert auch mit
+Zwei-Faktor-Anmeldung. Gespeichert wird es nur verschlüsselt und geht über die
+API nie wieder hinaus – `hasSecrets` sagt lediglich, *dass* eines vorliegt.
+
+`baseUrl` darf großzügig eingegeben werden: `cloud.example.de` bekommt sein
+`https://`, ein abschließender Schrägstrich fällt weg, und eine mitkopierte
+App-Adresse (`…/index.php/apps/files?dir=/Fotos`) wird auf die Instanz
+zurückgeschnitten.
+
+Lehnt die Nextcloud die Anmeldung ab, antwortet der Hub mit **400**, nicht mit
+401: Ein 401 aus dieser API bedeutet „deine Hub-Sitzung ist abgelaufen“ und
+würde den Nutzer zur Anmeldemaske werfen – abgelehnt hat aber die Nextcloud.
+
+Neue Benachrichtigungen erscheinen zusätzlich als `notification`-Ereignis im
+Eventstream, aus dem die Oberfläche ihre Einblendungen baut. Beim ersten
+Verbinden geschieht das bewusst nicht: Der Hub merkt sich nur den Stand,
+statt alles Offene auf einmal zu melden.
 
 ---
 

@@ -287,6 +287,32 @@ button.icon {
   justify-content: center;
   gap: 0.4rem;
 }
+
+/*
+ * Ein Verweis, der aussieht wie ein Knopf.
+ *
+ * Bewusst ein <a> und kein <button>: „Öffnen" führt zu einer Nextcloud in
+ * einem neuen Tab. Wer den Verweis in einem eigenen Fenster öffnen oder
+ * kopieren will, kann das nur bei einem echten Verweis.
+ */
+a.linkbutton {
+  font: inherit;
+  display: inline-block;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  text-decoration: none;
+  padding: 0.34rem 0.65rem;
+  font-size: 0.85rem;
+  border-radius: var(--radius-sm);
+  transition:
+    background 0.16s var(--ease),
+    border-color 0.16s var(--ease);
+}
+a.linkbutton:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
 button svg {
   width: 1.1em;
   height: 1.1em;
@@ -1913,6 +1939,17 @@ button.round {
 .toast .toast-hint {
   color: var(--muted);
   font-size: 0.85rem;
+}
+.toast .toast-link {
+  display: inline-block;
+  margin-top: 0.4rem;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.toast .toast-link:hover {
+  text-decoration: underline;
 }
 
 /* ------------------------------------------------------------ Animationen */

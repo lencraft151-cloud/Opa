@@ -114,12 +114,24 @@ function host() {
   return toastHost;
 }
 
-export function toast(message, { kind = 'info', hint = '', timeout = 6000 } = {}) {
+/**
+ * Kurze Einblendung.
+ *
+ * `link` macht daraus eine anklickbare Meldung – gedacht für
+ * Benachrichtigungen aus der Nextcloud, bei denen der Weg zur Sache selbst
+ * (das Gespräch, die geteilte Datei) einen Klick wert ist. Der Verweis
+ * bekommt eine eigene Zeile, damit das Wegklicken der Einblendung nicht
+ * versehentlich einen neuen Tab öffnet.
+ */
+export function toast(message, { kind = 'info', hint = '', timeout = 6000, link = '' } = {}) {
   const node = document.createElement('div');
   node.className = `toast ${kind}`;
   node.innerHTML =
     `<div class="toast-title">${esc(message)}</div>` +
-    (hint ? `<div class="toast-hint">${esc(hint)}</div>` : '');
+    (hint ? `<div class="toast-hint">${esc(hint)}</div>` : '') +
+    (link
+      ? `<a class="toast-link" href="${esc(link)}" target="_blank" rel="noreferrer noopener">Öffnen ↗</a>`
+      : '');
   host().append(node);
 
   const remove = () => {
@@ -128,7 +140,9 @@ export function toast(message, { kind = 'info', hint = '', timeout = 6000 } = {}
     setTimeout(() => node.remove(), 200);
   };
   const timer = setTimeout(remove, timeout);
-  node.addEventListener('click', () => {
+  node.addEventListener('click', (event) => {
+    // Ein Klick auf den Verweis soll ihn öffnen, nicht die Meldung schließen.
+    if (event.target.closest('.toast-link')) return;
     clearTimeout(timer);
     remove();
   });

@@ -8,6 +8,26 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.6.0 – 2026-08-09
+
+**Die eigene Nextcloud meldet sich.** Neue Talk-Nachricht, geteilte Datei,
+Kalendererinnerung: Der Hub holt die Benachrichtigungen aus der eigenen
+Nextcloud und blendet sie ein – auf dem Tablet an der Wand ebenso wie auf dem
+Handy. Ein Klick auf „Öffnen" führt zur Sache selbst. Eingerichtet wird das
+unter Einstellungen → Nextcloud mit Adresse, Benutzername und einem
+**App-Passwort**; das normale Kontopasswort funktioniert bei
+Zwei-Faktor-Anmeldung ohnehin nicht und wäre hier auch zu viel des Guten.
+
+Zwei Dinge tut der Hub dabei bewusst nicht: Beim ersten Verbinden meldet er
+nichts – sonst poppen alle offenen Benachrichtigungen auf einmal auf. Und
+nach einem Neustart fängt er nicht von vorn an: Er merkt sich, was er schon
+gezeigt hat.
+
+Die Nextcloud steht dabei nicht bei den Integrationen, sondern in den
+Einstellungen. Sie ist kein Gerät – es gibt nichts zu schalten und nichts zu
+messen. Sie in dieselbe Liste wie eine Hue Bridge zu stellen, würde beide
+Begriffe verwischen.
+
 ## 1.5.0 – 2026-08-09
 
 **Markisen, Tore und andere Motoren.** Für den Hub sind sie dasselbe wie ein

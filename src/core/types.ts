@@ -529,6 +529,69 @@ export interface SceneEntry {
   commands: DeviceCommand[];
 }
 
+// ---------------------------------------------------------------------------
+// Nextcloud
+// ---------------------------------------------------------------------------
+
+/**
+ * Verbindung zu einer Nextcloud.
+ *
+ * Kein Gerät und deshalb keine Integration im Sinne von `Integration`: Es
+ * gibt nichts zu schalten und nichts zu messen. Der Hub holt hier nur die
+ * Benachrichtigungen ab und zeigt sie an – Talk-Nachrichten, geteilte
+ * Dateien, Kalendererinnerungen.
+ */
+export interface NextcloudAccount {
+  id: string;
+  householdId: string;
+  /** Basisadresse der Instanz, ohne abschließenden Schrägstrich. */
+  baseUrl: string;
+  username: string;
+  /** Anzeigename, wie ihn die Instanz meldet. */
+  displayName: string | null;
+  serverVersion: string | null;
+  enabled: boolean;
+  /** Abfragetakt in Sekunden. */
+  pollIntervalSeconds: number;
+  /**
+   * App-Passwort, verschlüsselt (siehe util/crypto.ts).
+   *
+   * Bewusst kein Anmeldepasswort: Nextcloud vergibt in den Einstellungen
+   * unter „Sicherheit" Gerätepasswörter, die sich einzeln widerrufen lassen
+   * und die auch bei aktiver Zwei-Faktor-Anmeldung funktionieren.
+   */
+  secretsEnc: string | null;
+  lastSeenAt: string | null;
+  lastError: string | null;
+  /**
+   * Höchste bereits gemeldete Benachrichtigungs-ID.
+   *
+   * Verhindert, dass nach einem Neustart des Hubs alle offenen
+   * Benachrichtigungen erneut als Popup erscheinen.
+   */
+  lastNotificationId: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Konto ohne Zugangsdaten – so geht es über die API. */
+export type PublicNextcloudAccount = Omit<NextcloudAccount, 'secretsEnc'> & {
+  hasSecrets: boolean;
+};
+
+/** Eine einzelne Benachrichtigung aus Nextcloud. */
+export interface NextcloudNotification {
+  id: number;
+  /** Herkunfts-App, z. B. `spreed` (Talk) oder `files_sharing`. */
+  app: string;
+  subject: string;
+  message: string;
+  /** Absolute Adresse zum Öffnen in der Nextcloud, sofern vorhanden. */
+  link: string | null;
+  /** Zeitpunkt laut Nextcloud. */
+  datetime: string;
+}
+
 /** Eine angemeldete Sitzung, üblicherweise ein Browser. */
 export interface Session {
   id: string;

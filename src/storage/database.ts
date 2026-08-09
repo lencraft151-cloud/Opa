@@ -7,6 +7,7 @@ import type {
   Device,
   Household,
   Integration,
+  NextcloudAccount,
   Room,
   Scene,
   Session,
@@ -29,6 +30,7 @@ export interface DatabaseShape {
   users: User[];
   sessions: Session[];
   scenes: Scene[];
+  nextcloud: NextcloudAccount[];
 }
 
 function emptyDatabase(): DatabaseShape {
@@ -43,6 +45,7 @@ function emptyDatabase(): DatabaseShape {
     users: [],
     sessions: [],
     scenes: [],
+    nextcloud: [],
   };
 }
 
@@ -161,6 +164,7 @@ function migrate(data: DatabaseShape): DatabaseShape {
   data.users ??= [];
   data.sessions ??= [];
   data.scenes ??= [];
+  data.nextcloud ??= [];
 
   // Die Richtigstellung der Fähigkeiten kam später dazu.
   for (const device of data.devices) device.capabilityOverride ??= null;

@@ -16,7 +16,17 @@ export interface HubEventMap {
     applied: number;
     failed: number;
   };
-  'notification': { householdId: string; message: string; level: 'info' | 'warn' | 'error' };
+  'notification': {
+    householdId: string;
+    message: string;
+    level: 'info' | 'warn' | 'error';
+    /** Zweite Zeile im Popup – bei Nextcloud der Text unter der Überschrift. */
+    hint?: string;
+    /** Anklickbares Ziel, etwa der Gesprächsverlauf in Nextcloud Talk. */
+    link?: string;
+    /** Woher die Meldung kommt; die Oberfläche zeigt danach ein Symbol. */
+    source?: 'hub' | 'nextcloud';
+  };
 }
 
 export type HubEventName = keyof HubEventMap;
