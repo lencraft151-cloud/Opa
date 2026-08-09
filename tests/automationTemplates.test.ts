@@ -43,6 +43,7 @@ function makeDevice(
     model: null,
     firmware: null,
     capabilities,
+    capabilityOverride: null,
     state: {},
     reachable: true,
     hidden: false,

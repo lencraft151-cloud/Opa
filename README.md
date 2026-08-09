@@ -40,6 +40,10 @@ Geräte.
 | **Automationen** | Neun fertige Vorlagen mit vorausgewählten Geräten, dazu frei baubare Regeln aus Sensorschwellen, Gerätezuständen, Uhrzeiten und **Wiederholungen** mit Zeitfenster und Wochentagen |
 | **Darstellung** | Schriftgröße, Akzentfarben, hell/dunkel, „Bewegung reduzieren“ und die Lichtvorschau – am Haushalt gespeichert und damit auf jedem Gerät gleich |
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
+| **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
+| **Erneut verbinden** | Zugangsdaten erneuern oder den Knopf an der Hue Bridge noch einmal drücken – ohne Geräte, Räume, Szenen und Automationen zu verlieren |
+| **Sicherung** | Einstellungen, Räume, Geräte, Szenen und Automationen als Datei sichern und zurückspielen – ohne Passwörter in der Datei |
+| **Fassung des Hubs** | Änderungsprotokoll in der Oberfläche, Prüfung auf eine neuere Fassung und Aktualisierung auf Knopfdruck |
 | **Oberfläche** | Installierbare Web-App (PWA) mit Live-Updates (SSE), Dashboard, Raum-, Geräte-, Energie- und Verlaufsansicht; aktualisiert sich nach einem Update des Hubs selbst |
 
 ---
@@ -384,6 +388,78 @@ die für hellen und dunklen Hintergrund getrennt abgestimmt sind. Bei einer
 eigenen Farbe rechnet die Oberfläche die Textfarbe darauf nach der
 WCAG-Leuchtdichteformel aus, damit die Beschriftung lesbar bleibt.
 
+### Wenn ein Gerät fehlt
+
+Der häufigste Fall ist der ärgerlichste: Ein Rollladen ist da, der Hub zeigt ihn
+aber nicht. Drei Dinge greifen dagegen ineinander.
+
+**Erstens wird geraten, statt aufzugeben.** Kennt der Hub einen Kanaltyp nicht,
+sieht er sich an, welche Werte der Kanal führt. Ein Kanal mit Niveau und
+Fahrtrichtung ist ein Rollladen, egal wie sein Typ heißt. Homematic ist seit
+2010 gewachsen, es gibt Fremdgeräte über HmIP und Zusatzpakete mit eigenen
+Kanaltypen – eine Namensliste kann das nicht abdecken.
+
+**Zweitens gibt es eine Diagnose.** *Einstellungen → Integrationen → Erneut
+verbinden und nachsehen, was fehlt* zeigt alle Geräte dieser Verbindung und
+darunter, was übersprungen wurde und warum. „Rollladen fehlt“ ist keine
+Auskunft, mit der man etwas anfangen kann; „Kanal 4 übersprungen, weil Typ
+MAINTENANCE“ schon.
+
+**Drittens hat der Mensch das letzte Wort.** Unter *Geräte → Erkennt der Hub ein
+Gerät falsch?* lässt sich der Typ richtigstellen. Die Angabe gilt ab sofort
+überall – auf der Karte, in Automationen und in Szenen. Was das Gerät selbst
+meldet, bleibt daneben gespeichert: Ein Firmware-Update kann so neue Fähigkeiten
+mitbringen, ohne die Korrektur zu überschreiben.
+
+### Erneut verbinden
+
+Zugangsdaten ändern sich, Bridges vergessen ihre Kopplung, Geräte bekommen eine
+neue Adresse. Bisher blieb dafür nur „löschen und neu anlegen“ – und damit
+verlor man Gerätenamen, Raumzuordnungen, Szenen und Automationen, weil die neuen
+Geräte neue IDs bekommen.
+
+*Erneut verbinden* behält die ID der Integration. Nur die Zugangsdaten werden
+erneuert, danach liest der Hub die Geräteliste neu ein; die Geräte werden über
+ihre `externalId` wiedererkannt. Bei Hue heißt das: Knopf drücken, „Erneut
+verbinden“ wählen, fertig.
+
+### Sicherung
+
+*Einstellungen → Sicherung* lädt Haushalt, Räume, Geräte, Szenen und
+Automationen als JSON-Datei herunter.
+
+Was **nicht** darin steht, ist die eigentliche Entscheidung: keine Zugangsdaten
+zu Bridges, keine Passwörter, keine Sitzungen. Eine Sicherung landet am Ende in
+einem Download-Ordner, auf einem USB-Stick oder in einer Cloud – an Orten also,
+die man nicht mehr überblickt. Eine Datei, aus der jemand das Bridge-Konto und
+die Anmeldedaten aller Bewohner ziehen kann, gehört dort nicht hin.
+
+Der Preis ist eine Minute Arbeit nach dem Umzug auf neue Hardware: Jede
+Verbindung muss einmal über *Erneut verbinden* hergestellt werden. Der Hub sagt
+nach dem Zurückspielen, welche das sind. Auf **demselben** Hub entfällt das –
+bestehende Zugangsdaten werden nicht angefasst, wenn Typ und Adresse passen.
+
+Benutzerkonten bleiben beim Zurückspielen unangetastet. Wer die
+Wiederherstellung anstößt, soll danach nicht ausgesperrt sein.
+
+### Die Fassung des Hubs
+
+*Einstellungen → Diese Fassung* zeigt, was läuft, und liest dazu `CHANGELOG.md`
+aus dem eigenen Verzeichnis. Steht eine neuere Fassung bereit, stehen deren
+Änderungen **vor** dem Knopf, nicht dahinter – eine Aktualisierung, deren Inhalt
+man erst danach erfährt, ist eine Zumutung.
+
+Drei Dinge tut der Hub bewusst nicht:
+
+- **Ungefragt nach Hause telefonieren.** Ohne gesetztes `HUB_UPDATE_CHECK_URL`
+  fragt er niemanden.
+- **Heimlich aktualisieren.** Die Aktualisierung läuft nur auf Knopfdruck und
+  nur aus einer sauberen Git-Arbeitskopie – liegt dort etwas Ungespeichertes,
+  lehnt er ab, statt es zu überschreiben.
+- **Behaupten, er sei fertig.** Nach `git pull`, `npm install` und `npm run
+  build` sagt er, dass ein Neustart des Dienstes fehlt. Den erledigt systemd,
+  Docker oder pm2 – nicht er selbst.
+
 ---
 
 ## Anmeldung
@@ -452,6 +528,7 @@ Alle Werte kommen aus Umgebungsvariablen oder `.env` (siehe `.env.example`):
 | `TELEMETRY_MIN_INTERVAL_SECONDS` | `60` | Mindestabstand zweier Messwerte je Sensor |
 | `ALLOW_CLOUD_DISCOVERY` | `true` | `discovery.meethue.com` nutzen |
 | `DISCOVERY_TIMEOUT_MS` | `5000` | Timeout der Gerätesuche |
+| `HUB_UPDATE_CHECK_URL` | – | Adresse für die Prüfung auf eine neuere Fassung des Hubs. Leer heißt: gar nicht fragen |
 | `LOG_LEVEL` | `info` | `trace`…`error`, `silent` |
 
 ---
@@ -551,7 +628,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 353 Tests, node:test
+npm test        # 378 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
@@ -592,6 +669,18 @@ Abgedeckt sind unter anderem:
   ob die Fehlermeldung verrät, welcher Teil falsch war
 - Szenen: was aus einem Zustand an Kommandos wird (und was bewusst nicht),
   Reihenfolge, ein stummes Gerät mitten in der Szene
+- Unbekannte Kanäle: dass ein Rollladen an Niveau und Fahrtrichtung erkannt wird,
+  wie Rollladen und Dimmer unterschieden werden, wenn nur `LEVEL` da ist, und
+  dass der Hub aufgibt, statt zu raten, wenn gar nichts vorliegt
+- Richtiggestellte Gerätetypen: dass die Korrektur überall gilt, dass die
+  Meldung des Geräts daneben erhalten bleibt und dass eine leere Liste keine
+  Korrektur ist
+- Fassungen und Änderungsprotokoll: dass `1.10.0` neuer ist als `1.9.0` (als
+  Text wäre es umgekehrt), und dass das Vorwort keiner Fassung zugeschlagen wird
+- Sicherung: dass keine Zugangsdaten in der Datei landen, dass eine fremde Datei
+  erkannt wird, dass dieselbe Bridge verbunden bleibt, dass eine umgezogene
+  ehrlich als „neu zu verbinden“ gemeldet wird – und dass niemand ausgesperrt
+  wird
 
 ---
 

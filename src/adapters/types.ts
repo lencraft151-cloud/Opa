@@ -113,6 +113,26 @@ export interface IntegrationAdapter {
    * Minuten nicht erreichbar.
    */
   installUpdate?(ctx: IntegrationContext): Promise<void>;
+
+  /**
+   * Was beim letzten Einlesen liegen blieb.
+   *
+   * Beantwortet die Frage „wo ist mein Rollladen?" mit einer Liste statt mit
+   * Schweigen. Nur Adapter, die Geräte überhaupt verwerfen können, brauchen
+   * das – bei Hue etwa ist jede Ressource entweder ein Gerät oder gehört zu
+   * einem.
+   */
+  diagnostics?(ctx: IntegrationContext): SkippedEntry[];
+}
+
+/** Ein Kanal oder eine Komponente, aus der kein Gerät wurde. */
+export interface SkippedEntry {
+  /** Kennung beim Hersteller, z. B. die Kanaladresse. */
+  address: string;
+  /** Wie das Gerät sich selbst benennt. */
+  channelType: string;
+  /** In Alltagssprache, warum daraus kein Gerät wurde. */
+  reason: string;
 }
 
 /** Der Nutzer muss den Link-Button der Hue Bridge drücken. */

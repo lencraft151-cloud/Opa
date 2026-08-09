@@ -61,6 +61,12 @@ export interface AppConfig {
   telemetryMinIntervalSeconds: number;
   allowCloudDiscovery: boolean;
   discoveryTimeoutMs: number;
+  /**
+   * Adresse, unter der nach einer neueren Fassung des Hubs gefragt wird –
+   * etwa die Releases-API des Projekts. Leer heißt: gar nicht fragen. Ein
+   * Haushalts-Hub telefoniert nicht ungefragt nach Hause.
+   */
+  hubUpdateCheckUrl: string | null;
   logLevel: LogLevel;
 }
 
@@ -95,6 +101,7 @@ export function loadConfig(): AppConfig {
     telemetryMinIntervalSeconds: Math.max(0, num('TELEMETRY_MIN_INTERVAL_SECONDS', 60)),
     allowCloudDiscovery: bool('ALLOW_CLOUD_DISCOVERY', true),
     discoveryTimeoutMs: Math.max(500, num('DISCOVERY_TIMEOUT_MS', 5000)),
+    hubUpdateCheckUrl: str('HUB_UPDATE_CHECK_URL', '') || null,
     logLevel,
   };
 }

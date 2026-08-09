@@ -5,9 +5,11 @@ import { Database } from './storage/database.js';
 import { TelemetryStore } from './storage/telemetryStore.js';
 import { createRepositories, type Repositories } from './storage/repositories.js';
 import { AutomationService } from './services/automationService.js';
+import { BackupService } from './services/backupService.js';
 import { DeviceService } from './services/deviceService.js';
 import { EnergyService } from './services/energyService.js';
 import { HouseholdService } from './services/householdService.js';
+import { HubUpdateService } from './services/hubUpdateService.js';
 import { IntegrationService } from './services/integrationService.js';
 import { PollingService } from './services/pollingService.js';
 import { PresenceService } from './services/presenceService.js';
@@ -17,6 +19,7 @@ import { SetupService } from './services/setupService.js';
 import { TelemetryService } from './services/telemetryService.js';
 import { UpdateService } from './services/updateService.js';
 import { UserService } from './services/userService.js';
+import { VERSION } from './version.js';
 
 const log = createLogger('container');
 
@@ -34,7 +37,12 @@ export interface Container {
   polling: PollingService;
   setup: SetupService;
   energy: EnergyService;
+  /** Sicherung und Wiederherstellung der Konfiguration. */
+  backup: BackupService;
+  /** Firmware der Geräte. */
   updates: UpdateService;
+  /** Die Software des Hubs selbst. */
+  hubUpdate: HubUpdateService;
   users: UserService;
   scenes: SceneService;
   presence: PresenceService;
@@ -70,7 +78,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const users = new UserService(repos);
   const setup = new SetupService(repos, households, rooms, devices, users);
   const energy = new EnergyService(repos, telemetry, households);
+  const backup = new BackupService(db);
   const updates = new UpdateService(repos, registry, integrations, households);
+  const hubUpdate = new HubUpdateService(VERSION, { checkUrl: config.hubUpdateCheckUrl });
   const scenes = new SceneService(repos, devices);
   const presence = new PresenceService(repos, devices, households);
 
@@ -110,7 +120,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     polling,
     setup,
     energy,
+    backup,
     updates,
+    hubUpdate,
     users,
     scenes,
     presence,

@@ -241,4 +241,9 @@ export const deviceUpdateSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   roomId: z.string().nullable().optional(),
   hidden: z.boolean().optional(),
+  /**
+   * Richtiggestellte Fähigkeiten. `null` nimmt die Korrektur zurück und
+   * glaubt wieder dem, was das Gerät meldet.
+   */
+  capabilityOverride: z.array(z.enum(CAPABILITIES)).max(12).nullable().optional(),
 });

@@ -146,3 +146,40 @@ export function esc(value) {
     (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char],
   );
 }
+
+/**
+ * Winziger Markdown-Übersetzer für das Änderungsprotokoll.
+ *
+ * Bewusst nicht mehr als das, was in `CHANGELOG.md` wirklich vorkommt:
+ * Absätze, Aufzählungen, **fett**, `Code`. Alles andere bleibt Text.
+ *
+ * Wichtig ist die Reihenfolge: Erst wird maskiert, dann werden die wenigen
+ * erlaubten Auszeichnungen eingesetzt. Andersherum könnte ein `<script>` im
+ * Protokoll die Seite übernehmen – und das Protokoll kommt zwar aus dem
+ * eigenen Repository, aber nach einem `git pull` eben nicht mehr
+ * zwangsläufig aus der eigenen Hand.
+ */
+export function changelogHtml(markdown) {
+  const blocks = String(markdown ?? '')
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  const inline = (text) =>
+    esc(text)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  return blocks
+    .map((block) => {
+      const lines = block.split('\n');
+      if (lines.every((line) => /^[-*]\s+/.test(line.trim()))) {
+        const items = lines
+          .map((line) => `<li>${inline(line.trim().replace(/^[-*]\s+/, ''))}</li>`)
+          .join('');
+        return `<ul>${items}</ul>`;
+      }
+      return `<p>${inline(block.replace(/\n/g, ' '))}</p>`;
+    })
+    .join('');
+}

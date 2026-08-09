@@ -110,6 +110,71 @@ export function classifyChannel(channel: HomematicChannel): ChannelKind | null {
   return null;
 }
 
+/**
+ * Was ein unbekannter Kanal ist – geraten aus dem, was er kann.
+ *
+ * Die Namenstabelle oben deckt ab, was wir kennen. Sie kann aber nicht
+ * abdecken, was es noch gibt: Homematic ist seit 2010 gewachsen, es gibt
+ * Fremdgeräte über HmIP, Zusatzpakete erfinden eigene Kanaltypen. Bisher
+ * verschwand so ein Kanal wortlos – der Rollladen war einfach nicht da, und
+ * niemand konnte sehen, warum.
+ *
+ * Deshalb dieser zweite Anlauf: Nicht der Name entscheidet, sondern die
+ * Werte, die der Kanal führt. Ein Kanal mit `LEVEL` und einer Fahrtrichtung
+ * ist ein Rollladen, egal wie sein Typ heißt.
+ */
+export function inferKind(
+  values: Record<string, unknown>,
+  deviceType = '',
+  channelType = '',
+): ChannelKind | null {
+  const hasValue = (key: string): boolean => key in values;
+  const name = `${deviceType} ${channelType}`.toUpperCase();
+
+  // Solltemperatur ist eindeutig: Das kann nur eine Heizung sein.
+  if (hasValue('SET_POINT_TEMPERATURE') || hasValue('SET_TEMPERATURE')) return 'thermostat';
+
+  // Fahrtrichtung oder Lamellen – ein Antrieb, kein Dimmer.
+  if (
+    hasValue('LEVEL') &&
+    (hasValue('LEVEL_SLATS') ||
+      hasValue('LEVEL_2') ||
+      hasValue('ACTIVITY_STATE') ||
+      hasValue('DIRECTION') ||
+      hasValue('SECTION'))
+  ) {
+    return 'cover';
+  }
+
+  /*
+   * Bleibt der Fall „nur LEVEL“: Rollladen und Dimmer sehen dann gleich aus.
+   * Hier hilft der Gerätename weiter – eQ-3 benennt seine Modelle sprechend
+   * (HmIP-BROLL, HM-LC-Bl1-FM, HmIP-BBL für Jalousien).
+   */
+  if (hasValue('LEVEL')) {
+    if (/ROLL|BLIND|JALOU|SHUTTER|MARKI|BBL|BL1|BL-/.test(name)) return 'cover';
+    if (/DIM|DIMMER|PD-|LC-DW/.test(name)) return 'dimmer';
+    // Unentschieden: Ein falsch geratener Rollladen ist ärgerlicher als ein
+    // falsch geratener Dimmer – beide lassen sich in der Oberfläche
+    // richtigstellen, aber der Dimmer richtet keinen Schaden an.
+    return 'dimmer';
+  }
+
+  if (hasValue('STATE') && typeof values['STATE'] === 'boolean') {
+    return /MOTION|PRESENCE/.test(name) ? 'motion' : 'switch';
+  }
+  if (hasValue('MOTION')) return 'motion';
+  if (hasValue('ACTUAL_TEMPERATURE') || hasValue('HUMIDITY') || hasValue('TEMPERATURE')) {
+    return 'climate';
+  }
+  if (hasValue('POWER') || hasValue('ENERGY_COUNTER')) return 'power';
+  if (hasValue('LOWBAT') || hasValue('LOW_BAT') || hasValue('OPERATING_VOLTAGE_LEVEL')) {
+    return 'maintenance';
+  }
+
+  return null;
+}
+
 export function capabilitiesFor(kind: ChannelKind, values: Record<string, unknown>): Capability[] {
   switch (kind) {
     case 'cover': {

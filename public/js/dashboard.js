@@ -4,7 +4,15 @@ import { api, errorBanner, guard, toast } from './api.js';
 import { ACCENT_PRESETS, applyAppearance, FONT_SCALES, THEMES } from './appearance.js';
 import { barList, gauge, lineChart } from './charts.js';
 import { bindDeviceControls, deviceCard, emptyState, skeletonGrid, tile } from './components.js';
-import { esc, fmt, METRIC_LABEL, plural, VENDOR_LABEL } from './format.js';
+import {
+  CAPABILITY_LABEL,
+  changelogHtml,
+  esc,
+  fmt,
+  METRIC_LABEL,
+  plural,
+  VENDOR_LABEL,
+} from './format.js';
 import { bindManualForm, manualForm, runDiscovery } from './integrations.js';
 import { applyUpdate } from './selfupdate.js';
 
@@ -14,6 +22,12 @@ const $ = (selector) => document.querySelector(selector);
 export const store = {
   /** Antwort von `/system/info` – Fassung, Kennung, verfügbare Adapter. */
   systemInfo: null,
+  /**
+   * Antwort von `/system/version` – Fassung des Hubs samt Änderungsprotokoll.
+   * Wird erst beim Öffnen der Einstellungen geholt: Die Abfrage startet einen
+   * `git`-Prozess und hat auf jedem anderen Weg nichts zu suchen.
+   */
+  hubVersion: null,
   /** Angemeldeter Benutzer. */
   me: null,
   scenes: [],
@@ -620,9 +634,24 @@ function renderDevices() {
             .map((device) => deviceCard(device, { showMeta: true, roomName: roomName(device.roomId) }))
             .join('')
         : emptyState('🔍', 'Keine passenden Geräte.', 'Setze den Filter zurück oder ändere die Suche.')
-    }</div>`;
+    }</div>
+
+    <details class="card" data-section="device-types">
+      <summary>Erkennt der Hub ein Gerät falsch?</summary>
+      <p class="muted small">
+        Manche Geräte melden nicht sauber, was sie sind – ein Rollladenaktor gibt sich als
+        Schalter aus, ein Dimmer als Lampe. Hier lässt sich das richtigstellen. Die Angabe
+        gilt ab sofort überall: auf der Karte, in Automationen und in Szenen. Was das Gerät
+        selbst meldet, bleibt gespeichert; „wie gemeldet“ nimmt die Korrektur zurück.
+      </p>
+      <div class="list" id="device-types">${
+        devices.map(capabilityFixItem).join('') ||
+        emptyState('🔍', 'Keine passenden Geräte.')
+      }</div>
+    </details>`;
 
   bindDeviceControls(panel, sendCommand, deviceById);
+  wireCapabilityFix(panel.querySelector('#device-types'));
   restoreOpenSections(panel);
 
   $('#device-search').addEventListener('input', (event) => {
@@ -1747,23 +1776,27 @@ async function renderSettings() {
     ${accountCard()}
 
     <div class="card">
-      <h2>Diese Oberfläche</h2>
+      <h2>Sicherung</h2>
       <p class="muted small">
-        Die Seite prüft von selbst, ob der Hub eine neuere Fassung ausliefert, und lädt sich
-        dann nach – meist unbemerkt, während sie im Hintergrund liegt. Der Knopf hier erzwingt
-        das sofort, falls doch einmal etwas hängen bleibt.
+        Räume, Geräte­namen, Automationen, Szenen und alle Einstellungen als Datei –
+        für den Umzug auf neue Hardware oder als Rückweg, wenn etwas schiefgeht.
       </p>
-      <div class="list">
-        <div class="item">
-          <div>
-            <div class="title">Fassung ${esc(store.systemInfo?.version ?? '–')}</div>
-            <div class="sub">Kennung ${esc(store.systemInfo?.build ?? 'unbekannt')} ·
-              Node ${esc(store.systemInfo?.node ?? '–')}</div>
-          </div>
-          <button class="small" id="btn-reload-ui">Jetzt neu laden</button>
-        </div>
+      <div class="callout">
+        <strong>In der Datei stehen keine Passwörter</strong>
+        <span>
+          Weder die Zugangsdaten deiner Bridges noch die Anmeldedaten der Bewohner. Die
+          Datei darf also auf einem USB-Stick liegen. Der Preis: Auf einem <em>anderen</em>
+          Hub muss jede Verbindung einmal neu hergestellt werden.
+        </span>
+      </div>
+      <div class="row tight">
+        <button class="primary small" id="btn-backup">Sicherung herunterladen</button>
+        <button class="ghost small" id="btn-restore">Sicherung zurückspielen</button>
+        <input type="file" id="restore-file" accept="application/json,.json" class="hidden" />
       </div>
     </div>
+
+    <div class="card" id="card-hub-version">${hubVersionCard()}</div>
 
     <details class="card" data-section="glossary">
       <summary>Begriffe kurz erklärt</summary>
@@ -1793,7 +1826,7 @@ async function renderSettings() {
   wireSettings(panel);
   wireAccount(panel);
   restoreOpenSections(panel);
-  await Promise.all([renderTokens(), renderSessions(), renderUsers()]);
+  await Promise.all([renderTokens(), renderSessions(), renderUsers(), loadHubVersion()]);
 }
 
 /** Konto, Personen und angemeldete Geräte bedienen. */
@@ -2145,6 +2178,418 @@ function appearanceCard() {
   </div>`;
 }
 
+// ---------------------------------------------------------------------------
+// Sicherung
+// ---------------------------------------------------------------------------
+
+/**
+ * Herunterladen und Zurückspielen.
+ *
+ * Der Download läuft nicht über `api()`: Der Hub liefert die Datei mit
+ * `Content-Disposition` aus, und der Browser soll sie speichern, nicht
+ * anzeigen. Deshalb der Umweg über einen unsichtbaren Link.
+ */
+function wireBackup(panel) {
+  panel.querySelector('#btn-backup')?.addEventListener('click', async (event) => {
+    event.target.disabled = true;
+    try {
+      const response = await fetch('/api/system/backup', { credentials: 'same-origin' });
+      if (!response.ok) throw new Error(await response.text());
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `smarthome-sicherung-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast('Sicherung heruntergeladen.', {
+        kind: 'success',
+        hint: 'Bewahre sie außerhalb des Hubs auf – auf dem Hub nützt sie im Ernstfall nichts.',
+      });
+    } catch {
+      toast('Die Sicherung konnte nicht erstellt werden.', { kind: 'error' });
+    } finally {
+      event.target.disabled = false;
+    }
+  });
+
+  const file = panel.querySelector('#restore-file');
+  panel.querySelector('#btn-restore')?.addEventListener('click', () => file?.click());
+
+  file?.addEventListener('change', async () => {
+    const chosen = file.files?.[0];
+    file.value = '';
+    if (!chosen) return;
+
+    if (
+      !confirm(
+        'Zurückspielen ersetzt Räume, Geräte, Automationen und Szenen vollständig. ' +
+          'Der aktuelle Stand geht dabei verloren. Fortfahren?',
+      )
+    ) {
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(await chosen.text());
+    } catch {
+      toast('Die Datei lässt sich nicht lesen.', {
+        kind: 'error',
+        hint: 'Wähle die JSON-Datei, die der Hub unter „Sicherung herunterladen“ erzeugt hat.',
+      });
+      return;
+    }
+
+    const result = await guard(() => api('/system/restore', { method: 'POST', body: parsed }));
+    if (!result) return;
+
+    toast(
+      `Wiederhergestellt: ${plural(result.rooms, 'Raum', 'Räume')}, ` +
+        `${plural(result.devices, 'Gerät', 'Geräte')}, ` +
+        `${plural(result.rules, 'Automation', 'Automationen')}.`,
+      {
+        kind: 'success',
+        timeout: 12_000,
+        hint: result.needRelink.length
+          ? `Noch zu verbinden: ${result.needRelink.join(', ')}`
+          : 'Alle Verbindungen bestehen weiter.',
+      },
+    );
+    await loadDashboardData();
+    void renderSettings();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Diagnose und Gerätetyp richtigstellen
+// ---------------------------------------------------------------------------
+
+/**
+ * Gerätearten, die man von Hand einstellen kann.
+ *
+ * Bewusst keine Liste einzelner Fähigkeiten: „schaltbar, dimmbar, Farben,
+ * Weißtöne“ einzeln anzuklicken ist die Aufgabe des Hubs, nicht die des
+ * Bewohners. Hier steht, was das Gerät *ist* – die Fähigkeiten ergeben sich
+ * daraus.
+ */
+const DEVICE_KIND_PRESETS = [
+  { id: 'auto', label: 'wie gemeldet', capabilities: null },
+  { id: 'switch', label: 'Schalter', capabilities: ['switch'] },
+  { id: 'dimmer', label: 'dimmbares Licht', capabilities: ['switch', 'dimmer'] },
+  {
+    id: 'color',
+    label: 'Farblicht',
+    capabilities: ['switch', 'dimmer', 'color', 'color_temperature'],
+  },
+  { id: 'cover', label: 'Rollladen', capabilities: ['cover'] },
+  { id: 'cover_tilt', label: 'Jalousie mit Lamellen', capabilities: ['cover', 'cover.tilt'] },
+  { id: 'thermostat', label: 'Heizung', capabilities: ['thermostat', 'sensor.temperature'] },
+];
+
+const sameSet = (a, b) =>
+  a.length === b.length && [...a].sort().join() === [...b].sort().join();
+
+/** Welche Voreinstellung passt zur aktuellen Richtigstellung? */
+function currentKind(device) {
+  const override = device.capabilityOverride;
+  if (!override || override.length === 0) return 'auto';
+  const actuators = override.filter((capability) => !capability.startsWith('sensor.'));
+  const match = DEVICE_KIND_PRESETS.find(
+    (preset) => preset.capabilities && sameSet(preset.capabilities.filter(
+      (capability) => !capability.startsWith('sensor.'),
+    ), actuators),
+  );
+  return match?.id ?? 'custom';
+}
+
+/**
+ * Ein Gerät mit Wahlmöglichkeit für seinen Typ.
+ *
+ * Sensorfähigkeiten bleiben erhalten, egal was gewählt wird: Ein Shelly, der
+ * als Rollladen richtiggestellt wird, misst weiterhin Strom – das eine hat
+ * mit dem anderen nichts zu tun.
+ */
+function capabilityFixItem(device) {
+  const kind = currentKind(device);
+  const chips = DEVICE_KIND_PRESETS.map(
+    (preset) => `<button type="button" class="chip ${preset.id === kind ? 'active' : ''}"
+                         data-fix-kind="${esc(preset.id)}">${esc(preset.label)}</button>`,
+  ).join('');
+
+  const capabilities = device.capabilities ?? [];
+  const abilities = capabilities
+    .map((capability) => CAPABILITY_LABEL[capability])
+    .filter(Boolean)
+    .join(', ');
+
+  // Die Sensorfähigkeiten reisen im Markup mit: Der Bericht kennt auch
+  // ausgeblendete Geräte, die im normalen Datenstand gar nicht auftauchen.
+  const sensors = capabilities.filter((capability) => capability.startsWith('sensor.'));
+
+  return `<div class="item column">
+    <div>
+      <div class="title">${esc(device.name)}
+        ${device.capabilityOverride?.length ? '<span class="badge">richtiggestellt</span>' : ''}
+        ${device.reachable === false ? '<span class="badge">offline</span>' : ''}
+      </div>
+      <div class="sub">${esc(abilities || 'keine Fähigkeiten erkannt')}</div>
+    </div>
+    <div class="chips" data-fix-device="${esc(device.id)}" data-fix-sensors="${esc(sensors.join(','))}">
+      ${chips}
+    </div>
+  </div>`;
+}
+
+function wireCapabilityFix(root) {
+  root.querySelectorAll('[data-fix-device]').forEach((group) => {
+    const deviceId = group.dataset.fixDevice;
+    const sensors = group.dataset.fixSensors ? group.dataset.fixSensors.split(',') : [];
+
+    group.querySelectorAll('[data-fix-kind]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const preset = DEVICE_KIND_PRESETS.find((entry) => entry.id === button.dataset.fixKind);
+        if (!preset) return;
+        const capabilityOverride = preset.capabilities
+          ? [...new Set([...preset.capabilities, ...sensors])]
+          : null;
+
+        const updated = await guard(() =>
+          api(`/devices/${deviceId}`, { method: 'PATCH', body: { capabilityOverride } }),
+        );
+        if (!updated) return;
+
+        group.querySelectorAll('[data-fix-kind]').forEach((chip) => {
+          chip.classList.toggle('active', chip === button);
+        });
+        toast(
+          capabilityOverride
+            ? `„${updated.name}" gilt jetzt als ${preset.label}.`
+            : `„${updated.name}" folgt wieder dem, was das Gerät meldet.`,
+          { kind: 'success' },
+        );
+        await loadDashboardData();
+        renderCurrent({ reason: 'devices' });
+      });
+    });
+  });
+}
+
+/**
+ * Der Bericht zu einer Integration.
+ *
+ * Die übersprungenen Kanäle stehen mit Begründung da. Das ist der
+ * eigentliche Zweck: „Rollladen fehlt“ ist keine Fehlermeldung, mit der man
+ * etwas anfangen kann – „Kanal 4 übersprungen, weil Typ MAINTENANCE“ schon.
+ */
+function diagnosticsReport(report) {
+  const devices = report.devices.length
+    ? report.devices.map(capabilityFixItem).join('')
+    : emptyState('📭', 'Diese Verbindung hat kein einziges Gerät geliefert.');
+
+  const skipped = report.supportsDiagnostics
+    ? report.skipped.length
+      ? report.skipped
+          .map(
+            (entry) => `<div class="item">
+              <div>
+                <div class="title">${esc(entry.address)}</div>
+                <div class="sub">${esc(entry.channelType)} · ${esc(entry.reason)}</div>
+              </div>
+            </div>`,
+          )
+          .join('')
+      : '<p class="muted small">Nichts übersprungen – alles, was gemeldet wurde, ist da.</p>'
+    : '<p class="muted small">Diese Verbindung führt keine Liste übersprungener Kanäle.</p>';
+
+  return `<h3>${esc(plural(report.devices.length, 'Gerät gefunden', 'Geräte gefunden'))}</h3>
+    <p class="muted small">
+      Stimmt ein Typ nicht, lässt er sich hier richtigstellen – die Angabe gilt ab sofort
+      überall, auch in Automationen und Szenen.
+    </p>
+    ${devices}
+    <h3>Übersprungen</h3>
+    ${skipped}`;
+}
+
+// ---------------------------------------------------------------------------
+// Die Fassung des Hubs selbst
+// ---------------------------------------------------------------------------
+
+/**
+ * Was hier läuft, was neu wäre – und der Knopf, der es holt.
+ *
+ * Bewusst getrennt von der Firmware der Geräte: Das eine ist die Software,
+ * die alles steuert, das andere sind die Geräte, die gesteuert werden. Wer
+ * „Update" liest, soll wissen, wovon die Rede ist.
+ *
+ * Das Änderungsprotokoll steht *vor* dem Knopf, nicht dahinter. Eine
+ * Aktualisierung, deren Inhalt man erst danach erfährt, ist eine Zumutung.
+ */
+function hubVersionCard() {
+  const info = store.hubVersion;
+
+  if (!info) {
+    return `<h2>Diese Fassung</h2>
+      <div class="list"><div class="item"><div>
+        <div class="title skeleton-line"></div>
+        <div class="sub skeleton-line short"></div>
+      </div></div></div>`;
+  }
+
+  const badge = info.updateAvailable
+    ? '<span class="badge warn">neue Fassung verfügbar</span>'
+    : '<span class="badge ok">aktuell</span>';
+
+  const pending = info.pending.length
+    ? `<div class="changelog pending">
+         <h3>Was die Aktualisierung bringt</h3>
+         ${info.pending.map(changelogEntry).join('')}
+       </div>`
+    : '';
+
+  const current = info.current
+    ? `<details data-section="changelog-current">
+         <summary>Was in ${esc(info.currentVersion)} neu war</summary>
+         <div class="changelog">${changelogHtml(info.current.body)}</div>
+       </details>`
+    : '';
+
+  const action = info.updateAvailable
+    ? info.canUpdate
+      ? '<button class="primary small" id="btn-hub-install">Jetzt aktualisieren</button>'
+      : ''
+    : '';
+
+  return `<h2>Diese Fassung ${badge}</h2>
+    <div class="list">
+      <div class="item">
+        <div>
+          <div class="title">Hub ${esc(info.currentVersion)}${
+            info.updateAvailable ? ` → ${esc(info.latestVersion)}` : ''
+          }</div>
+          <div class="sub">
+            Node ${esc(store.systemInfo?.node ?? '–')} ·
+            Oberfläche ${esc(store.systemInfo?.build ?? 'unbekannt')} ·
+            ${info.checkedAt ? `geprüft ${esc(fmt.relative(info.checkedAt))}` : 'noch nicht geprüft'}
+          </div>
+        </div>
+        <div class="row tight">
+          ${action}
+          <button class="small" id="btn-hub-check">Nach neuer Fassung sehen</button>
+        </div>
+      </div>
+    </div>
+
+    ${pending}
+    ${
+      info.updateAvailable && !info.canUpdate && info.reason
+        ? `<div class="callout"><strong>Der Hub kann sich hier nicht selbst aktualisieren</strong>
+             <span>${esc(info.reason)}</span></div>`
+        : ''
+    }
+    ${current}
+
+    <details data-section="changelog-all">
+      <summary>Alle bisherigen Änderungen</summary>
+      <div class="changelog" id="changelog-all">
+        <p class="muted small">Wird geladen …</p>
+      </div>
+    </details>
+
+    <hr class="divider" />
+    <p class="muted small">
+      Die <strong>Oberfläche</strong> aktualisiert sich getrennt davon: Sie merkt selbst,
+      wenn der Hub eine neuere Fassung ausliefert, und lädt sich nach – meist unbemerkt,
+      während sie im Hintergrund liegt.
+    </p>
+    <button class="ghost small" id="btn-reload-ui">Oberfläche jetzt neu laden</button>`;
+}
+
+function changelogEntry(entry) {
+  return `<article class="changelog-entry">
+    <h4>${esc(entry.version)}${entry.date ? ` <span class="muted small">${esc(entry.date)}</span>` : ''}</h4>
+    ${changelogHtml(entry.body)}
+  </article>`;
+}
+
+/** Holt Fassung und Protokoll und zeichnet nur diese eine Karte neu. */
+async function loadHubVersion({ force = false } = {}) {
+  if (!store.hubVersion || force) {
+    const info = await guard(() => api('/system/version'));
+    if (info) store.hubVersion = info;
+  }
+  renderHubVersionCard();
+}
+
+function renderHubVersionCard() {
+  const card = $('#card-hub-version');
+  if (!card) return;
+  card.innerHTML = hubVersionCard();
+  wireHubVersion(card);
+  restoreOpenSections(card);
+}
+
+function wireHubVersion(card) {
+  card.querySelector('#btn-hub-check')?.addEventListener('click', async (event) => {
+    event.target.disabled = true;
+    const info = await guard(() => api('/system/version/check', { method: 'POST' }));
+    event.target.disabled = false;
+    if (!info) return;
+    store.hubVersion = info;
+    renderHubVersionCard();
+    toast(
+      info.updateAvailable
+        ? `Fassung ${info.latestVersion} steht bereit.`
+        : 'Der Hub ist auf dem neuesten Stand.',
+      { kind: info.updateAvailable ? 'info' : 'success' },
+    );
+  });
+
+  card.querySelector('#btn-hub-install')?.addEventListener('click', async (event) => {
+    if (
+      !confirm(
+        'Der Hub lädt die neue Fassung und baut sie. Das dauert ein paar Minuten; ' +
+          'danach muss der Dienst neu gestartet werden. Fortfahren?',
+      )
+    ) {
+      return;
+    }
+    event.target.disabled = true;
+    event.target.textContent = 'Wird aktualisiert …';
+    const result = await guard(() => api('/system/version/install', { method: 'POST' }));
+    event.target.disabled = false;
+    event.target.textContent = 'Jetzt aktualisieren';
+    if (!result) return;
+    toast('Die neue Fassung liegt bereit.', {
+      kind: 'success',
+      hint: 'Sie läuft, sobald der Dienst neu gestartet wurde.',
+      timeout: 12_000,
+    });
+    await loadHubVersion({ force: true });
+  });
+
+  card.querySelector('#btn-reload-ui')?.addEventListener('click', () => {
+    void applyUpdate({ silent: false });
+  });
+
+  // Das vollständige Protokoll erst holen, wenn jemand danach fragt.
+  card.querySelector('details[data-section="changelog-all"]')?.addEventListener(
+    'toggle',
+    async (event) => {
+      if (!event.target.open) return;
+      const target = card.querySelector('#changelog-all');
+      if (!target || target.dataset.loaded) return;
+      const result = await guard(() => api('/system/changelog'));
+      if (!result) return;
+      target.dataset.loaded = 'yes';
+      target.innerHTML =
+        result.entries.map(changelogEntry).join('') ||
+        '<p class="muted small">Kein Änderungsprotokoll gefunden.</p>';
+    },
+  );
+}
+
 function updateItem(entry) {
   const info = entry.updateInfo;
   const badge = !entry.supported
@@ -2218,25 +2663,78 @@ function deviceUpdateItem(entry) {
   </div>`;
 }
 
+/**
+ * Eine Integration in den Einstellungen.
+ *
+ * Unter dem Eintrag hängen zwei Dinge, die man selten braucht und dann sehr:
+ * das erneute Verbinden (neue Zugangsdaten, neuer Knopfdruck an der Bridge)
+ * und die Diagnose – die Antwort auf „wo ist mein Rollladen?“.
+ */
 function integrationItem(integration) {
-  return `<div class="item">
-    <div>
-      <div class="title">${esc(integration.name)}
-        ${
-          integration.status === 'linked'
-            ? '<span class="badge ok">verbunden</span>'
-            : `<span class="badge error">${esc(integration.status)}</span>`
-        }
+  const id = esc(integration.id);
+  return `<div class="item-block">
+    <div class="item">
+      <div>
+        <div class="title">${esc(integration.name)}
+          ${
+            integration.status === 'linked'
+              ? '<span class="badge ok">verbunden</span>'
+              : `<span class="badge error">${esc(integration.status)}</span>`
+          }
+        </div>
+        <div class="sub">${esc(VENDOR_LABEL[integration.type] ?? integration.type)} ·
+          ${esc(integration.config.host)} · ${esc(plural(integration.deviceCount, 'Gerät', 'Geräte'))}</div>
+        ${integration.lastError ? `<div class="sub">${esc(integration.lastError)}</div>` : ''}
       </div>
-      <div class="sub">${esc(VENDOR_LABEL[integration.type] ?? integration.type)} ·
-        ${esc(integration.config.host)} · ${esc(plural(integration.deviceCount, "Gerät", "Geräte"))}</div>
-      ${integration.lastError ? `<div class="sub">${esc(integration.lastError)}</div>` : ''}
+      <div class="row tight">
+        <button class="small" data-sync="${id}">Synchronisieren</button>
+        <button class="small" data-test="${id}">Testen</button>
+        <button class="small danger" data-remove-integration="${id}">Entfernen</button>
+      </div>
     </div>
-    <div class="row tight">
-      <button class="small" data-sync="${esc(integration.id)}">Synchronisieren</button>
-      <button class="small" data-test="${esc(integration.id)}">Testen</button>
-      <button class="small danger" data-remove-integration="${esc(integration.id)}">Entfernen</button>
-    </div>
+
+    <details data-section="integration-${id}" class="sub-details">
+      <summary>Erneut verbinden und nachsehen, was fehlt</summary>
+
+      <p class="muted small">
+        ${
+          integration.type === 'hue'
+            ? 'Wenn die Bridge den Hub vergessen hat: den runden Knopf drücken und hier ' +
+              'innerhalb von 30 Sekunden „Erneut verbinden“ wählen. Geräte, Räume, Szenen ' +
+              'und Automationen bleiben erhalten.'
+            : 'Passwort geändert oder das Gerät hat eine neue Adresse? Hier eintragen. ' +
+              'Geräte, Räume, Szenen und Automationen bleiben erhalten.'
+        }
+      </p>
+      <form class="form" data-relink="${id}">
+        <div class="field-row">
+          <label>Adresse
+            <input name="host" value="${esc(integration.config.host)}" maxlength="255" />
+          </label>
+          ${
+            integration.type === 'hue'
+              ? ''
+              : `<label>Benutzername
+                   <input name="username" maxlength="64" autocomplete="off"
+                          placeholder="${integration.type === 'shelly' ? 'admin' : 'Admin'}" />
+                 </label>
+                 <label>Passwort
+                   <input name="password" type="password" maxlength="128" autocomplete="off"
+                          placeholder="unverändert lassen: leer" />
+                 </label>`
+          }
+        </div>
+        <button type="submit" class="primary small">Erneut verbinden</button>
+      </form>
+
+      <h3>Wo ist mein Gerät?</h3>
+      <p class="muted small">
+        Alles, was der Hub bei dieser Verbindung gesehen hat – auch das, was er
+        übersprungen hat, und warum.
+      </p>
+      <button class="small" data-diagnose="${id}">Nachsehen</button>
+      <div class="list" data-diagnostics="${id}"></div>
+    </details>
   </div>`;
 }
 
@@ -2383,6 +2881,48 @@ function wireSettings(panel) {
     });
   });
 
+  wireBackup(panel);
+
+  panel.querySelectorAll('[data-relink]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      // Leere Felder heißen „lass es, wie es ist“ – ein leeres Passwort wäre
+      // sonst eine stille Löschung der hinterlegten Zugangsdaten.
+      const body = {};
+      for (const key of ['host', 'username', 'password']) {
+        const value = String(data.get(key) ?? '').trim();
+        if (value) body[key] = value;
+      }
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      const result = await guard(() =>
+        api(`/integrations/${form.dataset.relink}/relink`, { method: 'POST', body }),
+      );
+      button.disabled = false;
+      if (!result) return;
+      toast('Verbindung steht wieder.', {
+        kind: 'success',
+        hint: `${result.sync.added} neu, ${result.sync.updated} aktualisiert.`,
+      });
+      await loadDashboardData();
+      void renderSettings();
+    });
+  });
+
+  panel.querySelectorAll('[data-diagnose]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.diagnose;
+      const target = panel.querySelector(`[data-diagnostics="${id}"]`);
+      button.disabled = true;
+      const report = await guard(() => api(`/integrations/${id}/diagnostics`));
+      button.disabled = false;
+      if (!report || !target) return;
+      target.innerHTML = diagnosticsReport(report);
+      wireCapabilityFix(target);
+    });
+  });
+
   panel.querySelectorAll('[data-remove-integration]').forEach((button) => {
     button.addEventListener('click', async () => {
       if (!confirm('Integration und alle zugehörigen Geräte entfernen?')) return;
@@ -2410,10 +2950,6 @@ function wireSettings(panel) {
       await loadDashboardData();
       void renderSettings();
     });
-  });
-
-  panel.querySelector('#btn-reload-ui')?.addEventListener('click', () => {
-    void applyUpdate({ silent: false });
   });
 
   panel.querySelector('#form-token')?.addEventListener('submit', async (event) => {

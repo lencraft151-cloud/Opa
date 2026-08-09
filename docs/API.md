@@ -112,11 +112,77 @@ Zwischenspeicher und lädt sich neu. Gleicher Stand ⇒ gleiche Kennung, jede
 Änderung ⇒ neue Kennung. Der Wert wird 15 Sekunden lang zwischengespeichert.
 
 ```json
-{ "name": "Smart-Home-Hub", "version": "1.0.0", "build": "9617df2505a1",
+{ "name": "Smart-Home-Hub", "version": "1.3.0", "build": "9617df2505a1",
   "node": "v22.22.0", "hasHousehold": true, "setupCompleted": true,
   "authRequired": true,
   "adapters": [ { "type": "homematic", "displayName": "Homematic",
                   "supportsPush": false } ] }
+```
+
+### `GET /system/version`
+Fassung des **Hubs selbst** – nicht zu verwechseln mit der Firmware der Geräte
+unter `/updates`.
+
+```json
+{ "currentVersion": "1.3.0", "latestVersion": "1.3.0", "updateAvailable": false,
+  "pending": [], "current": { "version": "1.3.0", "date": "2026-08-08",
+  "body": "**FRITZ!Box (experimentell).** …" },
+  "checkedAt": null, "canUpdate": false,
+  "reason": "In der Arbeitskopie liegen ungespeicherte Änderungen. …" }
+```
+
+`pending` sind alle Abschnitte zwischen der laufenden und der neuesten Fassung –
+was eine Aktualisierung brächte, *bevor* man sie auslöst. `canUpdate` sagt, ob
+der Hub sich hier überhaupt selbst aktualisieren kann; `reason` sagt, warum
+nicht.
+
+### `GET /system/changelog`
+Das vollständige Änderungsprotokoll, neueste Fassung zuerst:
+`{ "entries": [ { "version", "date", "body" } ] }`. `body` ist Markdown.
+
+### `POST /system/version/check`
+Fragt nach der neuesten Fassung und liefert dieselbe Struktur wie
+`GET /system/version`. Nur Administratoren.
+
+Ohne gesetztes `HUB_UPDATE_CHECK_URL` fragt der Hub **niemanden**; der Aufruf
+setzt dann nur `checkedAt`. Ein Haushalts-Hub telefoniert nicht ungefragt nach
+Hause.
+
+### `POST /system/version/install`
+Führt `git pull --ff-only`, `npm install --omit=dev` und `npm run build` aus.
+Nur Administratoren; nur aus einer sauberen Git-Arbeitskopie, sonst `400`.
+
+Antwort `202`: `{ "log": ["$ git pull --ff-only", "…"], "restartRequired": true }`.
+Den Neustart des Dienstes übernimmt der Hub **nicht** – das ist Sache von
+systemd, Docker oder pm2.
+
+### `GET /system/backup`
+Lädt die Konfiguration als JSON-Datei herunter (`Content-Disposition:
+attachment`). Nur Administratoren.
+
+Enthalten: Haushalt samt Einstellungen, Räume, Geräte (Namen, Raumzuordnung,
+Richtigstellungen), Automationen, Szenen und die Integrationen mit Typ und
+Adresse.
+
+**Nicht** enthalten: Zugangsdaten zu Bridges, Passwörter, Sitzungen,
+Zugriffstoken. Die Datei darf deshalb auf einem USB-Stick liegen. Pro
+Integration merkt sich `hadSecrets` nur, *dass* es Zugangsdaten gab.
+
+### `POST /system/restore`
+Nimmt eine solche Datei als Body und ersetzt Haushalt, Räume, Geräte,
+Automationen und Szenen vollständig. Nur Administratoren.
+
+Benutzer, Sitzungen und Zugriffstoken bleiben unangetastet – wer die
+Wiederherstellung anstößt, soll danach nicht ausgesperrt sein. Der
+wiederhergestellte Haushalt übernimmt dafür die ID des laufenden.
+
+Zugangsdaten bestehender Verbindungen bleiben erhalten, wenn Typ und Adresse
+übereinstimmen. Alles andere steht in `needRelink` und braucht einmal
+`POST /integrations/:id/relink`.
+
+```json
+{ "rooms": 4, "devices": 23, "rules": 6, "scenes": 3, "integrations": 3,
+  "needRelink": ["Hue Bridge Flur"] }
 ```
 
 ### `GET /events`
@@ -241,6 +307,33 @@ link_button_required`. Antwort `201` mit Integration, übernommenen Geräten und
 | `POST` | `/integrations/:id/test` | Verbindung prüfen |
 | `DELETE` | `/integrations/:id` | Integration und deren Geräte entfernen |
 
+### `POST /integrations/:id/relink`
+Erneut verbinden: `{ host?, username?, password? }` – alle Felder optional,
+weggelassene bleiben, wie sie sind. Bei Hue vorher wieder den Knopf drücken.
+
+Die Integration **behält ihre ID**. Geräte, Räume, Szenen und Automationen
+bleiben damit erhalten; ein Löschen-und-neu-Anlegen würde sie alle verlieren.
+Antwort: `{ integration, sync }`.
+
+### `GET /integrations/:id/diagnostics`
+Beantwortet „wo ist mein Rollladen?“ mit einer Liste statt mit Schweigen.
+
+```json
+{ "integrationId": "int_…", "name": "Homematic", "status": "linked",
+  "deviceCount": 5,
+  "devices": [ { "id": "dev_…", "name": "Rollladen Küche",
+                 "externalId": "ABC123:3", "capabilities": ["cover"],
+                 "capabilityOverride": null, "reachable": true,
+                 "hidden": false } ],
+  "skipped": [ { "address": "ABC123:0", "channelType": "MAINTENANCE",
+                 "reason": "Kanaltyp führt keine steuerbaren Werte" } ],
+  "supportsDiagnostics": true }
+```
+
+`skipped` sind Kanäle, die der Hub gesehen und mit Begründung übersprungen hat.
+Nicht jeder Adapter führt eine solche Liste – dann ist `supportsDiagnostics`
+`false` und `skipped` leer.
+
 ---
 
 ## Räume
@@ -276,10 +369,29 @@ Filter: `roomId`, `unassigned=true`, `integrationId`, `capability`, `search`,
 | Methode | Pfad | Beschreibung |
 | --- | --- | --- |
 | `GET` | `/devices/:id` | Einzelnes Gerät |
-| `PATCH` | `/devices/:id` | `name`, `roomId`, `hidden` |
+| `PATCH` | `/devices/:id` | `name`, `roomId`, `hidden`, `capabilityOverride` |
 | `DELETE` | `/devices/:id` | Entfernen (kommt beim nächsten Sync wieder) |
 | `POST` | `/devices/:id/command` | Kommando ausführen |
 | `POST` | `/devices/command` | Kommando an mehrere Geräte |
+
+### Gerätetyp richtigstellen
+
+Manche Geräte melden nicht sauber, was sie sind – ein Rollladenaktor gibt sich
+als Schalter aus. `capabilityOverride` setzt die Angabe des Menschen über die
+des Geräts:
+
+```json
+PATCH /devices/dev_… { "capabilityOverride": ["cover", "sensor.power"] }
+```
+
+`null` nimmt die Korrektur zurück. Gespeichert bleiben beide: `capabilities` ist,
+was das Gerät meldet, `capabilityOverride`, was der Mensch sagt – ein
+Firmware-Update kann so neue Fähigkeiten mitbringen, ohne die Korrektur zu
+überschreiben.
+
+Nach außen gilt ausnahmslos die Korrektur: Sie greift am Übergang aus der
+Datenbank, wirkt also in der Geräteliste, in Automationen, in Szenen und bei der
+Prüfung, ob ein Kommando erlaubt ist.
 
 ### Kommandos
 

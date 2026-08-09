@@ -30,7 +30,23 @@ export function createApp(container: Container): express.Express {
   const app = express();
 
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '256kb' }));
+
+  /*
+   * Zwei Größenbeschränkungen statt einer.
+   *
+   * Für alles Normale reichen 256 kB mit weitem Abstand; eine großzügigere
+   * Grenze wäre nur eine Einladung, den Hub mit einer einzigen Anfrage
+   * lahmzulegen. Eine zurückgespielte Sicherung ist die eine Ausnahme: Ein
+   * Haushalt mit ein paar hundert Geräten und deren Zuständen kommt schnell
+   * über ein Megabyte.
+   */
+  const RESTORE_PATH = '/api/system/restore';
+  const normalBody = express.json({ limit: '256kb' });
+  const restoreBody = express.json({ limit: '16mb' });
+  app.use((req, res, next) => {
+    if (req.path === RESTORE_PATH) return restoreBody(req, res, next);
+    return normalBody(req, res, next);
+  });
 
   app.use((req, res, next) => {
     const startedAt = Date.now();

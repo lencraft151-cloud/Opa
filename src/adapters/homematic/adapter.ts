@@ -14,6 +14,7 @@ import { disambiguate, HomematicClient, type HomematicChannel } from './client.j
 import {
   capabilitiesFor,
   classifyChannel,
+  inferKind,
   pickPrimaryChannels,
   stateFromValues,
   targetTemperatureKey,
@@ -28,6 +29,7 @@ import type {
   IntegrationContext,
   LinkRequest,
   LinkResult,
+  SkippedEntry,
 } from '../types.js';
 
 const log = createLogger('homematic:adapter');
@@ -56,6 +58,8 @@ export class HomematicAdapter implements IntegrationAdapter {
     string,
     { entries: Map<string, ChannelEntry>; expiresAt: number }
   >();
+  /** Was beim letzten Einlesen liegen blieb – für die Diagnose. */
+  private readonly skippedChannels = new Map<string, SkippedEntry[]>();
 
   async discover(options: DiscoverOptions): Promise<DiscoveredIntegration[]> {
     const hosts = new Set<string>();
@@ -305,6 +309,12 @@ export class HomematicAdapter implements IntegrationAdapter {
 
   // -------------------------------------------------------------------------
 
+  /** Was beim Einlesen übersprungen wurde – beantwortet „wo ist mein Gerät?". */
+  diagnostics(ctx: IntegrationContext): SkippedEntry[] {
+    const key = (ctx as HomematicContext).integration?.id ?? (ctx as HomematicContext).config.host;
+    return this.skippedChannels.get(key) ?? [];
+  }
+
   private clientFor(ctx: HomematicContext): HomematicClient {
     const key = ctx.integration?.id ?? ctx.config.host;
     const existing = this.clients.get(key);
@@ -339,21 +349,47 @@ export class HomematicAdapter implements IntegrationAdapter {
     const channels = await client.listChannels();
     const found: ChannelEntry[] = [];
 
+    const skipped: SkippedEntry[] = [];
+
     await mapWithConcurrency(channels, 4, async (channel) => {
-      const kind = classifyChannel(channel);
-      if (!kind) return;
+      let values: Record<string, unknown> = {};
       try {
-        const values = await client.getParamset(channel.interfaceName, channel.address);
-        // Ein Kanal ohne verwertbare Fähigkeit wäre eine leere Karte in der UI.
-        if (capabilitiesFor(kind, values).length === 0) return;
-        found.push({ channel, kind, values });
+        values = await client.getParamset(channel.interfaceName, channel.address);
       } catch (err) {
-        log.debug('Kanal übersprungen', {
+        skipped.push({
           address: channel.address,
-          error: errorMessage(err),
+          channelType: channel.channelType,
+          reason: `nicht lesbar: ${errorMessage(err)}`,
         });
+        return;
       }
+
+      /*
+       * Erst der Kanaltyp, dann die Werte. Der zweite Anlauf ist der
+       * wichtige: Homematic ist seit 2010 gewachsen, und ein Kanaltyp, den
+       * wir nicht kennen, hieß bisher „Gerät verschwindet wortlos".
+       */
+      const kind = classifyChannel(channel) ?? inferKind(values, channel.deviceType, channel.channelType);
+      if (!kind) {
+        skipped.push({
+          address: channel.address,
+          channelType: channel.channelType,
+          reason: 'keine verwertbaren Werte',
+        });
+        return;
+      }
+      if (capabilitiesFor(kind, values).length === 0) {
+        skipped.push({
+          address: channel.address,
+          channelType: channel.channelType,
+          reason: 'Kanal ohne bedienbare Funktion',
+        });
+        return;
+      }
+      found.push({ channel, kind, values });
     });
+
+    this.skippedChannels.set(key, skipped);
 
     /*
      * Aktoren melden bei HmIP mehrere gleichwertige Kanäle – ein Rollladen

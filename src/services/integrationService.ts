@@ -158,6 +158,49 @@ export class IntegrationService {
     return { integration: this.get(integration.id), sync };
   }
 
+  /**
+   * Erneut verbinden – mit neuen Zugangsdaten oder nach einem Knopfdruck an
+   * der Bridge.
+   *
+   * Der entscheidende Unterschied zum Entfernen und Neuanlegen: Die
+   * Integration behält ihre ID. Damit bleiben Geräte, Raumzuordnungen,
+   * Szenen und Automationen erhalten – sonst müsste man nach einem
+   * Passwortwechsel die halbe Wohnung neu einrichten.
+   */
+  async relink(
+    id: string,
+    input: { host?: string; username?: string; password?: string },
+  ): Promise<{ integration: Integration; sync: SyncResult }> {
+    const integration = this.get(id);
+    const adapter = this.registry.get(integration.type);
+    const host = input.host?.trim() || (integration.config as { host?: string }).host;
+    if (!host) throw badRequest('Es wurde keine Adresse angegeben');
+
+    const linkRequest: LinkRequest = { host, name: integration.name };
+    if (input.username !== undefined) linkRequest.username = input.username;
+    if (input.password !== undefined) linkRequest.password = input.password;
+
+    const result = await adapter.link(linkRequest);
+
+    const updated = await this.repos.integrations.patch(
+      id,
+      {
+        // Der Anzeigename bleibt: Er wurde vielleicht von Hand vergeben.
+        config: result.config,
+        secretsEnc: result.secrets ? encryptJson(result.secrets, this.config.secretKey) : null,
+        status: 'linked',
+        lastError: null,
+        lastSeenAt: nowIso(),
+      },
+      'Integration',
+    );
+    events.emit('integration.updated', { integration: updated });
+    log.info('Integration erneut verbunden', { name: updated.name, host });
+
+    const sync = await this.sync(id, false);
+    return { integration: this.get(id), sync };
+  }
+
   async rename(id: string, name: string): Promise<Integration> {
     const trimmed = name.trim();
     if (!trimmed) throw badRequest('Der Name darf nicht leer sein');
@@ -264,6 +307,7 @@ export class IntegrationService {
           model: adapterDevice.model ?? null,
           firmware: adapterDevice.firmware ?? null,
           capabilities: adapterDevice.capabilities,
+          capabilityOverride: null,
           state: { ...adapterDevice.state, updatedAt: nowIso() },
           reachable: adapterDevice.reachable,
           hidden: false,
@@ -278,6 +322,11 @@ export class IntegrationService {
         continue;
       }
 
+      /*
+       * Die vom Gerät gemeldeten Fähigkeiten werden immer aktualisiert – ein
+       * Firmware-Update kann neue bringen. Eine Richtigstellung des Nutzers
+       * steht daneben und überlebt jeden Abgleich (siehe `effectiveDevice`).
+       */
       const patch: Partial<Device> = {
         capabilities: adapterDevice.capabilities,
         state: { ...current.state, ...adapterDevice.state, updatedAt: nowIso() },

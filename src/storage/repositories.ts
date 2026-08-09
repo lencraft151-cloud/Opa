@@ -135,27 +135,62 @@ export class IntegrationRepository extends BaseRepository<Integration> {
   }
 }
 
+/**
+ * Hat der Nutzer die Fähigkeiten eines Geräts richtiggestellt, gilt seine
+ * Angabe – überall. Deshalb geschieht das hier, am Übergang aus der
+ * Datenbank, und nicht in jedem Aufrufer einzeln.
+ *
+ * Gespeichert bleiben beide: `capabilities` ist, was das Gerät meldet,
+ * `capabilityOverride`, was der Mensch sagt. Ein Firmware-Update kann so
+ * neue Fähigkeiten mitbringen, ohne die Richtigstellung zu überschreiben.
+ */
+export function effectiveDevice(device: Device): Device {
+  if (!device.capabilityOverride || device.capabilityOverride.length === 0) return device;
+  return { ...device, capabilities: [...device.capabilityOverride] };
+}
+
 export class DeviceRepository extends BaseRepository<Device> {
   constructor(db: Database) {
     super(db, 'devices');
   }
 
+  override list(): Device[] {
+    return this.all().map(effectiveDevice);
+  }
+
+  override find(id: string): Device | undefined {
+    const device = this.all().find((entry) => entry.id === id);
+    return device ? effectiveDevice(device) : undefined;
+  }
+
+  /** Der ungeschönte Datensatz – für die Bearbeitung der Richtigstellung. */
+  raw(id: string): Device | undefined {
+    return this.all().find((entry) => entry.id === id);
+  }
+
   listByHousehold(householdId: string): Device[] {
-    return this.all().filter((device) => device.householdId === householdId);
+    return this.all()
+      .filter((device) => device.householdId === householdId)
+      .map(effectiveDevice);
   }
 
   listByIntegration(integrationId: string): Device[] {
-    return this.all().filter((device) => device.integrationId === integrationId);
+    return this.all()
+      .filter((device) => device.integrationId === integrationId)
+      .map(effectiveDevice);
   }
 
   listByRoom(roomId: string): Device[] {
-    return this.all().filter((device) => device.roomId === roomId);
+    return this.all()
+      .filter((device) => device.roomId === roomId)
+      .map(effectiveDevice);
   }
 
   findByExternalId(integrationId: string, externalId: string): Device | undefined {
-    return this.all().find(
-      (device) => device.integrationId === integrationId && device.externalId === externalId,
+    const device = this.all().find(
+      (entry) => entry.integrationId === integrationId && entry.externalId === externalId,
     );
+    return device ? effectiveDevice(device) : undefined;
   }
 
   /** Schreibt Zustandsänderungen gepuffert (hochfrequent durch Polling). */
@@ -167,7 +202,7 @@ export class DeviceRepository extends BaseRepository<Device> {
       device.reachable = reachable;
       device.lastSeenAt = reachable ? nowIso() : device.lastSeenAt;
       device.updatedAt = nowIso();
-      return device;
+      return effectiveDevice(device);
     });
   }
 

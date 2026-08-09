@@ -160,6 +160,9 @@ function migrate(data: DatabaseShape): DatabaseShape {
   data.sessions ??= [];
   data.scenes ??= [];
 
+  // Die Richtigstellung der Fähigkeiten kam später dazu.
+  for (const device of data.devices) device.capabilityOverride ??= null;
+
   data.version = SCHEMA_VERSION;
   return data;
 }

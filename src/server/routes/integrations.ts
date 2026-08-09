@@ -99,6 +99,71 @@ export function integrationRoutes(container: Container): Router {
     }),
   );
 
+  /**
+   * Erneut verbinden: neue Zugangsdaten, oder bei Hue nach einem erneuten
+   * Knopfdruck. Geräte, Räume und Automationen bleiben erhalten – die
+   * Integration behält ihre ID.
+   */
+  router.post(
+    '/integrations/:id/relink',
+    asyncHandler(async (req, res) => {
+      const input = parseBody(
+        z.object({
+          host: z.string().min(3).max(255).optional(),
+          username: z.string().max(64).optional(),
+          password: z.string().max(128).optional(),
+        }),
+        req,
+      );
+      const result = await container.integrations.relink(req.params.id as string, input);
+      res.json({
+        integration: IntegrationRepository.toPublic(result.integration),
+        sync: result.sync,
+      });
+    }),
+  );
+
+  /**
+   * Was beim letzten Einlesen liegen blieb.
+   *
+   * Beantwortet die Frage „wo ist mein Rollladen?" mit einer Liste statt mit
+   * Schweigen: Welche Kanäle der Hub gesehen und warum er sie übersprungen
+   * hat. Nicht jeder Adapter kann das – dann bleibt die Liste leer.
+   */
+  router.get('/integrations/:id/diagnostics', (req, res) => {
+    const integration = container.integrations.get(req.params.id as string);
+    const adapter = container.registry.get(integration.type);
+    const devices = container.devices.list(integration.householdId, {
+      integrationId: integration.id,
+      includeHidden: true,
+    });
+
+    const skipped = adapter.diagnostics
+      ? adapter.diagnostics(container.integrations.contextFor(integration))
+      : [];
+
+    res.json({
+      integrationId: integration.id,
+      name: integration.name,
+      type: integration.type,
+      status: integration.status,
+      lastError: integration.lastError,
+      lastSeenAt: integration.lastSeenAt,
+      deviceCount: devices.length,
+      devices: devices.map((device) => ({
+        id: device.id,
+        name: device.name,
+        externalId: device.externalId,
+        capabilities: device.capabilities,
+        capabilityOverride: device.capabilityOverride,
+        reachable: device.reachable,
+        hidden: device.hidden,
+      })),
+      skipped,
+      supportsDiagnostics: typeof adapter.diagnostics === 'function',
+    });
+  });
+
   router.post(
     '/integrations/:id/test',
     asyncHandler(async (req, res) => {

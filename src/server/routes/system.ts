@@ -2,11 +2,12 @@ import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
 import { events } from '../../core/events.js';
 import type { Container } from '../../container.js';
+import { VERSION } from '../../version.js';
 import { assetVersion } from '../assetVersion.js';
+import { requireAdminUnlessOpen } from '../auth.js';
 import { asyncHandler } from '../http.js';
 
 const START_TIME = Date.now();
-const VERSION = '1.0.0';
 
 /** `public/` liegt neben `src/` bzw. `dist/` – siehe `server/app.ts`. */
 const PUBLIC_DIR = fileURLToPath(new URL('../../../public', import.meta.url));
@@ -50,6 +51,98 @@ export function systemRoutes(container: Container): Router {
           cloudDiscovery: container.config.allowCloudDiscovery,
         },
       });
+    }),
+  );
+
+  // -------------------------------------------------------------------------
+  // Die Software des Hubs selbst
+  // -------------------------------------------------------------------------
+
+  /**
+   * Welche Fassung läuft, was ist neu, liegt etwas Neueres bereit?
+   *
+   * Bewusst getrennt von `/updates`: dort geht es um die Firmware der Geräte,
+   * hier um das Programm, das sie steuert.
+   */
+  router.get(
+    '/system/version',
+    asyncHandler(async (_req, res) => {
+      res.json(await container.hubUpdate.info());
+    }),
+  );
+
+  /** Das vollständige Änderungsprotokoll – alle Fassungen, neueste zuerst. */
+  router.get(
+    '/system/changelog',
+    asyncHandler(async (_req, res) => {
+      res.json({ entries: await container.hubUpdate.changelog() });
+    }),
+  );
+
+  /** Fragt nach, ob es eine neuere Fassung gibt. */
+  router.post(
+    '/system/version/check',
+    asyncHandler(async (req, res) => {
+      requireAdminUnlessOpen(req, container.config.authDisabled);
+      res.json(await container.hubUpdate.check());
+    }),
+  );
+
+  /**
+   * Installiert die neuere Fassung. Der Neustart des Dienstes bleibt Sache
+   * des Betriebssystems – die Antwort sagt das auch.
+   */
+  router.post(
+    '/system/version/install',
+    asyncHandler(async (req, res) => {
+      requireAdminUnlessOpen(req, container.config.authDisabled);
+      const result = await container.hubUpdate.install(container.households.current()?.id ?? '');
+      res.status(202).json({
+        ...result,
+        message:
+          'Die neue Fassung liegt bereit. Sie läuft, sobald der Dienst neu gestartet wurde.',
+      });
+    }),
+  );
+
+  // -------------------------------------------------------------------------
+  // Sicherung und Wiederherstellung
+  // -------------------------------------------------------------------------
+
+  /**
+   * Lädt die Konfiguration als Datei herunter.
+   *
+   * Ohne Zugangsdaten – siehe `backupService.ts`. Der Dateiname trägt das
+   * Datum, damit sich mehrere Sicherungen im Download-Ordner nicht gegenseitig
+   * überschreiben.
+   */
+  router.get('/system/backup', (req, res) => {
+    requireAdminUnlessOpen(req, container.config.authDisabled);
+    const household = container.households.require();
+    const backup = container.backup.export(household.id);
+    const stamp = backup.createdAt.slice(0, 10);
+
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.setHeader(
+      'content-disposition',
+      `attachment; filename="smarthome-sicherung-${stamp}.json"`,
+    );
+    res.send(JSON.stringify(backup, null, 2));
+  });
+
+  /**
+   * Spielt eine Sicherung zurück.
+   *
+   * Danach laufen die Hintergrunddienste auf einem anderen Datenstand –
+   * Polling und Automationen werden deshalb neu aufgesetzt.
+   */
+  router.post(
+    '/system/restore',
+    asyncHandler(async (req, res) => {
+      requireAdminUnlessOpen(req, container.config.authDisabled);
+      const result = await container.backup.restore(req.body);
+      await container.startBackgroundServices();
+      res.json(result);
     }),
   );
 

@@ -8,9 +8,10 @@ import type {
   DeviceState,
   RuleTarget,
 } from '../core/types.js';
+import { CAPABILITIES } from '../core/types.js';
 import { nowIso } from '../util/id.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
-import type { Repositories } from '../storage/repositories.js';
+import { effectiveDevice, type Repositories } from '../storage/repositories.js';
 import type { IntegrationService } from './integrationService.js';
 import type { TelemetryService } from './telemetryService.js';
 
@@ -28,6 +29,11 @@ export interface DeviceUpdate {
   name?: string;
   roomId?: string | null;
   hidden?: boolean;
+  /**
+   * Richtiggestellte Fähigkeiten. `null` nimmt die Korrektur zurück und
+   * glaubt wieder dem Gerät.
+   */
+  capabilityOverride?: Capability[] | null;
 }
 
 export interface CommandResult {
@@ -95,7 +101,17 @@ export class DeviceService {
     }
     if (changes.hidden !== undefined) patch.hidden = changes.hidden;
 
-    const updated = await this.repos.devices.patch(id, patch, 'Gerät');
+    if (changes.capabilityOverride !== undefined) {
+      patch.capabilityOverride = normalizeOverride(changes.capabilityOverride, device);
+    }
+
+    /*
+     * `patch` liefert den gespeicherten Datensatz zurück, in dem `capabilities`
+     * noch das ist, was das Gerät meldet. Nach außen zählt aber die
+     * Richtigstellung – sonst zeigte die Antwort auf genau die Änderung, die
+     * eben vorgenommen wurde, noch den alten Stand.
+     */
+    const updated = effectiveDevice(await this.repos.devices.patch(id, patch, 'Gerät'));
     events.emit('device.updated', { device: updated, changed: Object.keys(patch) });
     return updated;
   }
@@ -275,6 +291,33 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
   'sensor.battery': 'Batterieanzeige',
   button: 'Taster',
 };
+
+/**
+ * Prüft eine Richtigstellung.
+ *
+ * Der Hub hindert niemanden daran, einem Gerät eine Fähigkeit zuzusprechen,
+ * die es womöglich nicht hat – bei einem Rollladen, der sich als Dimmer
+ * meldet, ist genau das der Sinn der Sache. Eine leere Liste ist aber keine
+ * Angabe, sondern ein Versehen: Sie würde das Gerät unbedienbar machen.
+ */
+export function normalizeOverride(
+  override: Capability[] | null,
+  device: Device,
+): Capability[] | null {
+  if (override === null) return null;
+
+  const unique = [...new Set(override)].filter((capability) =>
+    CAPABILITIES.includes(capability),
+  );
+  if (unique.length === 0) {
+    throw badRequest(
+      'Ohne eine einzige Fähigkeit ließe sich das Gerät nicht mehr bedienen.',
+      undefined,
+      `Wähle mindestens eine aus – oder setze auf "wie gemeldet" zurück (${device.capabilities.join(', ') || 'keine'}).`,
+    );
+  }
+  return unique;
+}
 
 export function supports(device: Device, command: DeviceCommand): boolean {
   const required = REQUIRED_CAPABILITY[command.type];

@@ -325,6 +325,15 @@ export interface Device {
   model: string | null;
   firmware: string | null;
   capabilities: Capability[];
+  /**
+   * Vom Nutzer richtiggestellte Fähigkeiten.
+   *
+   * Der Hub erkennt Geräte anhand ihres Typs und, wenn der unbekannt ist,
+   * anhand ihrer Werte. Beides kann danebenliegen – bei einem Rollladen, der
+   * sich wie ein Dimmer meldet, etwa. Dann sagt der Nutzer, was es ist, und
+   * das steht hier. `null` heißt: dem Gerät glauben.
+   */
+  capabilityOverride: Capability[] | null;
   state: DeviceState;
   reachable: boolean;
   /** Vom Nutzer ausgeblendete Geräte tauchen im Dashboard nicht auf. */

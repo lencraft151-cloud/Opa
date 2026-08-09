@@ -35,6 +35,7 @@ function testConfig(dataDir: string): AppConfig {
     telemetryMinIntervalSeconds: 0,
     allowCloudDiscovery: false,
     discoveryTimeoutMs: 500,
+    hubUpdateCheckUrl: null,
     logLevel: 'silent',
   };
 }
