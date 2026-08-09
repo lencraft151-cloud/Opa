@@ -135,8 +135,7 @@ const RENDERERS = {
   rooms: renderRooms,
   devices: renderDevices,
   scenes: renderScenes,
-  energy: renderEnergy,
-  history: renderHistory,
+  insights: renderInsights,
   automations: renderAutomations,
   settings: renderSettings,
 };
@@ -150,7 +149,7 @@ const RENDERERS = {
  * Zeit, dann war die Eingabe weg. Diese beiden Ansichten zeigen keine
  * Messwerte; sie werden nur noch nach dem Speichern neu gezeichnet.
  */
-const DEVICE_DEPENDENT = new Set(['overview', 'rooms', 'devices', 'scenes', 'energy', 'history']);
+const DEVICE_DEPENDENT = new Set(['overview', 'rooms', 'devices', 'scenes', 'insights']);
 
 let current = 'overview';
 
@@ -1000,6 +999,21 @@ const PERIODS = [
   ['year', '12 Monate'],
 ];
 
+/**
+ * Auswertung: Stromverbrauch und Messwertverlauf auf einem Bildschirm.
+ *
+ * Die beiden Teile behalten ihre eigenen Bereiche – und damit ihre eigenen
+ * Kennungen –, damit ein neuer Messwert nur den betroffenen Teil neu zeichnet
+ * und nicht die halb ausgefüllte Auswahl darüber wegreißt.
+ */
+async function renderInsights() {
+  const panel = $('#panel-insights');
+  if (!panel.querySelector('#panel-energy')) {
+    panel.innerHTML = '<div id="panel-energy"></div><div id="panel-history"></div>';
+  }
+  await Promise.all([renderEnergy(), renderHistory()]);
+}
+
 async function renderEnergy() {
   const panel = $('#panel-energy');
   if (!store.energy || store.energy.period.key !== store.energyPeriod) {
@@ -1318,11 +1332,13 @@ async function renderAutomations() {
           <div data-trigger-pane="interval" hidden>
             <div class="row tight">
               <label>Alle
-                <select name="everyMinutes">${INTERVAL_CHOICES.map(
-                  (choice) =>
-                    `<option value="${choice.minutes}" ${choice.minutes === 60 ? 'selected' : ''}>${esc(
+                <select name="everySeconds">${INTERVAL_CHOICES.map(
+                  (choice) => {
+                    const seconds = choice.seconds ?? choice.minutes * 60;
+                    return `<option value="${seconds}" ${seconds === 3600 ? 'selected' : ''}>${esc(
                       choice.label,
-                    )}</option>`,
+                    )}</option>`;
+                  },
                 ).join('')}</select>
               </label>
               <label>Frühestens ab <input type="time" name="intervalFrom" value="08:00" /></label>
@@ -1346,7 +1362,19 @@ async function renderAutomations() {
             <input name="cooldownMinutes" type="number" min="0" max="1440" value="15" class="narrow"
                    title="Sperrzeit in Minuten" />
           </div>
-          <p class="field-help">Die letzte Zahl ist die Sperrzeit: So lange passiert danach nichts erneut.</p>
+          <label class="check">
+            <input type="checkbox" name="autoUndo" />
+            <span>… und danach von selbst wieder zurück</span>
+          </label>
+          <label>Nach wie vielen Sekunden zurück?
+            <input name="forSeconds" type="number" min="1" max="3600" value="10" class="narrow" />
+          </label>
+          <p class="field-help">
+            Damit lassen sich Regeln bauen, die von selbst wieder aufhören – „alle
+            20 Sekunden das Licht für 10 Sekunden an". Die Zahl davor ist die Sperrzeit:
+            So lange passiert danach nichts erneut. Bei einer Wiederholung im
+            Sekundentakt gehört dort eine 0 hin.
+          </p>
         </fieldset>
 
         <button type="submit" class="primary" ${switchable.length ? '' : 'disabled'}>
@@ -1388,6 +1416,10 @@ async function renderAutomations() {
           type: 'command',
           target: { deviceIds: [form.get('actionDevice')] },
           command: { type: 'setPower', on: form.get('actionCommand') === 'on' },
+          // Nur mitschicken, wenn die Rücknahme auch gewollt ist.
+          ...(form.get('autoUndo') === 'on'
+            ? { forSeconds: Number(form.get('forSeconds') || 10) }
+            : {}),
         },
       ],
       cooldownSeconds: Number(form.get('cooldownMinutes') || 0) * 60,
@@ -1426,7 +1458,17 @@ async function renderAutomations() {
  * Kürzer als fünf Minuten lässt der Hub nicht zu – häufiger wäre nur Last
  * ohne Nutzen, und die Messwerte selbst kommen auch nicht schneller.
  */
+/*
+ * Die Auswahl deckt zwei Größenordnungen ab: Sekunden für kurze Spielereien
+ * („alle 20 Sekunden kurz an") und Minuten bis Stunden für das Übliche
+ * („alle zwei Stunden lüften"). Intern zählt der Hub in Sekunden; Minuten
+ * sind nur die bequemere Schreibweise.
+ */
 const INTERVAL_CHOICES = [
+  { seconds: 20, label: '20 Sekunden' },
+  { seconds: 30, label: '30 Sekunden' },
+  { minutes: 1, label: '1 Minute' },
+  { minutes: 5, label: '5 Minuten' },
   { minutes: 15, label: '15 Minuten' },
   { minutes: 30, label: '30 Minuten' },
   { minutes: 60, label: 'Stunde' },
@@ -1474,7 +1516,7 @@ function buildTrigger(kind, form, element) {
   if (kind === 'interval') {
     const trigger = {
       type: 'interval',
-      everyMinutes: Number(form.get('everyMinutes')),
+      everySeconds: Number(form.get('everySeconds')),
       days: days('interval'),
     };
     // Ein halb ausgefülltes Zeitfenster weist der Hub ab – deshalb nur
@@ -1641,7 +1683,9 @@ export function describeTrigger(trigger, lookup = (id) => deviceById(id)?.name ?
     return `${lookup(trigger.deviceId)}: ${property} = ${trigger.equals ? 'ja' : 'nein'}`;
   }
   if (trigger.type === 'interval') {
-    const every = describeEvery(trigger.everyMinutes);
+    const every = describeEvery(
+      trigger.everySeconds !== undefined ? trigger.everySeconds / 60 : trigger.everyMinutes,
+    );
     const window = trigger.from && trigger.to ? ` zwischen ${trigger.from} und ${trigger.to} Uhr` : '';
     return `Alle ${every}${window}${describeDays(trigger.days)}`;
   }
@@ -1650,6 +1694,8 @@ export function describeTrigger(trigger, lookup = (id) => deviceById(id)?.name ?
 
 /** „90 Minuten“ ist schwerer zu lesen als „1,5 Stunden“ – aber nur knapp. */
 function describeEvery(minutes) {
+  // Unter einer Minute liest sich „0,33 Minuten" niemand gern.
+  if (minutes && minutes < 1) return `${Math.round(minutes * 60)} Sekunden`;
   if (!minutes || minutes < 60) return `${minutes} Minuten`;
   if (minutes === 60) return 'Stunde';
   if (minutes === 1440) return 'Tag';

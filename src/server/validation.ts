@@ -75,8 +75,13 @@ export const triggerSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('interval'),
-    // Unter fünf Minuten wäre der Sinn fraglich und die Last unnötig.
-    everyMinutes: z.number().int().min(5).max(1440),
+    /*
+     * Zwei Einheiten, weil sich beides ausdrücken lassen soll: „alle zwei
+     * Stunden lüften" und „alle 20 Sekunden kurz blinken". Unter fünf
+     * Sekunden käme der Hub mit Fragen und Schalten nicht hinterher.
+     */
+    everyMinutes: z.number().int().min(1).max(1440).optional(),
+    everySeconds: z.number().int().min(5).max(86_400).optional(),
     from: timeSchema.optional(),
     to: timeSchema.optional(),
     days: z.array(z.number().int().min(0).max(6)).optional(),
@@ -101,7 +106,14 @@ export const conditionSchema = z.discriminatedUnion('type', [
 ]);
 
 export const actionSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('command'), target: targetSchema, command: commandSchema }),
+  z.object({
+    type: z.literal('command'),
+    target: targetSchema,
+    command: commandSchema,
+    // Eine Stunde ist die Grenze: Länger gehört in eine eigene Regel mit
+    // Uhrzeit, sonst hängt der Hub stundenlang an einem Zeitgeber.
+    forSeconds: z.number().int().min(1).max(3600).optional(),
+  }),
   z.object({
     type: z.literal('webhook'),
     url: z.string().url(),

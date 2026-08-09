@@ -6,6 +6,7 @@ import type {
   ComparisonOperator,
   Device,
   Metric,
+  DeviceCommand,
   RuleAction,
   RuleCondition,
   RuleTrigger,
@@ -25,7 +26,16 @@ import type { HouseholdService } from './householdService.js';
 const log = createLogger('automations');
 
 /** Taktrate für Zeitpläne und Haltedauern (`forSeconds`). */
-const TICK_MS = 30_000;
+/*
+ * Takt der Regelprüfung.
+ *
+ * Fünf Sekunden statt der früheren dreißig: Ein Intervall von zwanzig
+ * Sekunden lässt sich mit einem Dreißig-Sekunden-Takt schlicht nicht
+ * einhalten. Die Prüfung selbst ist billig – sie sieht auf die Uhr und
+ * vergleicht Zahlen; teuer wird nur das Ausführen, und das passiert
+ * ohnehin nur, wenn eine Regel greift.
+ */
+const TICK_MS = 5_000;
 
 interface RuleRuntimeState {
   /** Seit wann ist die Trigger-Bedingung ununterbrochen erfüllt? */
@@ -59,6 +69,8 @@ export class AutomationService {
   private readonly runtime = new Map<string, RuleRuntimeState>();
   private timer: NodeJS.Timeout | null = null;
   private unsubscribe: (() => void) | null = null;
+  /** Laufende Rücknahmen aus `forSeconds` – siehe `scheduleUndo`. */
+  private readonly pendingUndos = new Set<NodeJS.Timeout>();
   private householdId: string | null = null;
 
   constructor(
@@ -200,6 +212,9 @@ export class AutomationService {
     this.timer = null;
     this.unsubscribe?.();
     this.unsubscribe = null;
+    // Sonst schaltete nach dem Herunterfahren noch eine Rücknahme.
+    for (const undo of this.pendingUndos) clearTimeout(undo);
+    this.pendingUndos.clear();
   }
 
   /** Führt eine Regel unabhängig vom Trigger aus (Test-Knopf in der UI). */
@@ -311,6 +326,40 @@ export class AutomationService {
     await this.executeActions(rule);
   }
 
+  /**
+   * Nimmt ein Kommando nach der eingestellten Zeit wieder zurück.
+   *
+   * Das Gegenteil wird aus dem Kommando selbst abgeleitet – nur dort, wo es
+   * eindeutig ist: Einschalten wird Ausschalten, Auffahren wird Zufahren.
+   * Für eine Helligkeit gibt es kein Gegenteil, ohne den vorherigen Wert zu
+   * kennen; solche Kommandos laufen ohne Rücknahme, und die Oberfläche bietet
+   * die Dauer dort gar nicht erst an.
+   *
+   * Die Zeitgeber liegen in einer Liste, damit `stop()` sie mitnimmt – sonst
+   * schaltete nach dem Herunterfahren noch etwas.
+   */
+  private scheduleUndo(
+    rule: AutomationRule,
+    action: Extract<RuleAction, { type: 'command' }>,
+  ): void {
+    const undo = undoCommand(action.command);
+    if (!undo) return;
+
+    const timer = setTimeout(
+      () => {
+        this.pendingUndos.delete(timer);
+        void this.devices
+          .executeMany(rule.householdId, action.target, undo)
+          .catch((err) =>
+            log.warn('Rücknahme fehlgeschlagen', { rule: rule.name, error: errorMessage(err) }),
+          );
+      },
+      (action.forSeconds ?? 0) * 1000,
+    );
+    timer.unref?.();
+    this.pendingUndos.add(timer);
+  }
+
   private async executeActions(rule: AutomationRule): Promise<number> {
     let executed = 0;
     for (const action of rule.actions) {
@@ -330,6 +379,7 @@ export class AutomationService {
                 failed: failed.map((f) => f.error),
               });
             }
+            if (action.forSeconds) this.scheduleUndo(rule, action);
             break;
           }
           case 'webhook': {
@@ -440,11 +490,14 @@ export class AutomationService {
       throw badRequest('Die Uhrzeit muss im Format HH:MM angegeben werden');
     }
     if (trigger.type === 'interval') {
-      if (trigger.everyMinutes < 5) {
+      if (trigger.everySeconds === undefined && trigger.everyMinutes === undefined) {
+        throw badRequest('Für eine Wiederholung wird ein Abstand gebraucht.');
+      }
+      if (trigger.everySeconds !== undefined && trigger.everySeconds < 5) {
         throw badRequest(
-          'Der Abstand muss mindestens fünf Minuten betragen.',
+          'Der Abstand muss mindestens fünf Sekunden betragen.',
           undefined,
-          'Häufiger wäre für ein Zuhause weder nötig noch schonend für die Geräte.',
+          'Darunter käme der Hub mit dem Fragen und Schalten nicht hinterher.',
         );
       }
       if ((trigger.from && !trigger.to) || (!trigger.from && trigger.to)) {
@@ -538,7 +591,8 @@ export function isIntervalDue(
   if (trigger.from && trigger.to && !isWithinTimeRange(now, timezone, trigger.from, trigger.to)) {
     return false;
   }
-  return (now.getTime() - lastRunMs) / 60_000 >= trigger.everyMinutes;
+  const seconds = trigger.everySeconds ?? (trigger.everyMinutes ?? 0) * 60;
+  return (now.getTime() - lastRunMs) / 1000 >= seconds;
 }
 
 /** Wochentag 0 = Sonntag … 6 = Samstag, in der Zeitzone des Haushalts. */
@@ -560,4 +614,24 @@ export function isWithinTimeRange(
   const now = localTime(date, timezone);
   if (from <= to) return now >= from && now <= to;
   return now >= from || now <= to;
+}
+
+/**
+ * Das Gegenteil eines Kommandos – oder nichts, wenn es keins gibt.
+ *
+ * Bewusst nur die eindeutigen Fälle. Für „Helligkeit 40 %" wäre das Gegenteil
+ * der vorherige Wert, und den müsste man raten; lieber gar keine Rücknahme
+ * als eine falsche.
+ */
+export function undoCommand(command: DeviceCommand): DeviceCommand | null {
+  switch (command.type) {
+    case 'setPower':
+      return { type: 'setPower', on: !command.on };
+    case 'openCover':
+      return { type: 'closeCover' };
+    case 'closeCover':
+      return { type: 'openCover' };
+    default:
+      return null;
+  }
 }

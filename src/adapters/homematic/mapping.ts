@@ -38,6 +38,17 @@ const KIND_BY_TYPE: Array<{ match: RegExp; kind: ChannelKind }> = [
   { match: /^(BLIND|JALOUSIE|SHUTTER)(_VIRTUAL_RECEIVER)?$/, kind: 'cover' },
   { match: /^(BLIND|SHUTTER)_TRANSMITTER$/, kind: 'cover' },
 
+  /*
+   * Andere Motoren fahren genauso: Markise, Garagentor, Tür, Fenster, Screen.
+   * Für den Hub sind sie alle ein Antrieb mit Position – „auf", „zu" und ein
+   * Prozentwert. Dass eine Markise waagerecht ausfährt und ein Rollladen
+   * senkrecht, ändert daran nichts.
+   */
+  {
+    match: /^(AWNING|MARKISE|GARAGE|GARAGE_DOOR|DOOR|WINDOW_DRIVE|SCREEN|SUN_PROTECTION)(_VIRTUAL_RECEIVER|_TRANSMITTER|_RECEIVER)?$/,
+    kind: 'cover',
+  },
+
   // Heizung: Wandthermostat und Heizkörperventil
   { match: /^(HEATING_CLIMATECONTROL_TRANSCEIVER|CLIMATECONTROL_RT_TRANSCEIVER)$/, kind: 'thermostat' },
   { match: /^(THERMALCONTROL_TRANSMIT|CLIMATECONTROL_REGULATOR)$/, kind: 'thermostat' },
@@ -152,7 +163,15 @@ export function inferKind(
    * (HmIP-BROLL, HM-LC-Bl1-FM, HmIP-BBL für Jalousien).
    */
   if (hasValue('LEVEL')) {
-    if (/ROLL|BLIND|JALOU|SHUTTER|MARKI|BBL|BL1|BL-/.test(name)) return 'cover';
+    /*
+     * Neben Rollläden fahren auch Markisen, Tore und Fensterantriebe – eQ-3
+     * und Fremdhersteller benennen sie sprechend. Ein falsch geratener
+     * Antrieb ist hier ungefährlich: Er bekommt „auf/zu/Position", und genau
+     * das kann er.
+     */
+    if (/ROLL|BLIND|JALOU|SHUTTER|MARKI|AWNING|GARAGE|TOR\b|SCREEN|BBL|BL1|BL-/.test(name)) {
+      return 'cover';
+    }
     if (/DIM|DIMMER|PD-|LC-DW/.test(name)) return 'dimmer';
     // Unentschieden: Ein falsch geratener Rollladen ist ärgerlicher als ein
     // falsch geratener Dimmer – beide lassen sich in der Oberfläche

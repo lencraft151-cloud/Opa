@@ -523,13 +523,36 @@ describe('Automationen', () => {
   });
 
   it('lehnt einen zu kurzen Takt ab', async () => {
-    // Unter fünf Minuten wäre nur Last ohne Nutzen.
+    // Unter fünf Sekunden käme der Hub mit Fragen und Schalten nicht hinterher.
     const { status } = await call('POST', '/api/automations', {
       name: 'Zu hektisch',
-      trigger: { type: 'interval', everyMinutes: 1 },
+      trigger: { type: 'interval', everySeconds: 2 },
       actions: [{ type: 'notify', message: 'x' }],
     });
     assert.equal(status, 400);
+  });
+
+  it('nimmt einen Takt in Sekunden – und ein Kommando, das sich selbst zurücknimmt', async () => {
+    /*
+     * „Alle 20 Sekunden das Licht für 10 Sekunden an" – in Minuten ließe sich
+     * das gar nicht ausdrücken, und ohne `forSeconds` bräuchte es eine zweite
+     * Regel, die den vorherigen Zustand raten müsste.
+     */
+    const { status, data } = await call('POST', '/api/automations', {
+      name: 'Kurz blinken',
+      trigger: { type: 'interval', everySeconds: 20 },
+      actions: [
+        {
+          type: 'command',
+          target: { allWithCapability: 'switch' },
+          command: { type: 'setPower', on: true },
+          forSeconds: 10,
+        },
+      ],
+    });
+    assert.equal(status, 201);
+    assert.equal(data.trigger.everySeconds, 20);
+    assert.equal(data.actions[0].forSeconds, 10);
   });
 });
 

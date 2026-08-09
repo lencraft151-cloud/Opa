@@ -15,8 +15,13 @@ const TABS = [
   { id: 'rooms', label: 'Räume', icon: icons.rooms, primary: true },
   { id: 'devices', label: 'Geräte', icon: icons.devices, primary: true },
   { id: 'scenes', label: 'Szenen', icon: icons.scene, primary: true },
-  { id: 'energy', label: 'Energie', icon: icons.energy },
-  { id: 'history', label: 'Verlauf', icon: icons.chart },
+  /*
+   * Energie und Verlauf standen getrennt – dabei beantworten sie dieselbe
+   * Frage aus zwei Richtungen: „Was war?" Wer den Stromverbrauch ansieht,
+   * will meist auch die Temperaturkurve daneben. Ein Reiter weniger, und
+   * beides auf einem Bildschirm.
+   */
+  { id: 'insights', label: 'Auswertung', icon: icons.energy },
   { id: 'automations', label: 'Automationen', icon: icons.automation },
   { id: 'settings', label: 'Einstellungen', icon: icons.settings },
 ];

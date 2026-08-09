@@ -8,6 +8,27 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.5.0 – 2026-08-09
+
+**Markisen, Tore und andere Motoren.** Für den Hub sind sie dasselbe wie ein
+Rollladen: ein Antrieb mit Position, „auf", „zu" und einem Prozentwert. Dass
+eine Markise waagerecht ausfährt und ein Rollladen senkrecht, ändert daran
+nichts. Erkannt werden jetzt `AWNING`, `GARAGE_DOOR`, `WINDOW_DRIVE`, `SCREEN`
+und Verwandte – und über die Werte-Erkennung auch alles, was im Modellnamen
+„Markise", „Garage" oder „Tor" führt.
+
+**Automationen im Sekundentakt, die von selbst wieder aufhören.** Bisher war
+der kürzeste Abstand fünf Minuten, und ein Kommando blieb, bis eine zweite
+Regel es zurücknahm. Jetzt gibt es Abstände ab fünf Sekunden und eine Dauer:
+„alle 20 Sekunden das Licht für 10 Sekunden an" ist eine Regel, keine zwei.
+Zurückgenommen wird nur, wo das Gegenteil eindeutig ist – Ein/Aus, Auf/Zu; für
+eine Helligkeit müsste man den vorherigen Wert raten, und das tut der Hub
+nicht.
+
+**Energie und Verlauf sind ein Reiter.** Sie beantworten dieselbe Frage aus
+zwei Richtungen: „Was war?" Wer den Stromverbrauch ansieht, will meist die
+Temperaturkurve daneben. Der Reiter heißt jetzt „Auswertung".
+
 ## 1.4.2 – 2026-08-09
 
 **Shelly-Lampen können jetzt Weißtöne.** Die Shelly Duo meldet sich als

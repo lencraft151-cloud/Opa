@@ -122,7 +122,7 @@ Zwischenspeicher und lädt sich neu. Gleicher Stand ⇒ gleiche Kennung, jede
 Änderung ⇒ neue Kennung. Der Wert wird 15 Sekunden lang zwischengespeichert.
 
 ```json
-{ "name": "Smart-Home-Hub", "version": "1.4.2", "build": "9617df2505a1",
+{ "name": "Smart-Home-Hub", "version": "1.5.0", "build": "9617df2505a1",
   "node": "v22.22.0", "hasHousehold": true, "setupCompleted": true,
   "authRequired": true,
   "adapters": [ { "type": "homematic", "displayName": "Homematic",

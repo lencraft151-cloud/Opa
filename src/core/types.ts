@@ -394,7 +394,15 @@ export type RuleTrigger =
    */
   | {
       type: 'interval';
-      everyMinutes: number;
+      /** Abstand in Minuten – oder `everySeconds` für kürzere Takte. */
+      everyMinutes?: number;
+      /**
+       * Abstand in Sekunden, ab 5.
+       *
+       * Für Regeln wie „alle 20 Sekunden das Licht kurz an". In Minuten
+       * ließe sich das gar nicht ausdrücken.
+       */
+      everySeconds?: number;
       from?: string;
       to?: string;
       days?: number[];
@@ -413,7 +421,19 @@ export interface RuleTarget {
 }
 
 export type RuleAction =
-  | { type: 'command'; target: RuleTarget; command: DeviceCommand }
+  | {
+      type: 'command';
+      target: RuleTarget;
+      command: DeviceCommand;
+      /**
+       * Nach so vielen Sekunden wird das Kommando zurückgenommen.
+       *
+       * Damit lassen sich Regeln bauen, die von selbst wieder aufhören:
+       * „alle 20 Minuten das Licht für 10 Sekunden an". Ohne das bräuchte man
+       * zwei Regeln, von denen die zweite den ersten Zustand raten müsste.
+       */
+      forSeconds?: number;
+    }
   | { type: 'webhook'; url: string; method?: 'GET' | 'POST'; body?: unknown }
   | { type: 'notify'; message: string };
 

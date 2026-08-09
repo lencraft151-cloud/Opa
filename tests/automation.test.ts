@@ -6,6 +6,7 @@ import {
   isWithinTimeRange,
   localTime,
   localWeekday,
+  undoCommand,
 } from '../src/services/automationService.ts';
 import { changedKeys, supports } from '../src/services/deviceService.ts';
 import type { Device } from '../src/core/types.ts';
@@ -147,5 +148,26 @@ describe('Wiederkehrende Automationen', () => {
     // einmal aus, nicht so oft, wie sie es "verpasst" hat.
     const trigger = { type: 'interval' as const, everyMinutes: 60, from: '14:00', to: '22:00' };
     assert.equal(isIntervalDue(trigger, minutes(480), now, berlin, friday), true);
+  });
+});
+
+describe('Kommandos, die sich selbst zurücknehmen', () => {
+  /*
+   * Für „alle 20 Sekunden das Licht für 10 Sekunden an" braucht es das
+   * Gegenteil eines Kommandos. Nur dort, wo es eindeutig ist – für eine
+   * Helligkeit wäre das Gegenteil der vorherige Wert, und den müsste man
+   * raten. Lieber keine Rücknahme als eine falsche.
+   */
+  it('kehrt Ein/Aus und Auf/Zu um', () => {
+    assert.deepEqual(undoCommand({ type: 'setPower', on: true }), { type: 'setPower', on: false });
+    assert.deepEqual(undoCommand({ type: 'setPower', on: false }), { type: 'setPower', on: true });
+    assert.deepEqual(undoCommand({ type: 'openCover' }), { type: 'closeCover' });
+    assert.deepEqual(undoCommand({ type: 'closeCover' }), { type: 'openCover' });
+  });
+
+  it('lässt alles andere in Ruhe', () => {
+    assert.equal(undoCommand({ type: 'setBrightness', brightness: 40 }), null);
+    assert.equal(undoCommand({ type: 'setTargetTemperature', targetTemperatureC: 21 }), null);
+    assert.equal(undoCommand({ type: 'setPosition', position: 50 }), null);
   });
 });

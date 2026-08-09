@@ -687,7 +687,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 409 Tests, node:test
+npm test        # 412 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
