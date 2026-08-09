@@ -48,6 +48,8 @@ export interface Container {
   presence: PresenceService;
   /** Startet Hintergrunddienste, sobald ein Haushalt existiert. */
   startBackgroundServices: () => Promise<void>;
+  /** Hält sie an – nach dem Löschen des Haushalts. Der Prozess läuft weiter. */
+  stopBackgroundServices: () => Promise<void>;
   shutdown: () => Promise<void>;
 }
 
@@ -78,7 +80,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const users = new UserService(repos);
   const setup = new SetupService(repos, households, rooms, devices, users);
   const energy = new EnergyService(repos, telemetry, households);
-  const backup = new BackupService(db);
+  const backup = new BackupService(db, telemetryStore);
   const updates = new UpdateService(repos, registry, integrations, households);
   const hubUpdate = new HubUpdateService(VERSION, {
     checkUrl: config.hubUpdateCheckUrl,
@@ -99,6 +101,21 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automations.start(household.id);
     updates.start(household.id);
     presence.start(household.id);
+  };
+
+  /**
+   * Hintergrunddienste anhalten, ohne den Prozess zu beenden.
+   *
+   * Unterschied zu `shutdown`: Hier wird nichts mehr weggeschrieben. Nach dem
+   * Löschen eines Haushalts wäre ein `flush` genau falsch – er brächte
+   * gepufferte Messwerte eines Haushalts zurück, den es nicht mehr gibt.
+   */
+  const stopBackgroundServices = async (): Promise<void> => {
+    automations.stop();
+    updates.stop();
+    presence.stop();
+    await polling.stop();
+    log.info('Hintergrunddienste angehalten');
   };
 
   const shutdown = async (): Promise<void> => {
@@ -132,6 +149,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     scenes,
     presence,
     startBackgroundServices,
+    stopBackgroundServices,
     shutdown,
   };
 }

@@ -38,7 +38,10 @@ Regeln, die der Hub durchsetzt:
 - Anmeldenamen sind klein geschrieben und eindeutig; erlaubt sind Buchstaben,
   Ziffern, Punkt, Bindestrich und Unterstrich.
 - Passwörter brauchen mindestens 10 Zeichen, dürfen nicht auf der Liste der
-  meistgenutzten stehen und nicht den Anmeldenamen enthalten.
+  meistgenutzten stehen und nicht im Kern der Anmeldename sein. Geprüft wird
+  der Name als Baustein – am Anfang, am Ende, bei Namen ab vier Zeichen auch
+  mittendrin. Eine zufällige Buchstabenfolge zählt nicht: „Winterabend-77"
+  ist für „ben" erlaubt.
 - Nach fünf Fehlversuchen ist das Konto 15 Minuten gesperrt. Ob Name oder
   Passwort falsch war, sagt die Antwort nicht.
 - Der letzte Administrator lässt sich weder löschen noch herabstufen.
@@ -67,6 +70,13 @@ denn ausgesperrt ist damit niemand mehr.
 Offen ohne Anmeldung sind `/health`, `/system/info`, `/setup/state` und
 `/auth/login`. Solange noch kein Haushalt existiert, ist die API entsperrt –
 anders käme man nicht durch die Ersteinrichtung.
+
+Dieselbe Ausnahme gilt für `/setup/household` und `/auth/users`, solange ein
+Haushalt zwar existiert, aber **kein einziges Konto**. Das ist kein
+eingerichteter Hub, sondern ein Abbruch mittendrin – ohne diese Ausnahme gäbe
+es kein Zurück, denn die Anmeldepflicht griffe, ohne dass jemand ihr genügen
+könnte. Zu schützen gibt es dort nichts: Wer den ersten Zugang anlegt, tut, was
+der Besitzer als Nächstes getan hätte.
 
 ## Fehlerformat
 
@@ -112,7 +122,7 @@ Zwischenspeicher und lädt sich neu. Gleicher Stand ⇒ gleiche Kennung, jede
 Änderung ⇒ neue Kennung. Der Wert wird 15 Sekunden lang zwischengespeichert.
 
 ```json
-{ "name": "Smart-Home-Hub", "version": "1.3.0", "build": "9617df2505a1",
+{ "name": "Smart-Home-Hub", "version": "1.3.1", "build": "9617df2505a1",
   "node": "v22.22.0", "hasHousehold": true, "setupCompleted": true,
   "authRequired": true,
   "adapters": [ { "type": "homematic", "displayName": "Homematic",
@@ -173,6 +183,25 @@ Arbeitskopie. Git fasst dabei nur verfolgte Dateien an; `DATA_DIR`, `.env` und
 Antwort `202`: `{ "log": ["$ git pull --ff-only", "…"], "restartRequired": true }`.
 Den Neustart des Dienstes übernimmt der Hub **nicht** – das ist Sache von
 systemd, Docker oder pm2.
+
+### `DELETE /household`
+Löscht den Haushalt und alles daran: Räume, Geräte, Automationen, Szenen,
+Benutzerkonten, Sitzungen, Zugriffstoken, die hinterlegten Zugangsdaten der
+Bridges und das Messwertarchiv. Nur Administratoren.
+
+Body: `{ "confirmName": "<Name des Haushalts>" }` – muss genau stimmen, sonst
+`400`. Die Oberfläche fragt zusätzlich fünfmal nach; der Server verlässt sich
+darauf nicht, weil er nicht nur von ihr aufgerufen wird.
+
+Danach ist der Hub wie frisch installiert: Der Einrichtungsassistent startet,
+die Hintergrunddienste sind angehalten, der Prozess läuft weiter. Die eigene
+Sitzung ist mit gelöscht – die Antwort löscht auch das Cookie.
+
+```json
+{ "rooms": 4, "devices": 23, "rules": 6, "scenes": 3, "integrations": 3,
+  "users": 2, "telemetryFiles": 87,
+  "message": "Der Haushalt wurde gelöscht. …" }
+```
 
 ### `GET /system/backup`
 Lädt die Konfiguration als JSON-Datei herunter (`Content-Disposition:

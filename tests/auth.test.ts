@@ -81,11 +81,24 @@ describe('Was als Passwort durchgeht', () => {
     assert.throws(() => assertUsablePassword('SmartHome'.toLowerCase() + ''), /zu kurz|Liste/);
   });
 
-  it('lässt den Anmeldenamen nicht im Passwort zu', () => {
-    assert.throws(
-      () => assertUsablePassword('anna hat ein passwort', 'anna'),
-      /Anmeldenamen enthalten/,
-    );
+  it('lässt ein Passwort nicht zu, das im Kern der Anmeldename ist', () => {
+    const nah = /Anmeldenamen/;
+    assert.throws(() => assertUsablePassword('anna hat ein passwort', 'anna'), nah, 'am Anfang');
+    assert.throws(() => assertUsablePassword('mein passwort anna', 'anna'), nah, 'am Ende');
+    assert.throws(() => assertUsablePassword('was anna will hier', 'anna'), nah, 'mittendrin, ab vier Zeichen');
+  });
+
+  it('lehnt einen kurzen Namen nicht ab, nur weil er zufällig im Wort steckt', () => {
+    /*
+     * „ben" steckt in „Winterabend" – dem Angreifer sagt das nichts, dem
+     * Bewohner aber schon: Er sucht ratlos nach einem Passwort, das
+     * angenommen wird. Genau das ist beim Einrichten passiert.
+     */
+    assert.doesNotThrow(() => assertUsablePassword('Winterabend-77', 'ben'));
+    assert.doesNotThrow(() => assertUsablePassword('Regenschauer im Mai', 'sam'));
+    // Als Baustein bleibt der Name verboten, egal wie kurz er ist.
+    assert.throws(() => assertUsablePassword('ben-und-noch-mehr', 'ben'), /Anmeldenamen/);
+    assert.throws(() => assertUsablePassword('geheimnisvoll-ben', 'ben'), /Anmeldenamen/);
   });
 
   it('nimmt eine lange Wortfolge an', () => {

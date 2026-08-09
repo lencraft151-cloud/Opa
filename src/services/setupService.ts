@@ -4,7 +4,8 @@ import type { Repositories } from '../storage/repositories.js';
 import type { DeviceService } from './deviceService.js';
 import type { HouseholdService, CreateHouseholdInput } from './householdService.js';
 import type { RoomService } from './roomService.js';
-import type { PublicUser, UserService } from './userService.js';
+import { normalizeUsername, type PublicUser, type UserService } from './userService.js';
+import { assertUsablePassword } from '../util/password.js';
 
 export interface SetupStepInfo {
   id: SetupStep;
@@ -166,16 +167,46 @@ export class SetupService {
     session: Session;
     state: SetupState;
   }> {
-    const household = await this.households.create(input);
-    const user = await this.users.create(household.id, {
-      username: input.username,
-      password: input.password,
-      displayName: input.displayName,
-      role: 'admin',
-    });
+    /*
+     * Zuerst prüfen, dann anlegen.
+     *
+     * Andersherum ging es schief, und zwar endgültig: Der Haushalt entstand,
+     * das Passwort wurde danach abgelehnt („enthält den Anmeldenamen"), und
+     * zurück blieb ein Haushalt ohne einen einzigen Zugang. Ab da griff die
+     * Anmeldepflicht – aber es gab niemanden, der sich hätte anmelden können.
+     * Der Hub war zugesperrt, und der Schlüssel lag drinnen.
+     */
+    const username = normalizeUsername(input.username);
+    assertUsablePassword(input.password, username);
+
+    /*
+     * Ein Haushalt ohne Zugang ist keine abgeschlossene Einrichtung, sondern
+     * ein Abbruch. Der nächste Versuch übernimmt ihn, statt an „es existiert
+     * bereits ein Haushalt" zu scheitern – sonst bliebe ein so entstandener
+     * Stand für immer unbenutzbar.
+     */
+    const existing = this.households.current();
+    const adopt = existing !== undefined && this.users.count(existing.id) === 0;
+    const household = adopt ? await this.households.update(input) : await this.households.create(input);
+
+    let user: PublicUser;
+    try {
+      user = await this.users.create(household.id, {
+        username,
+        password: input.password,
+        displayName: input.displayName,
+        role: 'admin',
+      });
+    } catch (err) {
+      // Gürtel und Hosenträger: Sollte das Anlegen doch scheitern, bleibt
+      // kein halber Haushalt zurück, den niemand mehr betreten kann.
+      if (!adopt) await this.households.remove(household.id);
+      throw err;
+    }
+
     // Direkt angemeldet weitermachen – ein zweites Formular an dieser Stelle
     // wäre nur eine Hürde.
-    const login = await this.users.login(household.id, input.username, input.password);
+    const login = await this.users.login(household.id, username, input.password);
 
     return {
       household,

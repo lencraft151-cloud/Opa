@@ -58,15 +58,18 @@ async function boot() {
   });
 
   const setupState = await api('/setup/state');
-  if (!setupState.hasHousehold || !setupState.completed) {
-    hideLogin();
-    $('#view-setup').classList.remove('hidden');
-    $('#view-app').classList.add('hidden');
-    initSetup(setupState, onSignedIn);
+
+  /*
+   * Ohne Haushalt gibt es niemanden, der sich anmelden könnte – der Assistent
+   * legt Haushalt und ersten Zugang in einem Schritt an. Das ist der einzige
+   * Fall, in dem die Oberfläche ohne Anmeldung etwas anzeigt.
+   */
+  if (!setupState.hasHousehold) {
+    showSetup(setupState);
     return;
   }
 
-  // Eingerichtet – bleibt die Frage, wer davorsitzt.
+  // Ab hier gibt es einen Haushalt – bleibt die Frage, wer davorsitzt.
   const me = await api('/auth/me', { silent401: true }).catch(() => null);
 
   if (me?.userCount === 0 && (me?.viaToken || me?.authDisabled)) {
@@ -75,17 +78,53 @@ async function boot() {
     return;
   }
   if (!me?.user && !me?.authDisabled) {
-    showLogin(onSignedIn);
+    /*
+     * Früher startete hier der Assistent, sobald die Einrichtung unfertig war
+     * – ohne zu fragen, ob überhaupt jemand angemeldet ist. Seine erste
+     * Anfrage lief dann in einen 401, und der Fehlerpfad schaltete auf die
+     * Anmeldemaske um: ein Aufblitzen des Assistenten, ein roter Eintrag in
+     * der Konsole und drei einander widersprechende Meldungen übereinander.
+     */
+    showLogin(onSignedIn, {
+      reason: setupState.completed
+        ? undefined
+        : 'Die Einrichtung ist noch nicht abgeschlossen. Melde dich an, um sie fortzusetzen.',
+    });
+    return;
+  }
+
+  // Angemeldet, aber der Assistent ist noch nicht durch.
+  if (!setupState.completed) {
+    showSetup(setupState);
     return;
   }
 
   await startDashboard();
 }
 
-/** Nach erfolgreicher Anmeldung: Oberfläche aufbauen. */
+function showSetup(setupState) {
+  hideLogin();
+  $('#view-setup').classList.remove('hidden');
+  $('#view-app').classList.add('hidden');
+  initSetup(setupState, onSignedIn);
+}
+
+/**
+ * Nach erfolgreicher Anmeldung.
+ *
+ * Wohin es geht, entscheidet der Stand der Einrichtung – nicht die Annahme,
+ * dass sie fertig ist. Wer den Assistenten abgebrochen hat, landete sonst in
+ * einem Dashboard ohne Geräte und ohne Weg zurück.
+ */
 async function onSignedIn() {
   signedOut = false;
   hideLogin();
+
+  const setupState = await api('/setup/state').catch(() => null);
+  if (setupState && !setupState.completed) {
+    showSetup(setupState);
+    return;
+  }
   await startDashboard();
 }
 

@@ -44,6 +44,7 @@ Geräte.
 | **Erneut verbinden** | Zugangsdaten erneuern oder den Knopf an der Hue Bridge noch einmal drücken – ohne Geräte, Räume, Szenen und Automationen zu verlieren |
 | **Sicherung** | Einstellungen, Räume, Geräte, Szenen und Automationen als Datei sichern und zurückspielen – ohne Passwörter in der Datei |
 | **Fassung des Hubs** | Änderungsprotokoll in der Oberfläche, Prüfung auf eine neuere Fassung und Aktualisierung auf Knopfdruck |
+| **Haushalt löschen** | Alles zurücksetzen – hinter fünf Bestätigungen, von denen die letzte den abgetippten Namen verlangt |
 | **Oberfläche** | Installierbare Web-App (PWA) mit Live-Updates (SSE), Dashboard, Raum-, Geräte-, Energie- und Verlaufsansicht; aktualisiert sich nach einem Update des Hubs selbst |
 
 ---
@@ -442,6 +443,20 @@ bestehende Zugangsdaten werden nicht angefasst, wenn Typ und Adresse passen.
 Benutzerkonten bleiben beim Zurückspielen unangetastet. Wer die
 Wiederherstellung anstößt, soll danach nicht ausgesperrt sein.
 
+### Haushalt löschen
+
+Ganz unten in den Einstellungen, hinter fünf Bestätigungen. Die fragen
+allerdings nicht fünfmal dasselbe: Fünf gleichlautende „Bist du sicher?" klickt
+man in fünf Sekunden weg, sie erziehen nur dazu, nicht mehr hinzusehen. Jeder
+Schritt nennt deshalb etwas anderes, das gleich verschwindet – mit den
+tatsächlichen Zahlen aus diesem Haushalt: so viele Geräte, so viele
+Automationen, alle Konten einschließlich des eigenen. Der letzte Schritt lässt
+sich überhaupt nicht klicken, sondern nur tippen: Dort muss der Name des
+Haushalts abgetippt werden.
+
+Danach ist der Hub wie frisch installiert – der Assistent startet wieder, der
+Dienst läuft weiter.
+
 ### Die Fassung des Hubs
 
 *Einstellungen → Diese Fassung* zeigt, was läuft, und liest dazu `CHANGELOG.md`
@@ -649,7 +664,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 386 Tests, node:test
+npm test        # 391 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 

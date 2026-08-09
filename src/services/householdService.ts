@@ -137,6 +137,15 @@ export class HouseholdService {
     return this.repos.households.patch(household.id, patch, 'Haushalt');
   }
 
+  /**
+   * Entfernt einen Haushalt – nur für den Rückzug, wenn die Einrichtung
+   * mittendrin gescheitert ist. Das vollständige Löschen samt allem, was
+   * daran hängt, steht in `backupService.resetHousehold`.
+   */
+  async remove(id: string): Promise<void> {
+    await this.repos.households.remove(id);
+  }
+
   async setStep(step: SetupStep): Promise<Household> {
     if (!SETUP_STEPS.includes(step)) throw badRequest(`Unbekannter Einrichtungsschritt: ${step}`);
     const household = this.require();

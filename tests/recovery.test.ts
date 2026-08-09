@@ -490,4 +490,47 @@ describe('Sicherung und Wiederherstellung', () => {
       'die zurückgespielten Räume ziehen mit um',
     );
   });
+
+  it('löscht den Haushalt nur, wenn der Name genau stimmt', async () => {
+    const before = db.read().households.length;
+    await assert.rejects(() => backup.reset('altbau'), /stimmt nicht/, 'Kleinschreibung zählt');
+    await assert.rejects(() => backup.reset(''), /stimmt nicht/);
+    assert.equal(db.read().households.length, before, 'nichts passiert');
+  });
+
+  it('löscht beim Zurücksetzen wirklich alles – auch die Konten', async () => {
+    const name = db.read().households[0]?.name as string;
+    let cleared = 0;
+    const service = new BackupService(db, { clear: async () => ++cleared });
+
+    const result = await service.reset(name);
+    assert.ok(result.rooms >= 1);
+
+    const data = db.read();
+    assert.deepEqual(
+      {
+        households: data.households.length,
+        rooms: data.rooms.length,
+        devices: data.devices.length,
+        integrations: data.integrations.length,
+        users: data.users.length,
+        sessions: data.sessions.length,
+        tokens: data.tokens.length,
+        scenes: data.scenes.length,
+        rules: data.rules.length,
+      },
+      {
+        households: 0,
+        rooms: 0,
+        devices: 0,
+        integrations: 0,
+        users: 0,
+        sessions: 0,
+        tokens: 0,
+        scenes: 0,
+        rules: 0,
+      },
+    );
+    assert.equal(cleared, 1, 'das Messwertarchiv wird mit gelöscht');
+  });
 });

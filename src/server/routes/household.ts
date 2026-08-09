@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Container } from '../../container.js';
+import { clearSessionCookie, requireAdminUnlessOpen } from '../auth.js';
 import { asyncHandler, parseBody } from '../http.js';
 import { appearanceSchema, presenceSchema } from '../validation.js';
 
@@ -105,6 +106,39 @@ export function householdRoutes(container: Container): Router {
     asyncHandler(async (req, res) => {
       await container.households.revokeToken(req.params.id as string);
       res.status(204).end();
+    }),
+  );
+
+  /**
+   * Haushalt löschen – alles weg, der Hub startet danach wieder mit dem
+   * Assistenten.
+   *
+   * Der Name muss im Body stehen und genau stimmen. Die Oberfläche fragt
+   * zusätzlich fünfmal nach; der Server verlässt sich darauf aber nicht,
+   * denn er wird nicht nur von der Oberfläche aufgerufen.
+   */
+  router.delete(
+    '/household',
+    asyncHandler(async (req, res) => {
+      requireAdminUnlessOpen(req, container.config.authDisabled);
+      const { confirmName } = parseBody(
+        z.object({ confirmName: z.string().min(1).max(120) }),
+        req,
+      );
+
+      const result = await container.backup.reset(confirmName);
+
+      // Die Hintergrunddienste liefen für einen Haushalt, den es nicht mehr
+      // gibt – sie jetzt weiterlaufen zu lassen, wäre nur Lärm.
+      await container.stopBackgroundServices();
+
+      // Und die eigene Sitzung ist mit gelöscht worden.
+      clearSessionCookie(req, res);
+
+      res.json({
+        ...result,
+        message: 'Der Haushalt wurde gelöscht. Der Hub startet nun wieder mit der Einrichtung.',
+      });
     }),
   );
 

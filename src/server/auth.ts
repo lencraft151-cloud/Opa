@@ -21,6 +21,13 @@ const PUBLIC_PATHS = new Set(['/health', '/system/info', '/setup/state', '/auth/
  */
 const OPTIONAL_AUTH_PATHS = new Set(['/auth/me']);
 
+/**
+ * Wege zurück aus einem Haushalt ohne Zugang – siehe die Begründung unten in
+ * `createAuthMiddleware`. Nur diese beiden, und nur solange es wirklich kein
+ * einziges Konto gibt.
+ */
+const RECOVERY_PATHS = new Set(['/setup/household', '/auth/users']);
+
 /** Name des Sitzungs-Cookies. */
 export const SESSION_COOKIE = 'sh_session';
 
@@ -60,7 +67,23 @@ export function createAuthMiddleware(container: Container): RequestHandler {
     if (PUBLIC_PATHS.has(req.path)) return next();
 
     // Bootstrap: ohne Haushalt gibt es noch niemanden, der sich anmelden könnte.
-    if (!container.households.current()) return next();
+    const household = container.households.current();
+    if (!household) return next();
+
+    /*
+     * Ein Haushalt ohne einen einzigen Zugang ist keine fertige Einrichtung,
+     * sondern ein Abbruch mittendrin – und ohne diese Ausnahme ein
+     * Zustand, aus dem es kein Zurück gäbe: Die Anmeldepflicht greift, aber
+     * es gibt kein Konto, mit dem man ihr genügen könnte.
+     *
+     * Geöffnet wird deshalb genau der Weg, der aus diesem Zustand
+     * herausführt, und kein anderer. Zu schützen gibt es hier ohnehin
+     * nichts: Wer den ersten Zugang anlegt, tut, was der Besitzer als
+     * Nächstes getan hätte.
+     */
+    if (RECOVERY_PATHS.has(req.path) && container.repos.users.listByHousehold(household.id).length === 0) {
+      return next();
+    }
 
     const optional = OPTIONAL_AUTH_PATHS.has(req.path);
 

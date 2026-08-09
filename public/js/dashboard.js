@@ -1798,6 +1798,24 @@ async function renderSettings() {
 
     <div class="card" id="card-hub-version">${hubVersionCard()}</div>
 
+    <details class="card danger-zone" data-section="danger">
+      <summary>Haushalt löschen</summary>
+      <p class="muted small">
+        Löscht diesen Haushalt mit allem, was daran hängt: Räume, Geräte, Automationen,
+        Szenen, alle Benutzerkonten, die hinterlegten Zugangsdaten deiner Bridges und das
+        gesamte Messwertarchiv. Danach startet der Hub wieder mit der Einrichtung.
+      </p>
+      <div class="callout warn">
+        <strong>Das lässt sich nicht rückgängig machen</strong>
+        <span>
+          Wenn du dir nicht sicher bist: Lade zuerst eine Sicherung herunter. Damit
+          bekommst du Räume, Namen, Szenen und Automationen zurück – die Zugangsdaten
+          deiner Bridges allerdings nicht.
+        </span>
+      </div>
+      <div id="danger-zone-body"></div>
+    </details>
+
     <details class="card" data-section="glossary">
       <summary>Begriffe kurz erklärt</summary>
       <dl class="glossary">
@@ -2176,6 +2194,163 @@ function appearanceCard() {
       <button class="ghost small" id="btn-appearance-reset">Auf Standard zurücksetzen</button>
     </div>
   </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Haushalt löschen
+// ---------------------------------------------------------------------------
+
+/**
+ * Fünfmal nachfragen – aber nicht fünfmal dasselbe.
+ *
+ * Fünf gleichlautende „Bist du sicher?" klickt man in fünf Sekunden weg; sie
+ * erziehen nur dazu, nicht mehr hinzusehen. Jeder Schritt hier nennt deshalb
+ * etwas anderes, das gleich verschwindet – mit den tatsächlichen Zahlen aus
+ * diesem Haushalt. Wer bis zum Ende kommt, hat es fünfmal schwarz auf weiß
+ * gelesen. Der letzte Schritt lässt sich überhaupt nicht klicken, sondern nur
+ * tippen.
+ */
+let dangerStep = 0;
+
+function dangerSteps() {
+  const counts = {
+    devices: store.devices.length,
+    rooms: store.rooms.length,
+    automations: store.automations.length,
+    scenes: store.scenes.length,
+    integrations: store.integrations.length,
+  };
+
+  return [
+    {
+      question: `„${store.household?.name ?? 'Dieser Haushalt'}" wirklich löschen?`,
+      detail: 'Ab hier wird es ernst. Abbrechen geht bis zum letzten Schritt.',
+      confirm: 'Ja, ich will löschen',
+    },
+    {
+      question: `${plural(counts.devices, 'Gerät', 'Geräte')} und ${plural(
+        counts.rooms,
+        'Raum',
+        'Räume',
+      )} verschwinden.`,
+      detail:
+        'Die Geräte selbst bleiben natürlich, wo sie sind – aber ihre Namen, ihre ' +
+        'Raumzuordnung und alles, was du hier eingestellt hast, sind weg.',
+      confirm: 'Verstanden, weiter',
+    },
+    {
+      question: `${plural(counts.automations, 'Automation', 'Automationen')} und ${plural(
+        counts.scenes,
+        'Szene',
+        'Szenen',
+      )} verschwinden.`,
+      detail: 'Auch das gesamte Messwertarchiv – jede aufgezeichnete Temperatur, jede kWh.',
+      confirm: 'Auch das ist mir klar',
+    },
+    {
+      question: `Alle Zugänge werden gelöscht – auch deiner.`,
+      detail:
+        `Und die hinterlegten Zugangsdaten von ${plural(
+          counts.integrations,
+          'Verbindung',
+          'Verbindungen',
+        )}. ` +
+        'Nach dem Löschen musst du dich neu einrichten und jede Bridge neu koppeln.',
+      confirm: 'Ja, auch meinen Zugang',
+    },
+    {
+      question: 'Zum Schluss: Tippe den Namen des Haushalts ab.',
+      detail:
+        'Das ist der einzige Schritt, den man nicht wegklicken kann – und genau ' +
+        'deshalb steht er hier.',
+      confirm: 'Haushalt endgültig löschen',
+      typed: true,
+    },
+  ];
+}
+
+function renderDangerZone() {
+  const body = $('#danger-zone-body');
+  if (!body) return;
+
+  const isAdmin = store.me?.user?.role === 'admin' || store.me?.authDisabled;
+  if (!isAdmin) {
+    body.innerHTML =
+      '<p class="muted small">Einen Haushalt löschen dürfen nur Administratoren.</p>';
+    return;
+  }
+
+  const steps = dangerSteps();
+
+  if (dangerStep === 0) {
+    body.innerHTML = `<button class="danger" id="danger-start">Haushalt löschen …</button>`;
+    body.querySelector('#danger-start').addEventListener('click', () => {
+      dangerStep = 1;
+      renderDangerZone();
+    });
+    return;
+  }
+
+  const step = steps[dangerStep - 1];
+  body.innerHTML = `
+    <div class="danger-step">
+      <div class="danger-count">Schritt ${dangerStep} von ${steps.length}</div>
+      <div class="title">${esc(step.question)}</div>
+      <p class="muted small">${esc(step.detail)}</p>
+      ${
+        step.typed
+          ? `<label>Name des Haushalts
+               <input id="danger-name" autocomplete="off" autocapitalize="none"
+                      spellcheck="false" placeholder="${esc(store.household?.name ?? '')}" />
+             </label>`
+          : ''
+      }
+      <div class="row tight">
+        <button class="danger" id="danger-next" ${step.typed ? 'disabled' : ''}>
+          ${esc(step.confirm)}
+        </button>
+        <button class="ghost" id="danger-cancel">Abbrechen</button>
+      </div>
+    </div>`;
+
+  body.querySelector('#danger-cancel').addEventListener('click', () => {
+    dangerStep = 0;
+    renderDangerZone();
+  });
+
+  const next = body.querySelector('#danger-next');
+
+  if (!step.typed) {
+    next.addEventListener('click', () => {
+      dangerStep += 1;
+      renderDangerZone();
+    });
+    return;
+  }
+
+  // Letzter Schritt: Der Knopf bleibt gesperrt, bis der Name genau stimmt.
+  const field = body.querySelector('#danger-name');
+  const expected = (store.household?.name ?? '').trim();
+  field.addEventListener('input', () => {
+    next.disabled = field.value.trim() !== expected;
+  });
+  field.focus();
+
+  next.addEventListener('click', async () => {
+    next.disabled = true;
+    next.textContent = 'Wird gelöscht …';
+    const result = await guard(() =>
+      api('/household', { method: 'DELETE', body: { confirmName: field.value.trim() } }),
+    );
+    if (!result) {
+      next.disabled = false;
+      next.textContent = step.confirm;
+      return;
+    }
+    // Der eigene Zugang ist mit gelöscht – ein Neuladen führt in den Assistenten.
+    toast(result.message, { kind: 'success', timeout: 10_000 });
+    setTimeout(() => location.reload(), 1200);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2899,6 +3074,9 @@ function wireSettings(panel) {
   });
 
   wireBackup(panel);
+  // Ein halb durchlaufener Löschvorgang soll ein Neuzeichnen nicht überleben.
+  dangerStep = 0;
+  renderDangerZone();
 
   panel.querySelectorAll('[data-relink]').forEach((form) => {
     form.addEventListener('submit', async (event) => {

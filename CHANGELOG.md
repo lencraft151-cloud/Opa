@@ -8,6 +8,37 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.3.1 – 2026-08-09
+
+**Behoben: Der Hub konnte sich beim Einrichten selbst aussperren.** Wurde das
+Passwort abgelehnt – etwa weil es den Anmeldenamen enthielt –, war der Haushalt
+trotzdem schon angelegt, ein Zugang aber nicht. Ab da verlangte der Hub eine
+Anmeldung, für die es kein Konto gab; jeder weitere Versuch endete in „Nicht
+angemeldet". Jetzt wird das Passwort geprüft, bevor irgendetwas entsteht, und
+ein Haushalt ohne Zugang lässt sich weiterhin einrichten. Bestehende
+Datenstände in diesem Zustand retten sich beim nächsten Aufruf selbst.
+
+**Behoben: Nach der Anmeldung landete man im Dashboard, obwohl die Einrichtung
+unfertig war** – ohne Weg zurück in den Assistenten. Jetzt entscheidet der
+Stand der Einrichtung, wohin es geht.
+
+**Behoben: Drei einander widersprechende Meldungen auf der Anmeldemaske.** Der
+Assistent startete, ohne zu prüfen, ob überhaupt jemand angemeldet ist; seine
+erste Anfrage lief in einen Fehler, der die Maske öffnete – mitsamt „Die
+Anmeldung ist abgelaufen", obwohl es nie eine gab.
+
+**Behoben: „Winterabend-77" war als Passwort für „ben" nicht erlaubt.** Der
+Name steckt in „WinterABENd" – dem Angreifer sagt das nichts, dem Bewohner
+schon: Er suchte ratlos nach einem Passwort, das angenommen wird. Geprüft wird
+jetzt der Name als Baustein (am Anfang, am Ende, bei längeren Namen auch
+mittendrin), nicht als zufällige Buchstabenfolge.
+
+**Haushalt löschen.** Unter Einstellungen, hinter fünf Bestätigungen – die
+allerdings nicht fünfmal dasselbe fragen, sondern jeweils etwas anderes nennen,
+das gleich verschwindet, mit den tatsächlichen Zahlen dieses Haushalts. Der
+letzte Schritt lässt sich nicht wegklicken: Dort muss der Name des Haushalts
+abgetippt werden.
+
 ## 1.3.0 – 2026-08-09
 
 **FRITZ!Box (experimentell).** Vierte Integration: DECT-Schaltsteckdosen mit

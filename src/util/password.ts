@@ -132,11 +132,37 @@ export function assertUsablePassword(password: string, username = ''): void {
       'Nimm etwas, das nicht in einem Wörterbuch steht – zum Beispiel drei zufällige Wörter.',
     );
   }
-  if (username && value.toLowerCase().includes(username.trim().toLowerCase()) && username.length >= 3) {
+  if (looksLikeUsername(value, username)) {
     throw badRequest(
-      'Das Passwort darf nicht den Anmeldenamen enthalten.',
+      'Das Passwort ist zu nah am Anmeldenamen.',
       undefined,
-      'Der Name ist bekannt – ein Passwort, das ihn enthält, ist damit halb geraten.',
+      'Der Name ist bekannt – ein Passwort, das aus ihm besteht, ist damit halb geraten.',
     );
   }
+}
+
+/**
+ * Ist das Passwort im Kern nur der Anmeldename?
+ *
+ * Die erste Fassung suchte den Namen einfach irgendwo im Passwort. Das klingt
+ * gründlich und ist in der Praxis ärgerlich: Bei „ben" wurde
+ * „Winterabend-77" abgelehnt – der Name steckt in „WinterABENd", sagt einem
+ * Angreifer aber nichts. Gefährlich sind `ben`, `ben2024`, `hallo-ben`, also
+ * der Name als *Baustein* des Passworts, nicht als zufällige Buchstabenfolge
+ * mitten in einem Wort.
+ *
+ * Deshalb: Am Anfang oder Ende zählt immer – das sind die gefährlichen
+ * Muster. Mittendrin zählt erst ab vier Zeichen; bei dreien ist ein
+ * zufälliges Zusammentreffen in einem gewöhnlichen Wort schlicht zu häufig,
+ * um daraus einen Vorwurf zu machen.
+ */
+export function looksLikeUsername(password: string, username: string): boolean {
+  const name = username.trim().toLowerCase();
+  if (name.length < 3) return false;
+
+  const value = password.toLowerCase();
+  if (value === name) return true;
+  if (value.startsWith(name) || value.endsWith(name)) return true;
+
+  return name.length >= 4 && value.includes(name);
 }

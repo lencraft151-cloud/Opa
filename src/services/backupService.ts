@@ -71,8 +71,21 @@ export interface RestoreResult {
   needRelink: string[];
 }
 
+export interface ResetResult {
+  rooms: number;
+  devices: number;
+  rules: number;
+  scenes: number;
+  integrations: number;
+  users: number;
+  telemetryFiles: number;
+}
+
 export class BackupService {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly telemetry?: { clear(): Promise<number> },
+  ) {}
 
   /** Baut die Sicherungsdatei. */
   export(householdId: string): BackupFile {
@@ -98,6 +111,11 @@ export class BackupService {
       rules: mine(data.rules),
       scenes: mine(data.scenes),
     };
+  }
+
+  /** Löscht den Haushalt und alles daran – siehe `resetHousehold`. */
+  async reset(confirmName: string): Promise<ResetResult> {
+    return resetHousehold(this.db, confirmName, this.telemetry);
   }
 
   /**
@@ -172,6 +190,65 @@ export class BackupService {
       };
     });
   }
+}
+
+/**
+ * Löscht den Haushalt und alles, was daran hängt.
+ *
+ * Danach ist der Hub wie frisch installiert: Beim nächsten Aufruf startet der
+ * Einrichtungsassistent. Weg sind Räume, Geräte, Automationen, Szenen,
+ * Benutzerkonten, Sitzungen, Zugriffstoken, die hinterlegten Zugangsdaten der
+ * Bridges und das Messwertarchiv.
+ *
+ * Der Name muss dabei genau getippt werden. Fünf Klicks lassen sich in fünf
+ * Sekunden wegdrücken – einen Namen abzutippen zwingt dazu, hinzusehen. Beides
+ * zusammen ist der Grund, warum hier nichts „aus Versehen" passiert.
+ */
+export async function resetHousehold(
+  db: Database,
+  confirmName: string,
+  telemetry?: { clear(): Promise<number> },
+): Promise<ResetResult> {
+  const household = db.read().households[0];
+  if (!household) throw badRequest('Es gibt keinen Haushalt zum Löschen.');
+
+  if (confirmName.trim() !== household.name.trim()) {
+    throw badRequest(
+      'Der eingegebene Name stimmt nicht mit dem Haushalt überein.',
+      undefined,
+      `Tippe „${household.name}" genau so ab, wie er dasteht.`,
+    );
+  }
+
+  const counted = await db.update((data) => {
+    const result: ResetResult = {
+      rooms: data.rooms.length,
+      devices: data.devices.length,
+      rules: data.rules.length,
+      scenes: data.scenes.length,
+      integrations: data.integrations.length,
+      users: data.users.length,
+      telemetryFiles: 0,
+    };
+    data.households = [];
+    data.rooms = [];
+    data.integrations = [];
+    data.devices = [];
+    data.rules = [];
+    data.scenes = [];
+    data.users = [];
+    data.sessions = [];
+    data.tokens = [];
+    return result;
+  });
+
+  // Erst die Datenbank, dann das Archiv: Schlägt das Löschen der Dateien fehl,
+  // steht am Ende ein leerer Hub mit ein paar verwaisten Messwerten da – und
+  // nicht ein Haushalt, dessen Messwerte weg sind.
+  counted.telemetryFiles = telemetry ? await telemetry.clear() : 0;
+
+  log.warn('Haushalt gelöscht', { ...counted });
+  return counted;
 }
 
 /**

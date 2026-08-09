@@ -931,6 +931,51 @@ hr.divider {
   margin: 1.1rem 0 0.8rem;
 }
 
+/* ------------------------------------------------------ Haushalt löschen */
+
+/*
+ * Unauffällig, solange sie zu ist – der rote Rand erscheint erst beim
+ * Aufklappen. Eine dauerhaft rot umrandete Karte am Seitenende macht die
+ * Einstellungen unruhig, ohne irgendetwas sicherer zu machen.
+ */
+.danger-zone > summary {
+  color: var(--error);
+}
+.danger-zone[open] {
+  border-color: color-mix(in srgb, var(--error) 45%, var(--border));
+}
+.danger-step {
+  border: 1px solid color-mix(in srgb, var(--error) 45%, var(--border));
+  border-radius: var(--radius-sm);
+  padding: 0.9rem;
+  margin-top: 0.8rem;
+  background: color-mix(in srgb, var(--error) 6%, var(--surface));
+  animation: card-in 0.28s var(--ease);
+}
+.danger-step .danger-count {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--error);
+  font-weight: 700;
+}
+.danger-step .title {
+  font-weight: 650;
+  font-size: 1.05rem;
+  margin: 0.2rem 0;
+}
+.danger-step label {
+  display: block;
+  margin: 0.6rem 0;
+}
+/* Der letzte Schritt: gesperrt, bis der Name stimmt. */
+.danger-step button.danger:not(:disabled) {
+  background: var(--error);
+  border-color: var(--error);
+  color: #fff;
+  font-weight: 650;
+}
+
 /* ------------------------------------------------------------- Assistent */
 
 .wizard {

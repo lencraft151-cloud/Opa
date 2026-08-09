@@ -133,6 +133,49 @@ describe('Einrichtung über die API', () => {
     assert.equal(second.data.build, first.data.build, 'gleicher Stand, gleiche Kennung');
   });
 
+  it('hinterlässt nichts, wenn das Passwort abgelehnt wird', async () => {
+    /*
+     * Der Fehler, der den Hub unbrauchbar machte: Der Haushalt entstand,
+     * danach lehnte die Prüfung das Passwort ab – und zurück blieb ein
+     * Haushalt ohne einen einzigen Zugang. Ab da griff die Anmeldepflicht,
+     * aber es gab niemanden, der sich hätte anmelden können. Jeder weitere
+     * Versuch endete in 401; der Hub war endgültig zugesperrt.
+     */
+    const rejected = await call('POST', '/api/setup/household', {
+      name: 'Testhaushalt',
+      username: 'anna',
+      password: 'kurz',
+    });
+    assert.equal(rejected.status, 400);
+
+    const state = await call('GET', '/api/setup/state');
+    assert.equal(state.data.hasHousehold, false, 'kein halber Haushalt bleibt zurück');
+  });
+
+  it('lässt einen Haushalt ohne Zugang noch einrichten', async () => {
+    // Für Datenstände, die den Fehler oben schon erwischt hat: Solange es
+    // kein einziges Konto gibt, bleibt der Weg zur Einrichtung offen.
+    const household = await container.households.create({ name: 'Verwaist' });
+    assert.equal(container.repos.users.listByHousehold(household.id).length, 0);
+
+    const rescued = await call('POST', '/api/setup/household', {
+      name: 'Gerettet',
+      username: 'retter',
+      password: 'drei zufaellige woerter',
+    });
+    assert.equal(rescued.status, 201, 'die Einrichtung greift den verwaisten Haushalt auf');
+    assert.equal(rescued.data.household.name, 'Gerettet');
+    assert.equal(rescued.data.user.role, 'admin');
+
+    // Und danach ist wieder alles geschützt.
+    const withoutSession = await call('GET', '/api/devices', undefined, false);
+    assert.equal(withoutSession.status, 401);
+
+    // Aufräumen: Der eigentliche Einrichtungstest unten fängt bei null an.
+    await container.backup.reset('Gerettet');
+    cookie = '';
+  });
+
   it('legt Haushalt und erstes Benutzerkonto an', async () => {
     const { status, data, headers } = await call('POST', '/api/setup/household', {
       name: 'Testhaushalt',
