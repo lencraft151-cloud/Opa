@@ -151,25 +151,33 @@ export function parseGen2Status(
       }
 
       case 'temperature': {
-        const tC = num(value['tC']);
-        if (tC === undefined) break;
+        /*
+         * Der Wert steht je nach Gerät unter `tC`, `value` – oder nur in
+         * Fahrenheit, wenn die Box so eingestellt ist. Fehlt er ganz, ist der
+         * Fühler gerade ungültig (abgezogen, noch nicht gemessen); das ist
+         * kein Grund, das Gerät verschwinden zu lassen.
+         */
+        const fahrenheit = num(value['tF']);
+        const tC =
+          num(value['tC']) ??
+          num(value['value']) ??
+          (fahrenheit !== undefined ? ((fahrenheit - 32) * 5) / 9 : undefined);
         components.push({
           externalId: key,
           name: label(naming, key, `Temperatur ${channel + 1}`),
           capabilities: ['sensor.temperature'],
-          state: { temperatureC: round(tC, 2) },
+          state: tC === undefined ? {} : { temperatureC: round(tC, 2) },
         });
         break;
       }
 
       case 'humidity': {
-        const rh = num(value['rh']);
-        if (rh === undefined) break;
+        const rh = num(value['rh']) ?? num(value['value']);
         components.push({
           externalId: key,
           name: label(naming, key, `Luftfeuchte ${channel + 1}`),
           capabilities: ['sensor.humidity'],
-          state: { humidity: round(rh, 1) },
+          state: rh === undefined ? {} : { humidity: round(rh, 1) },
         });
         break;
       }

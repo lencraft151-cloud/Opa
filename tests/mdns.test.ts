@@ -5,7 +5,13 @@ import type { AddressInfo } from 'node:net';
 import { describe, it } from 'node:test';
 import { browse, buildQuery, MDNS_SERVICES, parseResponse } from '../src/util/mdns.ts';
 import { setLogLevel } from '../src/core/logger.ts';
-import { reachableHosts } from '../src/util/net.ts';
+import {
+  defaultGateways,
+  isIPv4,
+  isPrivateIPv4,
+  localSubnets,
+  reachableHosts,
+} from '../src/util/net.ts';
 
 setLogLevel('silent');
 
@@ -287,5 +293,36 @@ describe('Belegte Adressen im Netz finden', () => {
 
   it('kommt mit einer leeren Liste zurecht', async () => {
     assert.deepEqual(await reachableHosts([]), []);
+  });
+});
+
+describe('Wo der Router steht', () => {
+  /*
+   * Für die FRITZ!Box ist das die entscheidende Adresse: Sie *ist* in aller
+   * Regel der Router. Die Suche kannte bisher nur `fritz.box` und AVMs
+   * Werksadresse – wer sein Netz auf 192.168.1.x umgestellt hat, fand seine
+   * Box über die normale Suche nie.
+   */
+  it('nennt mindestens einen Kandidaten je lokalem Netz', () => {
+    const gateways = defaultGateways();
+    for (const subnet of localSubnets()) {
+      const prefix = subnet.address.split('.').slice(0, 3).join('.');
+      assert.ok(
+        gateways.some((gateway) => gateway.startsWith(`${prefix}.`)),
+        `kein Kandidat für ${subnet.address}: ${gateways.join(', ')}`,
+      );
+    }
+  });
+
+  it('liefert lauter gültige, private Adressen', () => {
+    for (const gateway of defaultGateways()) {
+      assert.ok(isIPv4(gateway), `${gateway} ist keine IPv4-Adresse`);
+      assert.ok(isPrivateIPv4(gateway) || gateway.startsWith('192.0.2.'), gateway);
+    }
+  });
+
+  it('nennt keine Adresse doppelt', () => {
+    const gateways = defaultGateways();
+    assert.equal(new Set(gateways).size, gateways.length);
   });
 });

@@ -467,4 +467,6 @@ export const MDNS_SERVICES = {
   hue: '_hue._tcp.local',
   shelly: '_shelly._tcp.local',
   http: '_http._tcp.local',
+  /** AVM-Boxen melden sich unter diesem Dienst. */
+  fritzbox: '_fritzbox._tcp.local',
 } as const;

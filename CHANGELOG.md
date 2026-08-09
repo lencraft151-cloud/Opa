@@ -8,6 +8,27 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.4.1 – 2026-08-09
+
+**Die FRITZ!Box wurde nicht gefunden – und mit ihr keiner ihrer Rollläden.**
+Die normale Suche kannte nur `fritz.box` und AVMs Werksadresse
+`192.168.178.1`. Wer sein Netz auf `192.168.1.x` umgestellt hat oder einen
+Provider-Router betreibt, fand seine Box nie – außer über den gründlichen
+Scan. Dabei ist die Antwort einfach: Die FRITZ!Box *ist* in aller Regel der
+Router. Der Hub liest jetzt die Standardroute des Systems und fragt sie mit
+ab; dazu die üblichen `.1` und `.254` jedes lokalen Netzes und der
+mDNS-Dienst `_fritzbox._tcp`, unter dem AVM-Boxen sich melden.
+
+Damit erscheinen auch die Rollläden an der Box – sie waren nie falsch
+abgebildet, es fehlte schlicht die Box.
+
+**Shelly-Temperaturfühler verschwanden, wenn der Messwert gerade fehlte.**
+Ein abgezogener Add-on-Fühler oder ein noch nicht gemessener Wert ließ das
+ganze Gerät aus der Liste fallen. Jetzt bleibt es sichtbar und meldet nur
+keinen Wert. Gelesen wird der Wert außerdem unter allen Namen, unter denen
+Shelly ihn schreibt – `tC`, `value`, und in Fahrenheit, wenn das Gerät so
+eingestellt ist.
+
 ## 1.4.0 – 2026-08-09
 
 **Shelly: Heizungen und Sensoren, die vorher fehlten.** Ein BLU TRV hängt per

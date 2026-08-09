@@ -8,7 +8,8 @@ import type {
   FritzboxIntegrationSecrets,
 } from '../../core/types.js';
 import { mapWithConcurrency } from '../../util/http.js';
-import { isIPv4, scannableHosts } from '../../util/net.js';
+import { browse, MDNS_SERVICES } from '../../util/mdns.js';
+import { defaultGateways, isIPv4, scannableHosts } from '../../util/net.js';
 import { children } from '../../util/xml.js';
 import { FritzboxClient } from './client.js';
 import { celsiusToHalfDegrees, parseDevice, type FritzDevice } from './mapping.js';
@@ -31,7 +32,16 @@ type FritzboxContext = IntegrationContext<FritzboxIntegrationConfig, FritzboxInt
  * ist der Name, den die Box selbst im Heimnetz auflöst; die beiden Adressen
  * sind die Werkseinstellungen von AVM.
  */
-const KNOWN_HOSTS = ['fritz.box', '192.168.178.1', '169.254.1.1'];
+/**
+ * Adressen, unter denen eine FRITZ!Box üblicherweise erreichbar ist.
+ *
+ * `fritz.box` ist der von AVM vergebene Name, die beiden IP-Adressen sind
+ * Werkseinstellung und Notfalladresse. Dazu kommt zur Laufzeit der
+ * tatsächliche Router – siehe `defaultGateways`. Denn die FRITZ!Box *ist* in
+ * aller Regel der Router, und wer sein Netz auf `192.168.1.x` umgestellt hat,
+ * fand sie über diese Liste allein nie.
+ */
+const KNOWN_HOSTS = ['fritz.box', 'fritz.box.', '192.168.178.1', '169.254.1.1'];
 
 /**
  * FRITZ!Box als Smart-Home-Zentrale (experimentell).
@@ -51,6 +61,23 @@ export class FritzboxAdapter implements IntegrationAdapter {
 
   async discover(options: DiscoverOptions): Promise<DiscoveredIntegration[]> {
     const hosts = new Set<string>(KNOWN_HOSTS);
+    for (const gateway of defaultGateways()) hosts.add(gateway);
+
+    /*
+     * AVM-Boxen melden sich auch per mDNS. Das kostet nichts, was die Suche
+     * nicht ohnehin täte, und findet eine Box, die weder unter ihrem Namen
+     * noch als Router erreichbar ist – etwa hinter einem zweiten Router.
+     */
+    try {
+      for (const service of await browse(MDNS_SERVICES.fritzbox, {
+        timeoutMs: options.timeoutMs,
+      })) {
+        const address = service.addresses.find(isIPv4);
+        if (address) hosts.add(address);
+      }
+    } catch {
+      /* Ohne mDNS bleiben die bekannten Adressen. */
+    }
 
     // Im Zweifel auch das eigene Subnetz – manche Boxen laufen unter einer
     // anderen Adresse, etwa hinter einem zweiten Router.

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { Socket } from 'node:net';
 import { networkInterfaces } from 'node:os';
 
@@ -85,6 +86,48 @@ export function scannableHosts(maxHostsPerSubnet = 254): string[] {
     for (const host of enumerateHosts(subnet, maxHostsPerSubnet)) seen.add(host);
   }
   return [...seen];
+}
+
+/**
+ * Wo der Router steht.
+ *
+ * Für die FRITZ!Box ist das die entscheidende Adresse: Sie *ist* in aller
+ * Regel der Router. Die Suche kannte bisher nur `fritz.box` und AVMs
+ * Werksadresse `192.168.178.1` – wer sein Netz auf `192.168.1.x` umgestellt
+ * hat (oder einen Provider-Router mit anderer Voreinstellung nutzt), fand
+ * seine Box nie, außer über den gründlichen Scan.
+ *
+ * Zwei Wege: die echte Standardroute aus `/proc/net/route`, und als Rückfall
+ * die üblichen Verdächtigen `.1` und `.254` jedes lokalen Netzes. Der zweite
+ * Weg kostet zwei Anfragen und funktioniert auch dort, wo es kein `/proc`
+ * gibt.
+ */
+export function defaultGateways(): string[] {
+  const found = new Set<string>();
+
+  try {
+    // Format: Iface Destination Gateway … – Adressen als Little-Endian-Hex.
+    for (const line of readFileSync('/proc/net/route', 'utf8').split('\n').slice(1)) {
+      const columns = line.trim().split(/\s+/);
+      if (columns.length < 3 || columns[1] !== '00000000') continue;
+      const hex = columns[2] as string;
+      if (!/^[0-9A-Fa-f]{8}$/.test(hex) || hex === '00000000') continue;
+      const value = Number.parseInt(hex, 16);
+      // Little Endian: Die Bytes stehen in umgekehrter Reihenfolge.
+      const ip = [value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255];
+      found.add(ip.join('.'));
+    }
+  } catch {
+    /* Kein /proc (macOS, Windows) – dann eben nur die Faustregel. */
+  }
+
+  for (const subnet of localSubnets()) {
+    for (const host of enumerateHosts(subnet, 254).slice(0, 1)) found.add(host);
+    const parts = subnet.address.split('.');
+    if (parts.length === 4) found.add(`${parts[0]}.${parts[1]}.${parts[2]}.254`);
+  }
+
+  return [...found];
 }
 
 /**
