@@ -8,6 +8,29 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.12.1 – 2026-08-10
+
+**Das Aktualisieren zog den falschen Zweig – und warf den Hub damit auf einen
+älteren Stand zurück.** Ohne gesetztes `HUB_BRANCH` holte der Hub fest
+`main`. Wer seine Installation von einem anderen Zweig aufgesetzt und dann
+„aktualisieren" gedrückt hat, bekam deshalb kein Update, sondern einen
+Zweigwechsel – und hinterher sah es aus, als sei die halbe Anwendung
+verschwunden.
+
+Drei Änderungen:
+
+- **Ohne Angabe wird der eigene Zweig fortgeschrieben.** Der Hub liest, auf
+  welchem Zweig seine Arbeitskopie steht, und zieht diesen. `main` bleibt die
+  Vorgabe nur dort, wo es gar keine Arbeitskopie gibt. Eine ausdrückliche
+  Angabe in `HUB_BRANCH` gewinnt weiterhin – wer den Zweig selbst setzt, weiß,
+  was er tut.
+- **Unter Einstellungen → Diese Fassung steht jetzt, worauf man läuft:** Zweig
+  und Commit, neben Fassung und Node-Version. Ohne diese Angabe war „warum ist
+  alles weg?" nicht zu beantworten.
+- **Und eine Warnung, bevor es passiert:** Zeigt der eingestellte Zweig
+  woandershin als die Arbeitskopie, sagt der Hub das deutlich, statt es
+  stillschweigend zu tun.
+
 ## 1.12.0 – 2026-08-10
 
 **Der Hub sagt Bescheid, wenn eine neue Fassung da ist.** Bisher musste man

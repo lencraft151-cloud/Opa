@@ -11,7 +11,10 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 
@@ -209,5 +212,65 @@ describe('Versionen vergleichen', () => {
 
   it('stört sich nicht an einem führenden v', () => {
     assert.equal(compareVersions('v2.0.0', '2.0.0'), 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auf welchen Zweig aktualisiert wird
+// ---------------------------------------------------------------------------
+
+/**
+ * Der Fehler, der alles verschwinden ließ.
+ *
+ * Der Hub zog beim Aktualisieren fest `main`, wenn nichts anderes eingestellt
+ * war. Wer seinen Hub von einem Entwicklungszweig aufgesetzt und dann den
+ * Knopf gedrückt hat, bekam damit keinen neueren Stand, sondern einen viel
+ * älteren – und hinterher sah es aus, als sei die halbe Anwendung weg.
+ *
+ * Richtig ist: Ohne ausdrückliche Angabe wird der Zweig fortgeschrieben, auf
+ * dem die Arbeitskopie steht.
+ */
+describe('Zweig der Aktualisierung', () => {
+  it('nennt den Zweig, auf dem die Arbeitskopie steht', async () => {
+    const service = new HubUpdateService(VERSION, { checkUrl: null });
+    const info = await service.info();
+
+    // Dieses Projekt *ist* eine Arbeitskopie – der Name muss also da sein.
+    assert.ok(info.branch, 'der Zweig der Arbeitskopie wird gelesen');
+    assert.match(info.commit ?? '', /^[0-9a-f]{7}$/);
+  });
+
+  it('schreibt ohne Angabe genau diesen Zweig fort, statt auf main zu springen', async () => {
+    const service = new HubUpdateService(VERSION, { checkUrl: null });
+    const info = await service.info();
+
+    assert.equal(
+      info.updateBranch,
+      info.branch,
+      'ohne HUB_BRANCH wird der eigene Zweig gezogen, nicht main',
+    );
+  });
+
+  it('lässt eine ausdrückliche Angabe gewinnen', async () => {
+    // Wer den Zweig selbst setzt, weiß, was er tut – auch wenn es ein
+    // Wechsel ist.
+    const service = new HubUpdateService(VERSION, { checkUrl: null, branch: 'main' });
+    const info = await service.info();
+
+    assert.equal(info.updateBranch, 'main');
+  });
+
+  it('fällt ohne Arbeitskopie auf main zurück', async () => {
+    const leer = await mkdtemp(path.join(tmpdir(), 'smarthome-ohne-git-'));
+    try {
+      const service = new HubUpdateService(VERSION, { checkUrl: null, root: leer });
+      const info = await service.info();
+
+      assert.equal(info.branch, null, 'ohne .git gibt es keinen Zweig');
+      assert.equal(info.commit, null);
+      assert.equal(info.updateBranch, 'main', 'dann bleibt main die vernünftige Vorgabe');
+    } finally {
+      await rm(leer, { recursive: true, force: true });
+    }
   });
 });

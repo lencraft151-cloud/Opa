@@ -61,6 +61,19 @@ export interface Updatability {
 
 export interface HubVersionInfo {
   currentVersion: string;
+  /**
+   * Der Zweig, auf dem die Arbeitskopie steht – und der, der beim
+   * Aktualisieren gezogen würde.
+   *
+   * Beides gehört sichtbar in die Oberfläche, weil genau hier der stille
+   * Rückschritt entsteht: Wer den Hub von einem Zweig aufgesetzt hat und
+   * dann aktualisiert, während `main` eingestellt ist, bekommt einen
+   * *älteren* Stand – und wundert sich, warum alles weg ist.
+   */
+  branch: string | null;
+  updateBranch: string;
+  /** Die letzten sieben Stellen des Commits, für den Fall der Fälle. */
+  commit: string | null;
   latestVersion: string | null;
   updateAvailable: boolean;
   /** Alles, was zwischen der laufenden und der neuesten Fassung liegt. */
@@ -117,6 +130,8 @@ export class HubUpdateService {
   private latestVersion: string | null = null;
   private busy = false;
   private updatabilityCache: { at: number; value: Updatability } | null = null;
+  /** Zuletzt gelesener Zweig der Arbeitskopie – siehe `branch`. */
+  private checkedOutBranch: string | null = null;
   private timer: NodeJS.Timeout | null = null;
   private firstTimer: NodeJS.Timeout | null = null;
   /**
@@ -217,8 +232,37 @@ export class HubUpdateService {
     return this.options.root ?? PROJECT_ROOT;
   }
 
+  /**
+   * Der Zweig, der beim Aktualisieren gezogen wird.
+   *
+   * Ohne ausdrückliche Angabe **der Zweig, auf dem die Arbeitskopie steht** –
+   * nicht `main`. Das ist die Reparatur eines Fehlers, der teuer war: Wer
+   * seinen Hub von einem Entwicklungszweig aufgesetzt und dann den Knopf
+   * „aktualisieren" gedrückt hat, wurde auf `main` gezogen und damit auf
+   * einen viel älteren Stand zurückgeworfen. Die Aktualisierung soll den
+   * Stand fortschreiben, auf dem man ist, und nicht heimlich den Zweig
+   * wechseln.
+   */
   private get branch(): string {
-    return this.options.branch || 'main';
+    return this.options.branch || this.checkedOutBranch || 'main';
+  }
+
+  /** Auf welchem Zweig steht die Arbeitskopie? `null` heißt: keine da. */
+  private async readCheckout(): Promise<{ branch: string | null; commit: string | null }> {
+    try {
+      const [branch, commit] = await Promise.all([
+        run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: this.root, timeout: 10_000 }),
+        run('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: this.root, timeout: 10_000 }),
+      ]);
+      const name = branch.stdout.trim();
+      return {
+        // Ein losgelöster HEAD meldet „HEAD" – das ist kein Zweigname.
+        branch: name && name !== 'HEAD' ? name : null,
+        commit: commit.stdout.trim() || null,
+      };
+    } catch {
+      return { branch: null, commit: null };
+    }
   }
 
   /** Zustand für die Oberfläche. */
@@ -237,9 +281,14 @@ export class HubUpdateService {
       : [];
 
     const { canUpdate, mode, reason } = await this.updatability();
+    const checkout = await this.readCheckout();
+    this.checkedOutBranch = checkout.branch;
 
     return {
       currentVersion: this.currentVersion,
+      branch: checkout.branch,
+      updateBranch: this.branch,
+      commit: checkout.commit,
       latestVersion: latest,
       updateAvailable,
       pending,

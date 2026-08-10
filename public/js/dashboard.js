@@ -4091,7 +4091,31 @@ function hubVersionCard() {
          </div>`
       : '';
 
+  /*
+   * Die Warnung, die einen halben Tag gekostet hat.
+   *
+   * Der Hub aktualisiert auf den eingestellten Zweig. Steht dort ein anderer
+   * als der, auf dem die Arbeitskopie liegt, ist das kein Update, sondern ein
+   * Zweigwechsel – und wenn der andere Zweig älter ist, sieht es hinterher
+   * aus, als sei alles verschwunden. Genau das passiert stillschweigend, wenn
+   * jemand seinen Hub von einem Entwicklungszweig aufsetzt und `HUB_BRANCH`
+   * nicht kennt.
+   */
+  const branchWarning =
+    info.branch && info.updateBranch && info.branch !== info.updateBranch
+      ? `<div class="callout warn">
+           <strong>Das Aktualisieren würde den Zweig wechseln</strong>
+           <span>
+             Der Hub läuft auf <code>${esc(info.branch)}</code>, gezogen würde aber
+             <code>${esc(info.updateBranch)}</code>. Ist dort ein älterer Stand, verschwindet
+             hinterher alles, was es nur auf deinem Zweig gibt. Setze
+             <code>HUB_BRANCH=${esc(info.branch)}</code>, wenn du auf diesem Zweig bleiben willst.
+           </span>
+         </div>`
+      : '';
+
   return `<h2>Diese Fassung ${badge}</h2>
+    ${branchWarning}
     <div class="list">
       <div class="item">
         <div>
@@ -4101,6 +4125,9 @@ function hubVersionCard() {
           <div class="sub">
             Node ${esc(store.systemInfo?.node ?? '–')} ·
             Oberfläche ${esc(store.systemInfo?.build ?? 'unbekannt')} ·
+            ${info.branch ? `Zweig <code>${esc(info.branch)}</code>` : 'keine Arbeitskopie'}${
+              info.commit ? ` (${esc(info.commit)})` : ''
+            } ·
             ${info.checkedAt ? `geprüft ${esc(fmt.relative(info.checkedAt))}` : 'noch nicht geprüft'}
           </div>
         </div>

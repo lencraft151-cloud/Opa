@@ -776,8 +776,19 @@ zurückkopiert: Was nicht bewegt wird, kann nicht verlorengehen. Vorher prüft d
 Hub zusätzlich, ob das Repository einen Pfad führt, unter dem `DATA_DIR` liegt;
 wäre das so, bricht er ab, statt die Daten zu überschreiben.
 
-Woher der Quelltext kommt, steht in `HUB_REPO_URL` (mit sinnvoller Vorgabe),
-welcher Zweig in `HUB_BRANCH`.
+Woher der Quelltext kommt, steht in `HUB_REPO_URL` (mit sinnvoller Vorgabe).
+
+**Welcher Zweig gezogen wird, ist die Frage, an der es einmal teuer geklemmt
+hat.** Ohne Angabe zog der Hub fest `main` – wer seine Installation von einem
+anderen Zweig aufgesetzt und dann „aktualisieren" gedrückt hat, bekam damit
+keinen neueren Stand, sondern einen Zweigwechsel auf einen viel älteren.
+Hinterher sah es aus, als sei die halbe Anwendung verschwunden.
+
+Ohne `HUB_BRANCH` schreibt der Hub deshalb **den Zweig fort, auf dem seine
+Arbeitskopie steht**; `main` bleibt die Vorgabe nur dort, wo es gar keine
+Arbeitskopie gibt. Eine ausdrückliche Angabe gewinnt weiterhin. Unter
+Einstellungen → Diese Fassung stehen Zweig und Commit, und wenn beides
+auseinanderläuft, warnt der Hub, bevor er zieht.
 
 Drei Dinge tut der Hub bewusst nicht:
 
