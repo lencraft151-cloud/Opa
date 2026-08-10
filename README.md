@@ -529,6 +529,21 @@ Drei Feinheiten:
   eigenen Haushalt ist das der richtige Tausch – die Alternative wäre eine
   Passworteingabe bei jedem Start.
 
+**Die eine Falle: eine alte `.env`.** Steht dort noch `DATA_DIR=./data` aus
+früheren Fassungen, gewinnt diese Angabe – und die Daten liegen weiter *im*
+Projektordner, wo der nächste Austausch sie mitnimmt. Der Hub sagt das in den
+Einstellungen unter „Wo deine Daten liegen" mit einem Warnhinweis; wer ihn
+sieht, löscht die Zeile aus der `.env` und startet einmal neu. Der Bestand
+wandert dann beim nächsten Start an den richtigen Ort.
+
+Durchgespielt, nicht nur behauptet: Hub aufgesetzt (Haushalt, drei Räume,
+Shelly, Nextcloud-Konto), den **ganzen Projektordner gelöscht**, frisch
+geklont, `npm install && npm run build`, gestartet – ohne `.env`, ohne
+`data/`. Danach: derselbe Haushalt, dieselben Räume und Geräte, Anmeldung mit
+demselben Passwort, unveränderter `secret.key` und ein durchlaufender
+Nextcloud-Abruf. Der braucht das entschlüsselte App-Passwort und ist damit der
+Beleg, dass Datei *und* Schlüssel den Wechsel überstanden haben.
+
 ### Wiki im Hub
 
 Ein eigener Reiter mit zwölf Artikeln: Erste Schritte, Geräte verbinden, je
