@@ -645,64 +645,326 @@ async function refreshSummary() {
 }
 
 // ---------------------------------------------------------------------------
-// Räume
+// Räume und Geräte
 // ---------------------------------------------------------------------------
 
-function renderRooms(panel = $('#sub-rooms')) {
-  if (!panel) return;
-  const unassigned = store.devices.filter((device) => device.roomId === null);
+/**
+ * Eine Ansicht für beides.
+ *
+ * Vorher waren es zwei Reiter, dann zwei Unterreiter – und immer noch zwei
+ * Suchfelder, zwei Filter und zwei Antworten auf dieselbe Frage. Dabei ist
+ * „Räume" keine andere Sache als „Geräte": Es ist dieselbe Liste, nur
+ * gruppiert.
+ *
+ * Jetzt gibt es **eine** Werkzeugleiste, die für beides gilt. Ob nach Räumen
+ * gruppiert oder am Stück angezeigt wird, ist eine Einstellung darin – keine
+ * zweite Seite.
+ */
+const homeView = {
+  search: '',
+  /** `''` = alle Räume, `__none` = die ohne Raum. */
+  roomId: '',
+  capability: '',
+  /** `room` | `name` | `power` | `recent` */
+  sort: 'room',
+  /** `rooms` = nach Räumen gruppiert, `list` = alles am Stück. */
+  layout: 'rooms',
+  /** Schnellfilter, siehe `HOME_CHIPS`. */
+  chip: 'all',
+  /** Ausgewählte Geräte für Sammelaktionen. */
+  selected: new Set(),
+};
 
-  if (store.rooms.length === 0 && unassigned.length === 0) {
-    panel.innerHTML = emptyState(
-      '🏠',
-      'Noch keine Räume angelegt.',
-      'Räume fassen Geräte zusammen: Du siehst die Temperatur je Raum und kannst alles darin auf einmal schalten. Anlegen kannst du sie unter Einstellungen.',
-    );
-    return;
+/**
+ * Schnellfilter.
+ *
+ * Jeder beantwortet eine Frage, die man wirklich stellt – „was ist noch an?",
+ * „was hängt nirgends dran?", „was antwortet nicht?". Ein Filter für jede
+ * denkbare Eigenschaft wäre eine Suchmaske; das hier sind sechs Knöpfe.
+ */
+const HOME_CHIPS = [
+  { id: 'all', label: 'Alle', match: () => true },
+  { id: 'favorites', label: '⭐ Favoriten', match: (device) => device.favorite === true },
+  { id: 'on', label: '💡 An', match: (device) => device.state?.on === true },
+  { id: 'off', label: '🌙 Aus', match: (device) => device.state?.on === false },
+  { id: 'unassigned', label: '🚪 Ohne Raum', match: (device) => device.roomId === null },
+  { id: 'offline', label: '⚠️ Offline', match: (device) => device.reachable === false },
+];
+
+const HOME_SORTS = [
+  ['room', 'Raum'],
+  ['name', 'Name'],
+  ['power', 'Verbrauch'],
+  ['recent', 'Zuletzt gesehen'],
+];
+
+const HOME_CAPABILITIES = [
+  ['', 'Alle Fähigkeiten'],
+  ['switch', 'Schaltbar'],
+  ['dimmer', 'Dimmbar'],
+  ['color', 'Farbe'],
+  ['cover', 'Rollläden'],
+  ['thermostat', 'Heizung'],
+  ['sensor.temperature', 'Temperatur'],
+  ['sensor.humidity', 'Luftfeuchte'],
+  ['sensor.power', 'Verbrauch'],
+];
+
+/** Die Geräte, die gerade durch alle Filter kommen. */
+function visibleDevices() {
+  const needle = homeView.search.trim().toLowerCase();
+  const chip = HOME_CHIPS.find((entry) => entry.id === homeView.chip) ?? HOME_CHIPS[0];
+
+  const list = store.devices.filter((device) => {
+    if (homeView.capability && !device.capabilities.includes(homeView.capability)) return false;
+    if (homeView.roomId === '__none' && device.roomId !== null) return false;
+    else if (homeView.roomId && homeView.roomId !== '__none' && device.roomId !== homeView.roomId) {
+      return false;
+    }
+    if (!chip.match(device)) return false;
+    if (!needle) return true;
+
+    /*
+     * Gesucht wird über alles, wonach jemand sucht: den Namen, den Raum, den
+     * Hersteller und das Modell. Wer „hue" tippt, meint meist alle Lampen der
+     * Bridge – nicht nur die, die zufällig „Hue" im Namen tragen.
+     */
+    const haystack = [
+      device.name,
+      roomName(device.roomId),
+      VENDOR_LABEL[device.vendor] ?? device.vendor,
+      device.model ?? '',
+      device.manufacturer ?? '',
+    ]
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(needle);
+  });
+
+  return sortDevices(list);
+}
+
+function sortDevices(list) {
+  const byName = (a, b) => a.name.localeCompare(b.name, 'de');
+  const sorted = [...list];
+
+  switch (homeView.sort) {
+    case 'name':
+      sorted.sort(byName);
+      break;
+    case 'power':
+      // Ohne Messwert ganz nach unten: Eine Liste, die mit zwanzig „–" beginnt,
+      // beantwortet die Frage „wer verbraucht am meisten?" nicht.
+      sorted.sort((a, b) => (b.state?.powerW ?? -1) - (a.state?.powerW ?? -1) || byName(a, b));
+      break;
+    case 'recent':
+      sorted.sort((a, b) => (b.lastSeenAt ?? '').localeCompare(a.lastSeenAt ?? '') || byName(a, b));
+      break;
+    default:
+      sorted.sort((a, b) => roomName(a.roomId).localeCompare(roomName(b.roomId), 'de') || byName(a, b));
   }
 
-  const groups = store.rooms.map((room) => {
-    const devices = store.devices.filter((device) => device.roomId === room.id);
-    const covers = devices.filter((device) => device.capabilities.includes('cover'));
-    return `<section class="card">
-      <div class="row between">
-        <div>
-          <h2 style="margin:0">${esc(room.name)}</h2>
-          <div class="muted small">
-            ${esc(fmt.temperature(room.climate?.temperatureC ?? null))} ·
-            💧 ${esc(fmt.percent(room.climate?.humidity ?? null))} ·
-            ⚡ ${esc(fmt.power(room.climate?.powerW ?? 0))} · ${esc(plural(devices.length, "Gerät", "Geräte"))}
+  // Favoriten immer zuerst – dafür sind sie da.
+  return [...sorted.filter((device) => device.favorite), ...sorted.filter((device) => !device.favorite)];
+}
+
+/**
+ * Räume und Geräte in einer Ansicht.
+ */
+async function renderHome() {
+  const panel = $('#panel-home');
+  if (!panel) return;
+
+  const devices = visibleDevices();
+  const total = store.devices.length;
+  const on = devices.filter((device) => device.state?.on === true).length;
+  const filtered = devices.length !== total;
+
+  const html = `
+    <p class="intro">
+      Alles, was im Haus hängt – nach Räumen gruppiert oder am Stück, mit einer
+      Suche für beides. ${wikiLink('raeume', 'Was bringen Räume?')}
+    </p>
+
+    ${homeToolbar()}
+
+    <div class="chips home-chips">${HOME_CHIPS.map(
+      (chip) => `<button type="button" class="chip ${chip.id === homeView.chip ? 'active' : ''}"
+                         data-home-chip="${esc(chip.id)}">${esc(chip.label)}</button>`,
+    ).join('')}</div>
+
+    <div class="row between home-summary">
+      <span class="muted small">
+        ${
+          filtered
+            ? `${esc(plural(devices.length, 'Gerät', 'Geräte'))} von ${total}`
+            : esc(plural(total, 'Gerät', 'Geräte'))
+        }${on > 0 ? ` · ${on} an` : ''}
+      </span>
+      ${
+        /*
+         * Der Knopf hängt daran, ob ein Filter *gesetzt* ist – nicht daran, ob
+         * er gerade etwas wegnimmt. Sonst verschwände er genau dann, wenn die
+         * Suche auf alle Geräte passt, und man käme aus ihr nicht mehr heraus,
+         * ohne das Feld von Hand zu leeren.
+         */
+        isFiltering()
+          ? '<button class="small ghost" id="home-reset">Filter zurücksetzen</button>'
+          : ''
+      }
+    </div>
+
+    ${selectionBar()}
+
+    <div id="home-body">${
+      homeView.layout === 'rooms' ? groupedByRoom(devices) : flatList(devices)
+    }</div>`;
+
+  if (!paint(panel, html)) return;
+
+  bindDeviceControls(panel, sendCommand, deviceById);
+  wireDeviceEditors(panel);
+  wireHomeToolbar(panel);
+  wireDeviceSlots(panel);
+  wireRoomActions(panel);
+  restoreOpenSections(panel);
+  restoreDrafts(panel);
+}
+
+function homeToolbar() {
+  const rooms = store.rooms ?? [];
+  const option = (value, label, current) =>
+    `<option value="${esc(value)}" ${value === current ? 'selected' : ''}>${esc(label)}</option>`;
+
+  return `<div class="home-toolbar">
+    <div class="search-field">
+      <span aria-hidden="true">🔍</span>
+      <input id="home-search" type="search" value="${esc(homeView.search)}"
+             placeholder="Geräte, Räume, Hersteller durchsuchen …"
+             aria-label="Geräte und Räume durchsuchen" />
+      <kbd title="Drücke / für die Suche">/</kbd>
+    </div>
+
+    <select id="home-room" aria-label="Raum">
+      ${option('', 'Alle Räume', homeView.roomId)}
+      ${rooms.map((room) => option(room.id, room.name, homeView.roomId)).join('')}
+      ${option('__none', 'Ohne Raum', homeView.roomId)}
+    </select>
+
+    <select id="home-capability" aria-label="Fähigkeit">
+      ${HOME_CAPABILITIES.map(([value, label]) => option(value, label, homeView.capability)).join('')}
+    </select>
+
+    <select id="home-sort" aria-label="Sortierung">
+      ${HOME_SORTS.map(([value, label]) => option(value, `Sortiert nach ${label}`, homeView.sort)).join('')}
+    </select>
+
+    <div class="segmented" role="group" aria-label="Darstellung">
+      <button type="button" data-home-layout="rooms"
+              class="${homeView.layout === 'rooms' ? 'active' : ''}"
+              title="Geräte nach Räumen gruppiert">🛋️ Räume</button>
+      <button type="button" data-home-layout="list"
+              class="${homeView.layout === 'list' ? 'active' : ''}"
+              title="Alle Geräte in einer Liste">📋 Liste</button>
+    </div>
+  </div>`;
+}
+
+/**
+ * Die Leiste für Sammelaktionen.
+ *
+ * Erscheint erst, wenn etwas ausgewählt ist – vorher wäre sie eine leere
+ * Werkzeugleiste, die nur Platz kostet.
+ */
+function selectionBar() {
+  const count = homeView.selected.size;
+  if (count === 0) return '';
+
+  const rooms = store.rooms ?? [];
+  return `<div class="selection-bar">
+    <strong>${esc(plural(count, 'Gerät', 'Geräte'))} ausgewählt</strong>
+    <div class="row tight">
+      <button class="small" data-bulk="on">Alle an</button>
+      <button class="small" data-bulk="off">Alle aus</button>
+      ${
+        rooms.length
+          ? `<select id="bulk-room" aria-label="In einen Raum verschieben">
+               <option value="">In Raum verschieben …</option>
+               ${rooms.map((room) => `<option value="${esc(room.id)}">${esc(room.name)}</option>`).join('')}
+               <option value="__none">— aus dem Raum nehmen —</option>
+             </select>`
+          : ''
+      }
+      <button class="small" data-bulk="favorite" title="Angeheftete Geräte stehen immer oben">⭐ Anheften</button>
+      <button class="small ghost" data-bulk="hide">Ausblenden</button>
+      <button class="small ghost" data-bulk="clear">Auswahl aufheben</button>
+    </div>
+  </div>`;
+}
+
+/** Die Geräte, gruppiert nach ihren Räumen. */
+function groupedByRoom(devices) {
+  const rooms = store.rooms ?? [];
+  const unassigned = devices.filter((device) => device.roomId === null);
+
+  if (rooms.length === 0 && unassigned.length === 0) {
+    return emptyState(
+      '🏠',
+      store.devices.length === 0 ? 'Noch keine Geräte da.' : 'Nichts passt zu diesen Filtern.',
+      store.devices.length === 0
+        ? 'Unter Einstellungen → Integrationen kannst du Bridges und Geräte hinzufügen.'
+        : 'Setze die Filter zurück oder ändere die Suche.',
+    );
+  }
+
+  const sections = rooms
+    .map((room) => {
+      const inRoom = devices.filter((device) => device.roomId === room.id);
+      // Leere Räume nur zeigen, wenn nicht gefiltert wird – sonst stünden bei
+      // einer Suche zehn leere Überschriften über dem einen Treffer.
+      if (inRoom.length === 0 && isFiltering()) return '';
+      const covers = inRoom.filter((device) => device.capabilities.includes('cover'));
+
+      return `<section class="card">
+        <div class="row between">
+          <div>
+            <h2 style="margin:0">${esc(room.name)}</h2>
+            <div class="muted small">
+              ${esc(fmt.temperature(room.climate?.temperatureC ?? null))} ·
+              💧 ${esc(fmt.percent(room.climate?.humidity ?? null))} ·
+              ⚡ ${esc(fmt.power(room.climate?.powerW ?? 0))} · ${esc(plural(inRoom.length, 'Gerät', 'Geräte'))}
+            </div>
+          </div>
+          <div class="row tight">
+            <button class="small" data-room-power="${esc(room.id)}" data-on="1">Alles an</button>
+            <button class="small" data-room-power="${esc(room.id)}" data-on="">Alles aus</button>
+            ${
+              covers.length
+                ? `<button class="small" data-room-cover="${esc(room.id)}" data-open="1">Rollläden auf</button>
+                   <button class="small" data-room-cover="${esc(room.id)}" data-open="">Rollläden zu</button>`
+                : ''
+            }
           </div>
         </div>
-        <div class="row tight">
-          <button class="small" data-room-power="${esc(room.id)}" data-on="1">Alles an</button>
-          <button class="small" data-room-power="${esc(room.id)}" data-on="">Alles aus</button>
-          ${
-            covers.length
-              ? `<button class="small" data-room-cover="${esc(room.id)}" data-open="1">Rollläden auf</button>
-                 <button class="small" data-room-cover="${esc(room.id)}" data-open="">Rollläden zu</button>`
-              : ''
-          }
-        </div>
-      </div>
-      <div class="grid">${
-        devices.length
-          ? devices.map((device) => deviceCard(device)).join('')
-          : emptyState('📭', 'Keine Geräte in diesem Raum.')
-      }</div>
-    </section>`;
-  });
+        <div class="grid">${
+          inRoom.length
+            ? inRoom.map((device) => deviceSlot(device)).join('')
+            : emptyState('📭', 'Keine Geräte in diesem Raum.')
+        }</div>
+      </section>`;
+    })
+    .filter(Boolean);
 
   if (unassigned.length > 0) {
     /*
-     * Hier steht der Bogen offen und nicht hinter einem Aufklapper: Ein Gerät
+     * Der Bogen steht hier offen und nicht hinter einem Aufklapper: Ein Gerät
      * ohne Raum *ist* die unfertige Stelle. Wer hier landet, will genau das
      * erledigen – und nicht erst suchen, wo man es erledigt.
      */
-    groups.push(`<section class="card">
+    sections.push(`<section class="card">
       <div class="row between">
         <h2 style="margin:0">Ohne Raum</h2>
-        <span class="badge warn">${esc(plural(unassigned.length, "Gerät", "Geräte"))}</span>
+        <span class="badge warn">${esc(plural(unassigned.length, 'Gerät', 'Geräte'))}</span>
       </div>
       <p class="muted small">
         Diese Geräte sind da, gehören aber nirgends hin. Ohne Raum fehlen sie in den
@@ -712,7 +974,10 @@ function renderRooms(panel = $('#sub-rooms')) {
       </p>
       <div class="unassigned">${unassigned
         .map(
-          (device) => `<div class="unassigned-item">
+          (device) => `<div class="unassigned-item device-slot ${
+            homeView.selected.has(device.id) ? 'selected' : ''
+          }">
+            ${slotTools(device)}
             ${deviceCard(device)}
             ${deviceEditor(device)}
           </div>`,
@@ -721,17 +986,205 @@ function renderRooms(panel = $('#sub-rooms')) {
     </section>`);
   }
 
-  const intro = `<p class="intro">
-      Jeder Raum zeigt seine Geräte, dazu Temperatur, Feuchte und Leistung.
-      Mit den Knöpfen oben rechts schaltest du alles darin auf einmal.
-      ${wikiLink('raeume', 'Was bringen Räume?')}
-    </p>`;
+  if (sections.length === 0) {
+    return emptyState(
+      '🔍',
+      'Nichts passt zu diesen Filtern.',
+      'Setze die Filter zurück oder ändere die Suche.',
+    );
+  }
+  return sections.join('');
+}
 
-  if (!paint(panel, intro + groups.join(''))) return;
-  bindDeviceControls(panel, sendCommand, deviceById);
-  wireDeviceEditors(panel);
-  restoreOpenSections(panel);
+/** Alle Geräte am Stück, ohne Raumüberschriften. */
+function flatList(devices) {
+  if (devices.length === 0) {
+    return emptyState(
+      '🔍',
+      store.devices.length === 0 ? 'Noch keine Geräte da.' : 'Nichts passt zu diesen Filtern.',
+      store.devices.length === 0
+        ? 'Unter Einstellungen → Integrationen kannst du Bridges und Geräte hinzufügen.'
+        : 'Setze die Filter zurück oder ändere die Suche.',
+    );
+  }
+  return `<div class="grid">${devices
+    .map((device) => deviceSlot(device, { showMeta: true }))
+    .join('')}</div>`;
+}
 
+function isFiltering() {
+  return Boolean(
+    homeView.search.trim() || homeView.capability || homeView.roomId || homeView.chip !== 'all',
+  );
+}
+
+/**
+ * Eine Gerätekachel mit dem, was drumherum gehört.
+ *
+ * Der Stern und das Häkchen sitzen *über* der Karte statt darin: Die Karte
+ * gehört dem Gerät und zeigt seinen Zustand; anheften und auswählen sind
+ * Dinge, die der Nutzer mit ihr tut.
+ */
+function slotTools(device) {
+  const selected = homeView.selected.has(device.id);
+  return `<div class="slot-tools">
+    <label class="pick" title="Für eine Sammelaktion auswählen">
+      <input type="checkbox" data-pick="${esc(device.id)}" ${selected ? 'checked' : ''} />
+    </label>
+    <button type="button" class="star ${device.favorite ? 'on' : ''}"
+            data-favorite="${esc(device.id)}"
+            title="${device.favorite ? 'Nicht mehr anheften' : 'Anheften – steht dann ganz oben'}"
+            aria-pressed="${device.favorite ? 'true' : 'false'}">${device.favorite ? '★' : '☆'}</button>
+  </div>`;
+}
+
+function deviceSlot(device, options = {}) {
+  const selected = homeView.selected.has(device.id);
+  return `<div class="device-slot ${selected ? 'selected' : ''}">
+    ${slotTools(device)}
+    ${deviceCard(device, { ...options, roomName: roomName(device.roomId) })}
+    <details class="device-edit" data-section="edit-${esc(device.id)}">
+      <summary>Umbenennen, Raum, Gruppe, entfernen</summary>
+      ${deviceEditor(device)}
+    </details>
+  </div>`;
+}
+
+function wireHomeToolbar(panel) {
+  const search = panel.querySelector('#home-search');
+  search?.addEventListener('input', (event) => {
+    homeView.search = event.target.value;
+    void renderHome();
+    // Nach dem Neuzeichnen sitzt der Cursor sonst am Anfang.
+    const field = $('#home-search');
+    field?.focus();
+    field?.setSelectionRange(field.value.length, field.value.length);
+  });
+  search?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !search.value) return;
+    homeView.search = '';
+    void renderHome();
+    $('#home-search')?.focus();
+  });
+
+  panel.querySelector('#home-room')?.addEventListener('change', (event) => {
+    homeView.roomId = event.target.value;
+    void renderHome();
+  });
+  panel.querySelector('#home-capability')?.addEventListener('change', (event) => {
+    homeView.capability = event.target.value;
+    void renderHome();
+  });
+  panel.querySelector('#home-sort')?.addEventListener('change', (event) => {
+    homeView.sort = event.target.value;
+    void renderHome();
+  });
+
+  panel.querySelectorAll('[data-home-layout]').forEach((button) => {
+    button.addEventListener('click', () => {
+      homeView.layout = button.dataset.homeLayout;
+      void renderHome();
+    });
+  });
+
+  panel.querySelectorAll('[data-home-chip]').forEach((button) => {
+    button.addEventListener('click', () => {
+      homeView.chip = button.dataset.homeChip;
+      void renderHome();
+    });
+  });
+
+  panel.querySelector('#home-reset')?.addEventListener('click', () => {
+    homeView.search = '';
+    homeView.roomId = '';
+    homeView.capability = '';
+    homeView.chip = 'all';
+    void renderHome();
+  });
+
+  wireSelection(panel);
+}
+
+function wireDeviceSlots(panel) {
+  panel.querySelectorAll('[data-favorite]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const device = deviceById(button.dataset.favorite);
+      if (!device) return;
+      const updated = await guard(() =>
+        api(`/devices/${device.id}`, { method: 'PATCH', body: { favorite: !device.favorite } }),
+      );
+      if (!updated) return;
+      device.favorite = updated.favorite;
+      void renderHome();
+    });
+  });
+
+  panel.querySelectorAll('[data-pick]').forEach((box) => {
+    box.addEventListener('change', () => {
+      if (box.checked) homeView.selected.add(box.dataset.pick);
+      else homeView.selected.delete(box.dataset.pick);
+      void renderHome();
+    });
+  });
+}
+
+function wireSelection(panel) {
+  const ids = () => [...homeView.selected];
+
+  panel.querySelectorAll('[data-bulk]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const what = button.dataset.bulk;
+      if (what === 'clear') {
+        homeView.selected.clear();
+        void renderHome();
+        return;
+      }
+
+      if (what === 'on' || what === 'off') {
+        await guard(
+          () =>
+            api('/devices/command', {
+              method: 'POST',
+              body: {
+                target: { deviceIds: ids() },
+                command: { type: 'setPower', on: what === 'on' },
+              },
+            }),
+          { success: what === 'on' ? 'Eingeschaltet.' : 'Ausgeschaltet.' },
+        );
+        await reloadDevices();
+        return;
+      }
+
+      if (what === 'favorite' || what === 'hide') {
+        const body = what === 'favorite' ? { favorite: true } : { hidden: true };
+        await guard(
+          () => Promise.all(ids().map((id) => api(`/devices/${id}`, { method: 'PATCH', body }))),
+          { success: what === 'favorite' ? 'Angeheftet.' : 'Ausgeblendet.' },
+        );
+        homeView.selected.clear();
+        await loadDashboardData();
+        renderCurrent({ reason: 'devices' });
+      }
+    });
+  });
+
+  panel.querySelector('#bulk-room')?.addEventListener('change', async (event) => {
+    const value = event.target.value;
+    if (!value) return;
+    const roomId = value === '__none' ? null : value;
+    await guard(
+      () =>
+        Promise.all(ids().map((id) => api(`/devices/${id}`, { method: 'PATCH', body: { roomId } }))),
+      { success: roomId ? 'Verschoben.' : 'Aus dem Raum genommen.' },
+    );
+    homeView.selected.clear();
+    await loadDashboardData();
+    renderCurrent({ reason: 'devices' });
+  });
+}
+
+function wireRoomActions(panel) {
   panel.querySelectorAll('[data-room-power]').forEach((button) => {
     button.addEventListener('click', async () => {
       await guard(() =>
@@ -757,100 +1210,26 @@ function renderRooms(panel = $('#sub-rooms')) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Geräte
-// ---------------------------------------------------------------------------
-
-let deviceFilter = { search: '', capability: '' };
-
-function renderDevices(panel = $('#sub-devices')) {
-  if (!panel) return;
-  const devices = store.devices.filter((device) => {
-    if (deviceFilter.capability && !device.capabilities.includes(deviceFilter.capability)) return false;
-    if (
-      deviceFilter.search &&
-      !device.name.toLowerCase().includes(deviceFilter.search.toLowerCase())
-    ) {
-      return false;
+/**
+ * `/` springt in die Suche.
+ *
+ * Der Kniff, den jede Liste hat, in der man wirklich sucht. Nicht, wenn man
+ * ohnehin schon in einem Feld tippt – dann ist ein Schrägstrich ein
+ * Schrägstrich.
+ */
+export function startHomeShortcuts() {
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return;
+    const active = document.activeElement;
+    const tag = active?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || active?.isContentEditable) {
+      return;
     }
-    return true;
-  });
-
-  const html = `
-    <p class="intro">
-      Alle eingebundenen Geräte an einem Ort – Hue, Shelly, Homematic und FRITZ!Box
-      nebeneinander, neue Geräte genauso wie alte. Unter jedem Namen steht, was das
-      Gerät kann: schaltbar, dimmbar, Farbe, Rollladen, Heizung, Sensor.
-      ${wikiLink('geraete', 'Wie kommen Geräte hierher?')}
-    </p>
-    <div class="row">
-      <input id="device-search" class="grow" placeholder="Geräte durchsuchen…"
-             value="${esc(deviceFilter.search)}" />
-      <select id="device-filter">
-        ${[
-          ['', 'Alle Geräte'],
-          ['switch', 'Schaltbar'],
-          ['dimmer', 'Dimmbar'],
-          ['cover', 'Rollläden'],
-          ['sensor.temperature', 'Temperatur'],
-          ['sensor.humidity', 'Luftfeuchte'],
-          ['sensor.power', 'Verbrauch'],
-        ]
-          .map(
-            ([value, label]) =>
-              `<option value="${value}" ${deviceFilter.capability === value ? 'selected' : ''}>${label}</option>`,
-          )
-          .join('')}
-      </select>
-    </div>
-    <div class="grid" id="devices-grid">${
-      devices.length
-        ? devices
-            .map(
-              (device) => `<div class="device-slot">
-                ${deviceCard(device, { showMeta: true, roomName: roomName(device.roomId) })}
-                <details class="device-edit" data-section="edit-${esc(device.id)}">
-                  <summary>Umbenennen, Raum, Gruppe, entfernen</summary>
-                  ${deviceEditor(device)}
-                </details>
-              </div>`,
-            )
-            .join('')
-        : emptyState('🔍', 'Keine passenden Geräte.', 'Setze den Filter zurück oder ändere die Suche.')
-    }</div>
-
-    <details class="card" data-section="device-types">
-      <summary>Erkennt der Hub ein Gerät falsch?</summary>
-      <p class="muted small">
-        Manche Geräte melden nicht sauber, was sie sind – ein Rollladenaktor gibt sich als
-        Schalter aus, ein Dimmer als Lampe. Hier lässt sich das richtigstellen. Die Angabe
-        gilt ab sofort überall: auf der Karte, in Automationen und in Szenen. Was das Gerät
-        selbst meldet, bleibt gespeichert; „wie gemeldet“ nimmt die Korrektur zurück.
-      </p>
-      <div class="list" id="device-types">${
-        devices.map(capabilityFixItem).join('') ||
-        emptyState('🔍', 'Keine passenden Geräte.')
-      }</div>
-    </details>`;
-
-  if (!paint(panel, html)) return;
-
-  bindDeviceControls(panel, sendCommand, deviceById);
-  wireDeviceEditors(panel);
-  wireCapabilityFix(panel.querySelector('#device-types'));
-  restoreOpenSections(panel);
-
-  $('#device-search').addEventListener('input', (event) => {
-    deviceFilter.search = event.target.value;
-    renderDevices();
-    // Fokus und Cursor nach dem Neuzeichnen zurückgeben.
-    const field = $('#device-search');
+    const field = $('#home-search');
+    if (!field) return;
+    event.preventDefault();
     field.focus();
-    field.setSelectionRange(field.value.length, field.value.length);
-  });
-  $('#device-filter').addEventListener('change', (event) => {
-    deviceFilter.capability = event.target.value;
-    renderDevices();
+    field.select();
   });
 }
 
@@ -2137,74 +2516,6 @@ async function renderSettings() {
  * wohnte bis hierher in den Einstellungen und ist mit umgezogen – sie gehört
  * zu denselben Nachbarn.
  */
-/** Welche Sicht auf die Geräte zuletzt offen war. */
-let homeTab = 'rooms';
-
-/**
- * Räume und Geräte in einem Reiter.
- *
- * Vorher waren es zwei, und der Unterschied war schwer zu erklären: Beide
- * zeigen dieselben Geräte, nur einmal nach Räumen gruppiert und einmal am
- * Stück mit Suche. Das ist keine zwei Reiter wert – es sind zwei Sichten auf
- * dieselbe Sache, und genau so stehen sie jetzt da.
- */
-async function renderHome() {
-  const panel = $('#panel-home');
-  if (!panel) return;
-
-  const tabs = [
-    {
-      id: 'rooms',
-      label: 'Nach Räumen',
-      icon: '🛋️',
-      count: store.rooms.length,
-    },
-    {
-      id: 'devices',
-      label: 'Alle Geräte',
-      icon: '🔌',
-      count: store.devices.length,
-    },
-  ];
-
-  if (!panel.querySelector('#home-tabs')) {
-    panel.innerHTML = `
-      <p class="intro">
-        Dieselben Geräte, zwei Sichten: nach Räumen gruppiert – oder alle am Stück,
-        mit Suche und Filter. ${wikiLink('raeume', 'Was bringen Räume?')}
-      </p>
-      <div class="subtabs" id="home-tabs" role="tablist"></div>
-      <div id="sub-rooms" class="${homeTab === 'rooms' ? '' : 'hidden'}"></div>
-      <div id="sub-devices" class="${homeTab === 'devices' ? '' : 'hidden'}"></div>`;
-  }
-
-  const bar = panel.querySelector('#home-tabs');
-  const nextBar = tabs
-    .map(
-      (tab) =>
-        `<button role="tab" data-home-tab="${esc(tab.id)}" aria-selected="${tab.id === homeTab}"
-           class="${tab.id === homeTab ? 'active' : ''}">${tab.icon} ${esc(tab.label)}
-           <span class="badge">${tab.count}</span></button>`,
-    )
-    .join('');
-
-  if (paint(bar, nextBar)) {
-    bar.querySelectorAll('[data-home-tab]').forEach((button) => {
-      button.addEventListener('click', () => {
-        homeTab = button.dataset.homeTab;
-        void renderHome();
-      });
-    });
-  }
-
-  panel.querySelector('#sub-rooms')?.classList.toggle('hidden', homeTab !== 'rooms');
-  panel.querySelector('#sub-devices')?.classList.toggle('hidden', homeTab !== 'devices');
-
-  // Nur die sichtbare Sicht zeichnen – die andere wartet, bis sie dran ist.
-  if (homeTab === 'rooms') renderRooms(panel.querySelector('#sub-rooms'));
-  else renderDevices(panel.querySelector('#sub-devices'));
-}
-
 /** Welcher Unterreiter der Dienste zuletzt offen war. */
 let serviceTab = 'sonos';
 

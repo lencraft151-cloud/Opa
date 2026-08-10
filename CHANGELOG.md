@@ -8,6 +8,71 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.12.0 – 2026-08-10
+
+**Der Hub sagt Bescheid, wenn eine neue Fassung da ist.** Bisher musste man
+danach fragen: Einstellungen aufschlagen, „Jetzt nachsehen" drücken. Wer das
+nicht tat, lief womöglich monatelang auf einem alten Stand.
+
+Jetzt sieht der Hub von selbst nach – eine Minute nach dem Start und danach
+einmal am Tag. Findet er etwas, blendet er es ein: mit der Fassungsnummer,
+der eigenen zum Vergleich und dem ersten Satz aus dem Änderungsprotokoll,
+damit die eigentliche Frage beantwortet ist – ob es sich lohnt. Ein Klick
+auf die Meldung führt dorthin, wo man sie einspielt.
+
+Drei Feinheiten, die den Unterschied machen:
+
+- **Sie bleibt stehen.** Andere Einblendungen verschwinden nach acht
+  Sekunden; diese wartet, bis man sie wegklickt. Wer nicht davorsitzt, soll
+  sie nicht verpassen.
+- **Sie kommt einmal.** Dieselbe Fassung wird nicht täglich neu angepriesen –
+  eine Meldung, die man dreimal weggeklickt hat, liest niemand mehr.
+- **Ein Punkt bleibt am Reiter „Einstellungen".** Auch wenn die Einblendung
+  weg ist und auch nach einem Neuladen der Seite.
+
+Und die Grundregel bleibt: **Ohne eingestellte Prüfadresse
+(`HUB_UPDATE_CHECK_URL`) telefoniert der Hub gar nicht erst nach draußen.**
+Wer das nicht will, bekommt keine Prüfung – und keine Meldung.
+
+**Räume und Geräte sind jetzt wirklich eine Ansicht.** In 1.10.0 waren sie
+ein Reiter mit zwei Unterreitern – also immer noch zwei Seiten, zwei
+Suchfelder, zwei Filter. Dabei ist „Räume" keine andere Sache als „Geräte":
+Es ist dieselbe Liste, nur gruppiert.
+
+Jetzt gibt es **eine** Werkzeugleiste, die für beides gilt:
+
+- **Eine Suche für alles.** Sie greift auf Gerätenamen, **Raumnamen**,
+  Hersteller und Modell. Wer „Wohnzimmer" tippt, bekommt die Geräte des
+  Wohnzimmers; wer „shelly" tippt, alle Shellys – auch die, die nicht so
+  heißen. Mit `/` springt man von überall in das Feld.
+- **Räume oder Liste** ist ein Umschalter in dieser Leiste, keine zweite
+  Seite: gruppiert mit Raumkopf, Klimawerten und „alles an/aus" – oder alles
+  am Stück.
+- **Filter für Raum und Fähigkeit**, dazu **Sortierung** nach Raum, Name,
+  Verbrauch oder zuletzt gesehen.
+- **Schnellfilter** für die Fragen, die man wirklich stellt: ⭐ Favoriten,
+  💡 An, 🌙 Aus, 🚪 Ohne Raum, ⚠️ Offline.
+- **Eine Zeile sagt, was gerade zu sehen ist** („3 Geräte von 30 · 2 an") –
+  und daneben steht der Weg zurück zu allem.
+
+**Neu dabei: Favoriten.** Von dreißig Geräten bedient man täglich vier. Ein
+Klick auf den Stern heftet eines an; angeheftete Geräte stehen immer oben,
+egal wie sortiert wird. Die Anheftung überlebt Umbenennen, Neustarts und
+erneute Geräteabfragen.
+
+**Und Sammelaktionen.** Jede Kachel hat ein Häkchen; sobald etwas ausgewählt
+ist, erscheint eine Leiste, die beim Scrollen oben stehen bleibt: **alle an,
+alle aus, in einen Raum verschieben, anheften, ausblenden**. Wer zwölf
+Lampen umräumt, klickt nicht mehr zwölfmal durch Einzelformulare.
+
+Nachgeprüft, nicht nur behauptet: Im Browser steht eine Suchleiste statt
+zwei, es gibt keine Unterreiter mehr, die Suche nach einem Raumnamen und
+nach „shelly" findet jeweils das Richtige, `/` setzt den Fokus in das Feld,
+der Stern schaltet die Anheftung am Server um, zwei ausgewählte Geräte
+wandern mit einem Griff in einen Raum – und die Update-Einblendung erschien
+mit „Fassung 9.9.9 ist da – du hast 1.12.0", samt Punkt an den Einstellungen
+und Sprung dorthin beim Anklicken.
+
 ## 1.11.0 – 2026-08-10
 
 **Sonos zeigt Playlists, Radiosender und Favoriten.** Bisher konnte der Hub

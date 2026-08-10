@@ -119,6 +119,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     updates.start(household.id);
     presence.start(household.id);
     nextcloud.start(household.id);
+    hubUpdate.start(household.id);
   };
 
   /**
@@ -130,6 +131,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
    */
   const stopBackgroundServices = async (): Promise<void> => {
     automations.stop();
+    hubUpdate.stop();
     updates.stop();
     presence.stop();
     nextcloud.stop();
@@ -139,6 +141,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   const shutdown = async (): Promise<void> => {
     automations.stop();
+    hubUpdate.stop();
     updates.stop();
     presence.stop();
     nextcloud.stop();

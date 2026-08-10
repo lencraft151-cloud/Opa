@@ -97,7 +97,15 @@ export function systemRoutes(container: Container): Router {
     '/system/version/check',
     asyncHandler(async (req, res) => {
       requireAdminUnlessOpen(req, container.config.authDisabled);
-      res.json(await container.hubUpdate.check());
+      const info = await container.hubUpdate.check();
+      /*
+       * Auch die Prüfung von Hand kündigt an. Sonst hinge der Punkt an der
+       * Reiterleiste davon ab, wer nachgesehen hat – der Hub von selbst oder
+       * der Mensch –, und ein selbst gefundenes Update wäre nach dem
+       * Schließen der Antwort wieder vergessen.
+       */
+      container.hubUpdate.announceIfNew(container.households.current()?.id ?? '', info);
+      res.json(info);
     }),
   );
 

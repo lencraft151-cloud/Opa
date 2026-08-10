@@ -42,6 +42,9 @@ Geräte.
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
 | **Geräte geraderücken** | Name, Raum, Gruppe und das Entfernen an einer Stelle – bei Geräten ohne Raum offen sichtbar, sonst hinter einem Aufklapper |
+| **Eine Ansicht für alles** | Räume und Geräte in *einer* Ansicht: eine Suche über Name, Raum, Hersteller und Modell, Umschalter „nach Räumen ↔ Liste“, Filter, Sortierung und Schnellfilter |
+| **Favoriten** | Häufig benutzte Geräte anheften – sie stehen immer oben, egal wie sortiert wird |
+| **Sammelaktionen** | Mehrere Geräte auswählen und auf einmal schalten, in einen Raum verschieben, anheften oder ausblenden |
 | **Erneut verbinden** | Zugangsdaten erneuern oder den Knopf an der Hue Bridge noch einmal drücken – ohne Geräte, Räume, Szenen und Automationen zu verlieren |
 | **Wiki im Hub** | Zwölf durchsuchbare Artikel zu allem – Begriffe, Einrichtung je Hersteller, Automationen, Fehlersuche – mit Verweisen aus der Oberfläche heraus |
 | **Alles verbinden** | Ein Knopf übernimmt alle gefundenen Geräte, die kein Passwort brauchen – mit Bericht, was ging und was nicht |
@@ -49,10 +52,10 @@ Geräte.
 | **Spotify** | Was gerade läuft, samt Steuerung und Gerätewechsel, dazu Spotifys **eingebetteter Player**; Anmeldung mit PKCE, ohne Client-Geheimnis |
 | **Nextcloud** | Benachrichtigungen der eigenen Nextcloud – Talk, Freigaben, Kalender – als Einblendung im Hub, mit Verweis auf die Sache selbst |
 | **Sicherung** | Einstellungen, Räume, Geräte, Szenen und Automationen als Datei sichern und zurückspielen – ohne Passwörter in der Datei |
-| **Fassung des Hubs** | Änderungsprotokoll in der Oberfläche, Prüfung auf eine neuere Fassung und Aktualisierung auf Knopfdruck |
+| **Fassung des Hubs** | Änderungsprotokoll in der Oberfläche, **Benachrichtigung, sobald eine neue Fassung da ist**, und Aktualisierung auf Knopfdruck |
 | **Haushalt löschen** | Alles zurücksetzen – hinter fünf Bestätigungen, von denen die letzte den abgetippten Namen verlangt |
 | **Angefangene Eingaben** | Was getippt ist, überlebt ein Neuladen der Oberfläche – Kennwörter und Token ausdrücklich nicht |
-| **Oberfläche** | Installierbare Web-App (PWA) mit Live-Updates (SSE), Dashboard, „Räume & Geräte“ in einem Reiter, Energie- und Verlaufsansicht; aktualisiert sich nach einem Update des Hubs selbst |
+| **Oberfläche** | Installierbare Web-App (PWA) mit Live-Updates (SSE), Dashboard, „Räume & Geräte“ in einer Ansicht, Energie- und Verlaufsansicht; aktualisiert sich nach einem Update des Hubs selbst |
 
 ---
 
@@ -603,6 +606,51 @@ verbinden. Und die frühere Regel „ein Name schlägt jede IP" ließ einen
 Aufgelöste Adressen außerhalb der privaten Bereiche werden verworfen: Manche
 Provider lösen unbekannte Namen auf eine eigene Seite auf, und dorthin gehört
 kein FRITZ!Box-Kennwort.
+
+### Räume und Geräte in einer Ansicht
+
+Es waren einmal zwei Reiter, dann ein Reiter mit zwei Unterreitern – und
+immer noch zwei Suchfelder für dieselbe Frage. Dabei ist „Räume" keine andere
+Sache als „Geräte": Es ist dieselbe Liste, nur gruppiert. Also **eine**
+Werkzeugleiste:
+
+| | |
+| --- | --- |
+| **Suche** | über Gerätename, **Raumname**, Hersteller und Modell. `/` springt von überall hinein, `Esc` leert |
+| **Räume ↔ Liste** | ein Umschalter, keine zweite Seite: gruppiert mit Raumkopf, Klimawerten und „alles an/aus" – oder alles am Stück |
+| **Filter** | Raum und Fähigkeit |
+| **Sortierung** | Raum, Name, Verbrauch, zuletzt gesehen |
+| **Schnellfilter** | ⭐ Favoriten · 💡 An · 🌙 Aus · 🚪 Ohne Raum · ⚠️ Offline |
+
+**Favoriten** beantworten die Rechnung, die jeder Haushalt aufmacht: Von
+dreißig Geräten bedient man täglich vier. Angeheftete stehen immer oben, egal
+wie sortiert wird – die Anheftung liegt am Gerät und übersteht Umbenennen,
+Neustarts und erneute Geräteabfragen.
+
+**Sammelaktionen** ersparen das Einzeln-Durchklicken: Häkchen setzen, und die
+Leiste oben bietet alles an/aus, in einen Raum verschieben, anheften und
+ausblenden. Sie klebt beim Scrollen fest – wer zwanzig Geräte auswählt, hat
+den Knopf sonst längst aus dem Blick.
+
+### Wenn eine neue Fassung da ist
+
+Der Hub sieht von selbst nach – eine Minute nach dem Start und danach einmal
+am Tag – und meldet sich mit Fassungsnummer, der eigenen zum Vergleich und
+dem ersten Satz aus dem Änderungsprotokoll. Ein Klick führt dorthin, wo man
+sie einspielt; ein Punkt am Reiter „Einstellungen" bleibt, bis es getan ist.
+
+Drei Entscheidungen dahinter:
+
+- **Die Meldung bleibt stehen**, statt nach acht Sekunden zu verschwinden.
+- **Sie kommt einmal je Fassung.** Täglich dieselbe Ankündigung würde
+  weggeklickt, ohne gelesen zu werden – und die nächste gleich mit.
+- **Ohne `HUB_UPDATE_CHECK_URL` passiert gar nichts.** Ein Haushalts-Hub
+  telefoniert nicht ungefragt nach Hause; das gilt für den Takt genauso wie
+  für den Knopf.
+
+Ohne Prüfadresse bleibt das mitgelieferte `CHANGELOG.md` die einzige
+Auskunft – und dort steht die eigene Fassung ganz oben, es gibt also nichts
+anzukündigen. Dass das so bleibt, prüft `tests/version.test.ts`.
 
 ### Wiki im Hub
 

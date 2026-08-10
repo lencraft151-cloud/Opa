@@ -176,8 +176,11 @@ function migrate(data: DatabaseShape): DatabaseShape {
   data.sonos ??= [];
   data.spotify ??= [];
 
-  // Die Richtigstellung der Fähigkeiten kam später dazu.
-  for (const device of data.devices) device.capabilityOverride ??= null;
+  // Die Richtigstellung der Fähigkeiten und die Favoriten kamen später dazu.
+  for (const device of data.devices) {
+    device.capabilityOverride ??= null;
+    device.favorite ??= false;
+  }
 
   data.version = SCHEMA_VERSION;
   return data;

@@ -73,6 +73,13 @@ export const ARTICLES = [
         ],
       },
       {
+        heading: 'Favoriten',
+        body: [
+          'Der Stern über einer Gerätekachel heftet sie an. Angeheftete Geräte stehen **immer oben**, egal wie sortiert wird – und der Schnellfilter „⭐ Favoriten" zeigt nur sie.',
+          'Gedacht für die Rechnung, die jeder Haushalt aufmacht: Von dreißig Geräten bedient man täglich vier. Die Anheftung gehört zum Gerät und bleibt über Umbenennen, Neustarts und erneute Suchläufe hinweg bestehen.',
+        ],
+      },
+      {
         heading: 'Ein Gerät geraderücken',
         body: [
           'Frisch gefundene Geräte heißen oft „Shelly 1PM 34AB9F", stecken in keinem Raum und gelten als das Falsche. **Name, Raum, Gruppe und das Entfernen** liegen deshalb beieinander – bei Geräten ohne Raum offen sichtbar unter „Räume & Geräte", sonst hinter dem Aufklapper unter jeder Gerätekachel.',
@@ -227,8 +234,11 @@ export const ARTICLES = [
         heading: 'Räume',
         body: [
           'Anlegen in den Einstellungen, zuordnen unter **„Räume & Geräte" → „Alle Geräte"**. Danach zeigt jeder Raum Temperatur, Feuchte und Verbrauch, und du kannst alles darin auf einmal schalten.',
-          'Räume und Geräte stehen bewusst in *einem* Reiter: Wer ein Gerät sucht, weiß meist nicht, ob es schon in einem Raum steckt. Die beiden Unterreiter zeigen dieselben Geräte, nur anders sortiert.',
+          'Räume und Geräte stehen bewusst in *einer* Ansicht: Wer ein Gerät sucht, weiß meist nicht, ob es schon in einem Raum steckt. Über der Liste sitzt eine Werkzeugleiste, die für beides gilt – **eine Suche** (über Gerätename, Raumname, Hersteller und Modell), Filter für Raum und Fähigkeit, eine Sortierung und der Umschalter **„nach Räumen ↔ Liste"**.',
+          'Mit der Taste `/` springst du von überall in die Suche, mit `Esc` leerst du sie wieder.',
+          'Die **Schnellfilter** darunter beantworten die Fragen, die man wirklich stellt: Was ist noch an? Was hängt in keinem Raum? Was antwortet nicht?',
           'Viele Geräte auf einmal ordnest du im Einrichtungsassistenten unter **„Nach Gruppen sortieren"** zu: Dort stehen alle Lichter, alle Rollläden, alle Heizungen beieinander, und eine ganze Gruppe wandert mit einem Griff in einen Raum.',
+          'Später geht dasselbe über die **Sammelaktionen**: Häkchen an den Kacheln setzen, und die Leiste oben schaltet alles an oder aus, verschiebt es in einen Raum, heftet es an oder blendet es aus.',
         ],
       },
       {
@@ -338,6 +348,14 @@ export const ARTICLES = [
     summary:
       'Die häufigsten Fälle und was dann hilft: ein Gerät reagiert nicht, die Anzeige hinkt hinterher, oder du kommst selbst nicht mehr hinein.',
     sections: [
+      {
+        heading: 'Kommt keine Meldung über neue Fassungen?',
+        body: [
+          'Der Hub sieht nur nach, wenn eine Prüfadresse eingestellt ist (`HUB_UPDATE_CHECK_URL`). Ohne sie telefoniert er bewusst nicht nach draußen – dann bleibt das mitgelieferte Änderungsprotokoll die einzige Auskunft.',
+          'Ist sie gesetzt, sieht er eine Minute nach dem Start und danach täglich nach. Jede Fassung wird **einmal** gemeldet; eine Meldung, die man schon weggeklickt hat, kommt nicht wieder. Der Punkt am Reiter „Einstellungen" bleibt aber, bis das Update eingespielt ist.',
+          'Sofort nachsehen kannst du unter Einstellungen → Fassung des Hubs → „Jetzt nachsehen".',
+        ],
+      },
       {
         heading: 'Die FRITZ!Box wird gefunden, lässt sich aber nicht verbinden',
         body: [

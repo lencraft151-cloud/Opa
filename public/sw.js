@@ -9,7 +9,7 @@
  * Schaltzustand wäre schlimmer als eine ehrliche Fehlermeldung.
  */
 
-const CACHE = 'smarthome-shell-v10';
+const CACHE = 'smarthome-shell-v11';
 
 const SHELL = [
   '/',

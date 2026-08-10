@@ -7,8 +7,10 @@ import {
   refreshNextcloudCard,
   renderCurrent,
   renderPanel,
+  startHomeShortcuts,
   store,
 } from './dashboard.js';
+import { esc } from './format.js';
 import { icons } from './icons.js';
 import { hideLogin, showLogin } from './login.js';
 import { restoreDrafts, startDrafts } from './drafts.js';
@@ -46,6 +48,14 @@ const TABS = [
 
 let activeTab = 'overview';
 let info = null;
+/**
+ * Liegt eine neuere Fassung des Hubs bereit?
+ *
+ * Steht hier und nicht nur in einer Einblendung: Eine Einblendung ist nach
+ * acht Sekunden weg, und wer sie verpasst hat, erfährt nie davon. Der Punkt
+ * an der Reiterleiste bleibt, bis das Update eingespielt ist.
+ */
+let updateReady = null;
 /** Verhindert, dass mehrere abgelaufene Anfragen die Maske mehrfach öffnen. */
 let signedOut = false;
 
@@ -78,6 +88,7 @@ async function boot() {
    * eingesetzt. Kennwörter ausgenommen – siehe drafts.js.
    */
   startDrafts();
+  startHomeShortcuts();
 
   // Eine abgelaufene Anmeldung führt von überall zurück zur Anmeldemaske.
   setUnauthorizedHandler(() => {
@@ -222,6 +233,7 @@ async function startDashboard() {
   renderPanel(activeTab);
   connectEventStream();
   startPeriodicRefresh();
+  void lookForUpdate();
 }
 
 // ---------------------------------------------------------------------------
@@ -229,9 +241,15 @@ async function startDashboard() {
 // ---------------------------------------------------------------------------
 
 function buildNavigation() {
+  // Der Punkt sitzt an den Einstellungen – dort wird das Update eingespielt.
+  const mark = (id) =>
+    id === 'settings' && updateReady
+      ? `<span class="dot" title="Fassung ${esc(updateReady)} liegt bereit"></span>`
+      : '';
+
   $('#tabs-desktop').innerHTML = TABS.map(
     (tab) =>
-      `<button class="tab ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">${tab.label}</button>`,
+      `<button class="tab ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">${tab.label}${mark(tab.id)}</button>`,
   ).join('');
 
   const mobile = TABS.filter((tab) => tab.primary);
@@ -240,18 +258,36 @@ function buildNavigation() {
       .map(
         (tab) =>
           `<button data-tab="${tab.id}" class="${tab.id === activeTab ? 'active' : ''}">
-             ${tab.icon}<span>${tab.label}</span>
+             ${tab.icon}<span>${tab.label}</span>${mark(tab.id)}
            </button>`,
       )
       .join('') +
     `<button data-sheet="1" class="${mobile.some((tab) => tab.id === activeTab) ? '' : 'active'}">
-       ${icons.more}<span>Mehr</span>
+       ${icons.more}<span>Mehr</span>${updateReady ? '<span class="dot"></span>' : ''}
      </button>`;
 
   document.querySelectorAll('[data-tab]').forEach((button) => {
     button.addEventListener('click', () => selectTab(button.dataset.tab));
   });
   $('#tabs-mobile').querySelector('[data-sheet]').addEventListener('click', openSheet);
+}
+
+/**
+ * Beim Start einmal nachsehen, ob eine neue Fassung bereitliegt.
+ *
+ * Nicht dasselbe wie die Prüfung im Hub: Die fragt draußen nach und läuft
+ * einmal am Tag. Hier wird nur abgeholt, was der Hub ohnehin schon weiß –
+ * damit der Punkt an der Reiterleiste auch nach einem Neuladen wieder da ist
+ * und nicht erst beim nächsten Tagestakt.
+ */
+async function lookForUpdate() {
+  try {
+    const version = await api('/system/version');
+    updateReady = version?.updateAvailable ? (version.latestVersion ?? '') : null;
+    if (updateReady) buildNavigation();
+  } catch {
+    /* Ohne Auskunft bleibt der Punkt aus. */
+  }
 }
 
 function selectTab(id) {
@@ -394,6 +430,21 @@ function connectEventStream() {
 
   source.addEventListener('notification', (event) => {
     const { message, level, hint, link, source: origin } = JSON.parse(event.data);
+
+    if (origin === 'hub-update') {
+      // Sie bleibt stehen, bis jemand sie wegklickt: Eine neue Fassung ist
+      // keine Nachricht, die man im Vorbeigehen zur Kenntnis nimmt.
+      const node = toast(message, {
+        kind: 'success',
+        hint: `${hint ? `${hint} ` : ''}Zum Einspielen: Einstellungen → Fassung des Hubs.`,
+        timeout: 0,
+      });
+      node.addEventListener('click', () => selectTab('settings'));
+      updateReady = /Fassung ([\d.]+)/.exec(message)?.[1] ?? '';
+      buildNavigation();
+      return;
+    }
+
     toast(message, {
       kind: level === 'error' ? 'error' : 'info',
       hint: hint ?? '',

@@ -1170,6 +1170,29 @@ details.card summary {
   background: var(--error);
 }
 
+/*
+ * Der Punkt an einem Reiter: „Hier liegt etwas an."
+ *
+ * Er sitzt hochgestellt am Wort statt daneben, damit die Reiterbreite sich
+ * nicht ändert, wenn er auftaucht – sonst hüpfte die ganze Leiste, sobald
+ * eine neue Fassung erscheint.
+ */
+.tab .dot,
+#tabs-mobile .dot {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
+  animation: pulse 2.4s infinite;
+}
+.tab,
+#tabs-mobile button {
+  position: relative;
+}
+
 .content {
   max-width: 1220px;
   margin: 0 auto;
@@ -2225,6 +2248,160 @@ h2 .help:focus::after {
 .embed-frame.compact {
   height: 380px;
   border-radius: 12px;
+}
+
+/* -------------------------------------------------- Räume & Geräte in einem */
+
+/*
+ * Eine Werkzeugleiste für beides.
+ *
+ * Die Suche bekommt den ganzen übrigen Platz (`1 1 14rem`), die Auswahllisten
+ * nur so viel, wie sie brauchen. Auf dem Handy bricht alles um und die Suche
+ * steht allein in der ersten Zeile – sie ist das, wonach man greift.
+ */
+.home-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-bottom: 0.7rem;
+}
+.home-toolbar select {
+  flex: 0 1 auto;
+  min-width: 9rem;
+}
+
+.search-field {
+  flex: 1 1 14rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.search-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.search-field input {
+  flex: 1;
+  border: 0;
+  background: none;
+  padding: 0.55rem 0;
+  min-width: 0;
+}
+.search-field input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.search-field kbd {
+  font-size: 0.72rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.32rem;
+  flex: none;
+}
+/* Auf schmalen Geräten gibt es keine Tastatur, auf die der Hinweis passt. */
+@media (max-width: 640px) {
+  .search-field kbd {
+    display: none;
+  }
+}
+
+/* Umschalter „Räume ↔ Liste": zwei Knöpfe, die zusammengehören. */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex: none;
+}
+.segmented button {
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+}
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+.segmented button.active {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+
+.home-chips {
+  margin-bottom: 0.5rem;
+}
+.home-summary {
+  margin-bottom: 0.8rem;
+  min-height: 1.6rem;
+}
+
+/*
+ * Die Leiste für Sammelaktionen klebt oben.
+ *
+ * Wer zwanzig Geräte auswählt, hat beim zwanzigsten den Knopf längst aus dem
+ * Blick gescrollt – dann wäre die Auswahl eine Sackgasse.
+ */
+.selection-bar {
+  position: sticky;
+  top: 0.4rem;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  box-shadow: var(--shadow-sm, 0 2px 8px rgb(0 0 0 / 12%));
+}
+
+/* Stern und Häkchen sitzen über der Karte, nicht darin. */
+.slot-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0 0.15rem;
+  min-height: 1.4rem;
+}
+.slot-tools .pick {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s var(--ease);
+}
+.device-slot:hover .slot-tools .pick,
+.device-slot.selected .slot-tools .pick,
+.slot-tools .pick:focus-within {
+  opacity: 1;
+}
+.slot-tools .star {
+  border: 0;
+  background: none;
+  padding: 0 0.2rem;
+  font-size: 1.05rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+.slot-tools .star.on {
+  color: #f5a623;
+}
+.device-slot.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius);
 }
 
 /*

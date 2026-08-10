@@ -449,6 +449,7 @@ export class IntegrationService {
           state: { ...adapterDevice.state, updatedAt: nowIso() },
           reachable: adapterDevice.reachable,
           hidden: false,
+          favorite: false,
           lastSeenAt: adapterDevice.reachable ? nowIso() : null,
           createdAt: nowIso(),
           updatedAt: nowIso(),

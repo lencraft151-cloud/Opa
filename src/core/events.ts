@@ -25,7 +25,7 @@ export interface HubEventMap {
     /** Anklickbares Ziel, etwa der Gesprächsverlauf in Nextcloud Talk. */
     link?: string;
     /** Woher die Meldung kommt; die Oberfläche zeigt danach ein Symbol. */
-    source?: 'hub' | 'nextcloud';
+    source?: 'hub' | 'nextcloud' | 'hub-update';
   };
 }
 

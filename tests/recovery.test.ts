@@ -99,6 +99,7 @@ describe('Richtiggestellte Gerätetypen', () => {
     state: { updatedAt: '2026-08-08T10:00:00.000Z' },
     reachable: true,
     hidden: false,
+    favorite: false,
     lastSeenAt: '2026-08-08T10:00:00.000Z',
     createdAt: '2026-08-08T10:00:00.000Z',
     updatedAt: '2026-08-08T10:00:00.000Z',

@@ -29,6 +29,7 @@ export interface DeviceUpdate {
   name?: string;
   roomId?: string | null;
   hidden?: boolean;
+  favorite?: boolean;
   /**
    * Richtiggestellte Fähigkeiten. `null` nimmt die Korrektur zurück und
    * glaubt wieder dem Gerät.
@@ -100,6 +101,7 @@ export class DeviceService {
       }
     }
     if (changes.hidden !== undefined) patch.hidden = changes.hidden;
+    if (changes.favorite !== undefined) patch.favorite = changes.favorite;
 
     if (changes.capabilityOverride !== undefined) {
       patch.capabilityOverride = normalizeOverride(changes.capabilityOverride, device);

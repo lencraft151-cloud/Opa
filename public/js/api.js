@@ -139,11 +139,18 @@ export function toast(message, { kind = 'info', hint = '', timeout = 6000, link 
     node.style.transform = 'translateX(16px)';
     setTimeout(() => node.remove(), 200);
   };
-  const timer = setTimeout(remove, timeout);
+  /*
+   * `timeout: 0` heißt „bleibt stehen".
+   *
+   * Für Meldungen, die man nicht verpassen darf – eine bereitliegende neue
+   * Fassung etwa. Ohne diese Ausnahme hätte 0 das Gegenteil bewirkt: sofort
+   * verschwinden.
+   */
+  const timer = timeout > 0 ? setTimeout(remove, timeout) : null;
   node.addEventListener('click', (event) => {
     // Ein Klick auf den Verweis soll ihn öffnen, nicht die Meldung schließen.
     if (event.target.closest('.toast-link')) return;
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     remove();
   });
   return node;

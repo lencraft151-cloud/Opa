@@ -40,6 +40,7 @@ function makeDevice(
     state,
     reachable: true,
     hidden: false,
+    favorite: false,
     lastSeenAt: nowIso(),
     createdAt: nowIso(),
     updatedAt: nowIso(),

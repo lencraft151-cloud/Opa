@@ -372,6 +372,14 @@ export interface Device {
   reachable: boolean;
   /** Vom Nutzer ausgeblendete Geräte tauchen im Dashboard nicht auf. */
   hidden: boolean;
+  /**
+   * Angeheftet – steht in der Geräteliste ganz oben.
+   *
+   * Der Grund ist die Rechnung, die jeder Haushalt aufmacht: Von dreißig
+   * Geräten bedient man täglich vier. Die sollen nicht jedes Mal gesucht
+   * werden müssen.
+   */
+  favorite: boolean;
   lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;

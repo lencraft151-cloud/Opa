@@ -93,16 +93,125 @@ export interface HubUpdateOptions {
   dataDir?: string;
 }
 
+/**
+ * Wie oft im Hintergrund nach einer neuen Fassung gesehen wird.
+ *
+ * Einmal am Tag genügt: Fassungen erscheinen nicht stündlich, und jede
+ * Anfrage ist eine Verbindung nach außen, die ein Haushalts-Hub nicht ohne
+ * Grund aufbaut.
+ */
+const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Wie lange nach dem Start das erste Mal nachgesehen wird.
+ *
+ * Nicht sofort: Beim Start hat der Hub Wichtigeres zu tun, als eine fremde
+ * Adresse anzufragen – Geräte abfragen zum Beispiel. Eine Minute ist lang
+ * genug, dass alles andere steht, und kurz genug, dass man es noch mit dem
+ * Start in Verbindung bringt.
+ */
+const FIRST_CHECK_DELAY_MS = 60 * 1000;
+
 export class HubUpdateService {
   private lastCheckedAt: string | null = null;
   private latestVersion: string | null = null;
   private busy = false;
   private updatabilityCache: { at: number; value: Updatability } | null = null;
+  private timer: NodeJS.Timeout | null = null;
+  private firstTimer: NodeJS.Timeout | null = null;
+  /**
+   * Welche Fassung schon angekündigt wurde.
+   *
+   * Ohne dieses Gedächtnis meldete sich der Hub bei jeder Prüfung erneut –
+   * täglich dieselbe Nachricht über dieselbe Fassung. Eine Benachrichtigung,
+   * die man schon dreimal weggeklickt hat, liest niemand mehr.
+   */
+  private announcedVersion: string | null = null;
 
   constructor(
     private readonly currentVersion: string,
     private readonly options: HubUpdateOptions = { checkUrl: null },
   ) {}
+
+  /**
+   * Sieht von sich aus nach neuen Fassungen und sagt Bescheid.
+   *
+   * Ohne eingestellte Prüfadresse passiert gar nichts – ein Haushalts-Hub
+   * telefoniert nicht ungefragt nach Hause, und das gilt für den Takt genauso
+   * wie für den Knopf.
+   */
+  start(householdId: string): void {
+    this.stop();
+    if (!this.options.checkUrl) {
+      log.debug('Keine Prüfadresse gesetzt – es wird nicht von selbst nachgesehen');
+      return;
+    }
+
+    const look = (): void => {
+      void this.checkAndAnnounce(householdId);
+    };
+
+    this.firstTimer = setTimeout(look, FIRST_CHECK_DELAY_MS);
+    this.firstTimer.unref?.();
+    this.timer = setInterval(look, CHECK_INTERVAL_MS);
+    this.timer.unref?.();
+    log.info('Prüfung auf neue Fassungen läuft', { alleStunden: CHECK_INTERVAL_MS / 3600000 });
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    if (this.firstTimer) clearTimeout(this.firstTimer);
+    this.timer = null;
+    this.firstTimer = null;
+  }
+
+  /**
+   * Nachsehen – und, wenn etwas Neues da ist, es einmal sagen.
+   *
+   * Die Nachricht nennt die Fassung und die Überschrift dessen, was sich
+   * geändert hat. „Ein Update ist verfügbar" allein beantwortet nämlich nicht
+   * die einzige Frage, die man dann hat: ob es sich lohnt.
+   */
+  async checkAndAnnounce(householdId: string): Promise<HubVersionInfo | null> {
+    let info: HubVersionInfo;
+    try {
+      info = await this.check();
+    } catch (err) {
+      // Kein Netz, kein Dienst: Das ist kein Fehler, über den jemand eine
+      // Einblendung sehen muss. Beim nächsten Takt wieder.
+      log.debug('Prüfung im Hintergrund fehlgeschlagen', { error: errorMessage(err) });
+      return null;
+    }
+
+    this.announceIfNew(householdId, info);
+    return info;
+  }
+
+  /**
+   * Sagt einmal Bescheid, wenn diese Fassung noch nicht angekündigt wurde.
+   *
+   * Getrennt von `checkAndAnnounce`, weil auch der Knopf „Jetzt nachsehen"
+   * hier durchkommen muss: Wer selbst nachsieht und etwas findet, soll den
+   * Punkt an der Reiterleiste bekommen wie jeder andere auch – und nicht
+   * erst beim nächsten Tagestakt.
+   */
+  announceIfNew(householdId: string, info: HubVersionInfo): boolean {
+    if (!info.updateAvailable || !info.latestVersion) return false;
+    if (info.latestVersion === this.announcedVersion) return false;
+
+    this.announcedVersion = info.latestVersion;
+    const headline = info.pending[0] ? firstSentence(info.pending[0].body) : null;
+
+    events.emit('notification', {
+      householdId,
+      message: `Fassung ${info.latestVersion} ist da – du hast ${this.currentVersion}.`,
+      level: 'info',
+      source: 'hub-update',
+      ...(headline ? { hint: headline } : {}),
+    });
+    log.info('Neue Fassung angekündigt', { fassung: info.latestVersion });
+    return true;
+  }
 
   private get root(): string {
     return this.options.root ?? PROJECT_ROOT;
@@ -513,4 +622,37 @@ export function compareVersions(a: string, b: string): number {
     if (diff !== 0) return diff;
   }
   return 0;
+}
+
+/**
+ * Der erste vollständige Satz eines Änderungsabschnitts.
+ *
+ * Gebraucht für die Einblendung: Dort ist Platz für eine Zeile, und diese
+ * eine Zeile soll die Frage beantworten, ob sich das Aktualisieren lohnt.
+ * Markdown-Auszeichnung wird entfernt – ein `**fett**` mitten im Popup sähe
+ * nach einem Fehler aus.
+ */
+export function firstSentence(markdown: string, maxLength = 160): string | null {
+  const text = markdown
+    .split('\n')
+    // Überschriften und Listenzeichen tragen hier nichts bei.
+    .filter((line) => line.trim() && !line.startsWith('#'))
+    .join(' ')
+    .replace(/[*_`]/g, '')
+    .replace(/^[-–]\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return null;
+
+  /*
+   * Satzende suchen – aber nicht mitten in „z. B." abschneiden.
+   *
+   * Nach einem Leerzeichen und einem Großbuchstaben zu suchen genügt nicht:
+   * Genau so sieht auch eine Abkürzung aus. Deshalb zusätzlich die
+   * Bedingung, dass vor dem Punkt kein *einzelner* Buchstabe steht – „z."
+   * und „B." fallen damit raus, „Suche." nicht.
+   */
+  const end = text.search(/(?<![\s(][A-Za-zÄÖÜäöü])[.!?](\s+[A-ZÄÖÜ]|$)/);
+  const sentence = end === -1 ? text : text.slice(0, end + 1);
+  return sentence.length > maxLength ? `${sentence.slice(0, maxLength - 1).trimEnd()}…` : sentence;
 }
