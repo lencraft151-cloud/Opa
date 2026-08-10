@@ -10,18 +10,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const wiki = await import('../public/js/wiki.js');
-const { ARTICLES, markup, searchArticles } = wiki as unknown as {
-  ARTICLES: Array<{
-    id: string;
-    title: string;
-    icon: string;
-    summary: string;
-    sections: Array<{ heading: string; body: string[] }>;
-  }>;
-  markup: (text: string) => string;
-  searchArticles: (articles: unknown[], needle: string) => unknown[];
-};
+// Die Typen dazu stehen in `public/js/wiki.d.ts` – die Oberfläche selbst
+// bleibt reines JavaScript ohne Build-Schritt.
+const { ARTICLES, markup, searchArticles } = await import('../public/js/wiki.js');
 
 describe('Wiki-Artikel', () => {
   it('hat für jeden Bereich des Hubs einen Artikel', () => {
@@ -80,7 +71,7 @@ describe('Wiki-Artikel', () => {
 
 describe('Wiki-Suche', () => {
   it('findet Artikel über Wörter aus dem Fließtext', () => {
-    const hits = searchArticles(ARTICLES, 'kennwort') as Array<{ id: string }>;
+    const hits = searchArticles(ARTICLES, 'kennwort');
     assert.ok(hits.some((article) => article.id === 'fritzbox'));
   });
 
