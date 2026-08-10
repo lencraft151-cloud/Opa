@@ -8,6 +8,47 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.9.0 – 2026-08-10
+
+**Deine Einrichtung überlebt jede Aktualisierung.** Datenbank, Messwerte und
+der Verschlüsselungsschlüssel liegen jetzt in einem Ordner **außerhalb** des
+Programmordners – unter Linux `~/.local/share/smarthome-hub`, unter macOS in
+`~/Library/Application Support`, unter Windows in `%APPDATA%`.
+
+Vorher lag beides im Projektordner: die Daten in `./data`, der Schlüssel in
+der `.env` daneben. Wer sich die neueste Fassung von GitHub holte und den
+Ordner dabei austauschte, stand danach wieder vor dem
+Einrichtungsassistenten – oder, schlimmer, vor einer Datenbank, deren
+Zugangsdaten sich ohne den alten Schlüssel nicht mehr entschlüsseln ließen.
+
+Drei Dinge machen das jetzt aus:
+
+- **Der Ort.** Ohne `DATA_DIR` wählt der Hub den üblichen Datenordner des
+  Systems. Wer den Ort selbst bestimmt hat – Docker-Volume, eigene Platte –,
+  wird nicht umgezogen: Eine ausdrückliche Angabe gewinnt immer.
+- **Der Umzug.** Liegt noch ein alter `./data`-Bestand im Projektordner und am
+  neuen Ort nichts, wandert er beim ersten Start einmalig um – mitsamt
+  Messwertarchiv. Liegt an beiden Orten etwas, wird **nichts** angefasst;
+  einen echten Bestand mit einem vergessenen Rest zu überschreiben wäre nicht
+  rückgängig zu machen. Scheitert der Umzug, läuft der Hub am alten Ort weiter
+  und sagt, was zu tun ist.
+- **Der Schlüssel.** `SECRET_KEY` muss nicht mehr gesetzt werden: Der Hub legt
+  beim ersten Start selbst einen an und bewahrt ihn als `secret.key` **im
+  Datenordner** auf – also dort, wo auch die Daten liegen, die er schützt. Ein
+  Schlüssel aus der Umgebung hat weiterhin Vorrang und wird zusätzlich dorthin
+  gerettet, damit er auch dann noch da ist, wenn die `.env` einmal fehlt.
+
+Unter Einstellungen steht jetzt **„Wo deine Daten liegen"** mit dem Pfad und
+der Auskunft, ob er außerhalb des Programmordners liegt. Das ist die eine
+Angabe, die man zum Sichern und Umziehen braucht – und die man sonst erst
+beim nächsten Update vermisst.
+
+Nachgeprüft, nicht nur behauptet: Hub aufgesetzt, Haushalt und Nextcloud-Konto
+angelegt, den Projektordner **weggeworfen** und neu ausgepackt – ohne `.env`.
+Danach: derselbe Haushalt, Anmeldung mit demselben Passwort, und der
+Nextcloud-Abruf lief durch. Der braucht das entschlüsselte App-Passwort; er
+ist damit der Beleg, dass auch die Zugangsdaten den Wechsel überstanden haben.
+
 ## 1.8.0 – 2026-08-09
 
 **Ein Wiki im Hub.** Zwölf Artikel, durchsuchbar, mit Verweisen aus der

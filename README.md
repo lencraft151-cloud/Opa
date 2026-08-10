@@ -59,15 +59,13 @@ Geräte.
 ```bash
 npm install
 
-# Schlüssel zum Verschlüsseln der Gerätezugangsdaten erzeugen
-cp .env.example .env
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-# → Ausgabe in .env als SECRET_KEY eintragen
-
 npm run dev          # Entwicklung mit automatischem Neustart
 # oder
 npm run build && npm start
 ```
+
+Mehr ist nicht nötig: Der Hub legt seinen Datenordner und den Schlüssel für
+die Zugangsdaten beim ersten Start selbst an.
 
 Danach `http://localhost:8080` im Browser öffnen – der Assistent startet
 automatisch.
@@ -466,6 +464,45 @@ erneuert, danach liest der Hub die Geräteliste neu ein; die Geräte werden übe
 ihre `externalId` wiedererkannt. Bei Hue heißt das: Knopf drücken, „Erneut
 verbinden“ wählen, fertig.
 
+### Wo die Daten liegen – und warum das für Updates entscheidend ist
+
+Alles, was du einrichtest, liegt in **einem Ordner außerhalb des
+Projektordners**:
+
+| System | Ort |
+| --- | --- |
+| Linux | `~/.local/share/smarthome-hub` (bzw. `$XDG_DATA_HOME`) |
+| macOS | `~/Library/Application Support/smarthome-hub` |
+| Windows | `%APPDATA%\smarthome-hub` |
+
+Darin: `smarthome.json` (Haushalt, Räume, Geräte, Szenen, Automationen),
+`telemetry/` (das Messwertarchiv) und `secret.key` – der Schlüssel, mit dem
+die Zugangsdaten deiner Bridges verschlüsselt sind.
+
+**Das ist der Grund, warum du dir jederzeit die neueste Fassung holen
+kannst.** `git pull`, ein neues Archiv, ein frisch ausgepackter Ordner – die
+Einrichtung liegt woanders und bleibt, wie sie ist. Zum Sichern oder Umziehen
+genügt es, diesen einen Ordner zu kopieren. Den genauen Pfad zeigt der Hub
+unter *Einstellungen → Wo deine Daten liegen*.
+
+Drei Feinheiten:
+
+- **Eine ausdrückliche Angabe gewinnt.** Wer `DATA_DIR` setzt – Docker-Volume,
+  eigene Platte –, wird nicht umgezogen.
+- **Ein alter Bestand kommt mit.** Liegt noch `./data` aus früheren Fassungen
+  im Projektordner und am neuen Ort nichts, wandert er beim ersten Start
+  einmalig um. Liegt an *beiden* Orten etwas, wird nichts angefasst: Einen
+  echten Bestand mit einem vergessenen Rest zu überschreiben wäre nicht
+  rückgängig zu machen.
+- **Der Schlüssel gehört zu den Daten.** Er lag früher in der `.env` neben dem
+  Quelltext – und damit genau dort, wo beim Aktualisieren aufgeräumt wird. Ist
+  er weg, ist die Datenbank zwar da, aber jede Bridge müsste neu gekoppelt
+  werden. Deshalb liegt er jetzt im Datenordner. Ehrlich dazugesagt: Er
+  schützt die Sicherungsdatei und die Datenbank für sich genommen, nicht gegen
+  jemanden, der ohnehin Zugriff auf den ganzen Ordner hat. Für einen Hub im
+  eigenen Haushalt ist das der richtige Tausch – die Alternative wäre eine
+  Passworteingabe bei jedem Start.
+
 ### Wiki im Hub
 
 Ein eigener Reiter mit zwölf Artikeln: Erste Schritte, Geräte verbinden, je
@@ -669,8 +706,8 @@ Alle Werte kommen aus Umgebungsvariablen oder `.env` (siehe `.env.example`):
 | Variable | Standard | Bedeutung |
 | --- | --- | --- |
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | Adresse des Webservers |
-| `DATA_DIR` | `./data` | Datenbank und Messwerte |
-| `SECRET_KEY` | – | **Pflicht.** Schlüssel für die Zugangsdaten |
+| `DATA_DIR` | Datenordner des Systems | Datenbank, Messwerte, Schlüssel. Leer lassen – siehe unten |
+| `SECRET_KEY` | wird angelegt | Schlüssel für die Zugangsdaten. Nur setzen, wenn er von außen kommen soll |
 | `AUTH_DISABLED` | `false` | Token-Prüfung abschalten (nur lokal) |
 | `POLL_INTERVAL_SECONDS` | `15` | Abfrageintervall der Geräte (Startwert; änderbar in den Einstellungen) |
 | `TELEMETRY_RETENTION_DAYS` | `90` | Aufbewahrung der Messwerte |
@@ -779,7 +816,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 514 Tests, node:test
+npm test        # 527 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
@@ -837,6 +874,14 @@ Abgedeckt sind unter anderem:
   ihrer Anmeldeaufgabe selbst nennt (`fritz3000` statt leerer Kennung), und
   dass eine fehlende Smart-Home-Berechtigung beim Namen genannt wird statt als
   HTTP 403 durchgereicht
+- Datenordner: dass eine ausdrückliche Angabe gewinnt, dass ein alter Bestand
+  samt Messwertarchiv mitkommt, dass ein vorhandener Bestand am Zielort **nicht**
+  überschrieben wird, dass ein misslungener Umzug den Start nicht verhindert –
+  und dass der Schlüssel beim zweiten Start derselbe ist
+- **Das Neu-Herunterladen von Hand durchgespielt:** Hub aufgesetzt, Haushalt und
+  Nextcloud-Konto angelegt, Projektordner weggeworfen und ohne `.env` neu
+  ausgepackt. Danach derselbe Haushalt, Anmeldung mit demselben Passwort, und
+  der Nextcloud-Abruf lief durch – der braucht das entschlüsselte App-Passwort
 - Wiki: dass es zu jedem Bereich einen Artikel gibt, dass die Suche über den
   Fließtext findet und bei Unbekanntem ehrlich nichts zurückgibt, dass die
   Auszeichnung kein HTML durchreicht – und dass die Stolpersteine, die wirklich

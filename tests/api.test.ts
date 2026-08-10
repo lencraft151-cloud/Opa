@@ -39,6 +39,8 @@ function testConfig(dataDir: string): AppConfig {
     hubRepoUrl: null,
     hubBranch: 'main',
     logLevel: 'silent',
+  secretKeySource: 'env',
+  dataDirNote: null,
   };
 }
 

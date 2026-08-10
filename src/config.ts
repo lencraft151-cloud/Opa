@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { LOG_LEVELS, type LogLevel } from './core/logger.js';
 
@@ -86,23 +88,149 @@ export interface AppConfig {
   /** Zweig, der dabei gezogen wird. */
   hubBranch: string;
   logLevel: LogLevel;
+  /** Woher der Verschlüsselungsschlüssel kam – nur fürs Protokoll. */
+  secretKeySource: 'env' | 'file' | 'created';
+  /** Hinweis zum Datenordner (Umzug, Problem) – `null`, wenn alles still lief. */
+  dataDirNote: string | null;
+}
+
+/**
+ * Wo die Daten liegen, wenn niemand etwas anderes sagt.
+ *
+ * **Außerhalb der Arbeitskopie.** Das ist der ganze Punkt: Datenbank,
+ * Messwerte und Schlüssel gehören nicht in den Ordner, den man beim
+ * Aktualisieren austauscht. Wer sich die neueste Fassung von GitHub holt –
+ * per `git pull`, als Archiv oder als frischer Klon –, soll danach seinen
+ * Haushalt vorfinden und nicht den Einrichtungsassistenten.
+ *
+ * Verwendet werden die üblichen Orte des jeweiligen Systems:
+ * `%APPDATA%` unter Windows, sonst `$XDG_DATA_HOME` bzw. `~/.local/share`.
+ */
+export function defaultDataDir(): string {
+  const home = os.homedir();
+
+  if (process.platform === 'win32') {
+    const appData = process.env['APPDATA'];
+    if (appData) return path.join(appData, 'smarthome-hub');
+  }
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'smarthome-hub');
+  }
+
+  const xdg = process.env['XDG_DATA_HOME'];
+  if (xdg) return path.join(xdg, 'smarthome-hub');
+  return path.join(home, '.local', 'share', 'smarthome-hub');
+}
+
+/**
+ * Bestimmt den Datenordner und holt einen alten Bestand nach.
+ *
+ * Drei Fälle, in dieser Reihenfolge:
+ *
+ * 1. `DATA_DIR` ist gesetzt – dann gilt genau das. Wer den Ort selbst
+ *    bestimmt hat (Docker-Volume, eigene Platte), soll nicht umgezogen werden.
+ * 2. Im Projektordner liegt noch der alte `./data`-Bestand und am neuen Ort
+ *    nichts. Dann wandert er einmalig um. Genau dieser Schritt ist der
+ *    Unterschied zwischen „nach dem Update ist alles weg" und „nach dem
+ *    Update ist alles da".
+ * 3. Sonst der Ort aus `defaultDataDir()`.
+ *
+ * Schlägt der Umzug fehl – etwa über Dateisystemgrenzen hinweg –, bleibt der
+ * alte Ort in Betrieb. Ein Hub, der wegen eines misslungenen Umzugs gar nicht
+ * startet, wäre die schlechtere Antwort.
+ */
+export function resolveDataDir(cwd = process.cwd()): {
+  dir: string;
+  movedFrom: string | null;
+  note: string | null;
+} {
+  const explicit = str('DATA_DIR', '');
+  if (explicit) return { dir: path.resolve(cwd, explicit), movedFrom: null, note: null };
+
+  const target = defaultDataDir();
+  const legacy = path.resolve(cwd, 'data');
+
+  const hasLegacy = existsSync(path.join(legacy, 'smarthome.json'));
+  const hasTarget = existsSync(path.join(target, 'smarthome.json'));
+
+  if (!hasLegacy || hasTarget) return { dir: target, movedFrom: null, note: null };
+
+  try {
+    mkdirSync(path.dirname(target), { recursive: true });
+    renameSync(legacy, target);
+    return {
+      dir: target,
+      movedFrom: legacy,
+      note: `Der Datenordner ist nach ${target} umgezogen – dort überlebt er jede Aktualisierung.`,
+    };
+  } catch (err) {
+    return {
+      dir: legacy,
+      movedFrom: null,
+      note:
+        `Der Datenordner konnte nicht nach ${target} umziehen (${(err as Error).message}). ` +
+        'Der Hub läuft vorerst weiter aus dem Projektordner – bitte den Ordner von Hand ' +
+        'verschieben oder DATA_DIR setzen, sonst geht er beim nächsten Neu-Herunterladen verloren.',
+    };
+  }
+}
+
+/**
+ * Der Schlüssel, mit dem Zugangsdaten verschlüsselt werden.
+ *
+ * Er liegt **im Datenordner**, nicht in der `.env` neben dem Quelltext. Das
+ * ist der zweite Teil derselben Sache: Ein Schlüssel, der beim Austauschen
+ * des Projektordners verschwindet, macht sämtliche gespeicherten Zugangsdaten
+ * unlesbar – Bridges müssten neu gekoppelt werden, obwohl die Datenbank noch
+ * da ist.
+ *
+ * `SECRET_KEY` aus der Umgebung hat weiterhin Vorrang (Docker, systemd). Ist
+ * er gesetzt und liegt noch keine Datei vor, wird er einmal dorthin
+ * geschrieben – damit er auch dann noch da ist, wenn die `.env` einmal fehlt.
+ *
+ * Ehrlich dazugesagt: Der Schlüssel schützt die *Sicherungsdatei* und die
+ * Datenbank für sich genommen, nicht gegen jemanden, der ohnehin Zugriff auf
+ * den ganzen Datenordner hat. Für einen Hub im eigenen Haushalt ist das der
+ * richtige Tausch – die Alternative wäre eine Passworteingabe bei jedem Start.
+ */
+export function loadOrCreateSecretKey(dataDir: string): {
+  key: string;
+  source: 'env' | 'file' | 'created';
+} {
+  const file = path.join(dataDir, 'secret.key');
+  const fromEnv = str('SECRET_KEY', '');
+
+  mkdirSync(dataDir, { recursive: true });
+
+  if (fromEnv) {
+    if (!existsSync(file)) writeFileSync(file, fromEnv, { encoding: 'utf8', mode: 0o600 });
+    return { key: fromEnv, source: 'env' };
+  }
+
+  if (existsSync(file)) {
+    const stored = readFileSync(file, 'utf8').trim();
+    if (stored) return { key: stored, source: 'file' };
+  }
+
+  const created = randomBytes(32).toString('hex');
+  writeFileSync(file, created, { encoding: 'utf8', mode: 0o600 });
+  return { key: created, source: 'created' };
 }
 
 export function loadConfig(): AppConfig {
-  const dataDir = path.resolve(process.cwd(), str('DATA_DIR', './data'));
+  const location = resolveDataDir();
+  const dataDir = location.dir;
   const rawLevel = str('LOG_LEVEL', 'info') as LogLevel;
   const logLevel = LOG_LEVELS.includes(rawLevel) ? rawLevel : 'info';
 
   const authDisabled = bool('AUTH_DISABLED', false);
-  const secretKey = str('SECRET_KEY', '');
-
-  if (!secretKey && !authDisabled) {
-    throw new Error(
-      'SECRET_KEY ist nicht gesetzt. Ohne diesen Schlüssel können Zugangsdaten von Hue/Shelly ' +
-        'nicht verschlüsselt gespeichert werden.\n' +
-        'Erzeugen mit: node -e "console.log(crypto.randomBytes(32).toString(\'hex\'))"',
-    );
-  }
+  /*
+   * Kein `SECRET_KEY`? Dann legt der Hub selbst einen an – im Datenordner.
+   * Früher verweigerte er hier den Start. Das war für einen Haushalts-Hub die
+   * falsche Hürde: Wer ihn frisch herunterlädt, will ihn starten, nicht erst
+   * eine Zufallszahl erzeugen und in eine Datei schreiben.
+   */
+  const secret = loadOrCreateSecretKey(dataDir);
 
   return {
     port: num('PORT', 8080),
@@ -110,9 +238,9 @@ export function loadConfig(): AppConfig {
     dataDir,
     databaseFile: path.join(dataDir, 'smarthome.json'),
     telemetryDir: path.join(dataDir, 'telemetry'),
-    // Ohne SECRET_KEY (nur bei AUTH_DISABLED) wird ein deterministischer
-    // Entwicklungsschlüssel benutzt, damit der Hub überhaupt startet.
-    secretKey: secretKey || 'insecure-development-key',
+    secretKey: secret.key,
+    secretKeySource: secret.source,
+    dataDirNote: location.note,
     authDisabled,
     pollIntervalSeconds: Math.max(5, num('POLL_INTERVAL_SECONDS', 15)),
     telemetryRetentionDays: Math.max(1, num('TELEMETRY_RETENTION_DAYS', 90)),

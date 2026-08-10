@@ -282,13 +282,22 @@ export const ARTICLES = [
     title: 'Sicherung, Updates, Haushalt löschen',
     icon: '💾',
     summary:
-      'Die Sicherung enthält alles außer Passwörtern. Der Hub kann sich selbst aktualisieren. Und löschen geht nur hinter fünf Bestätigungen.',
+      'Deine Einrichtung liegt in einem Ordner außerhalb des Programms – deshalb übersteht sie jede Aktualisierung. Die Sicherung daneben enthält alles außer Passwörtern.',
     sections: [
       {
         heading: 'Sicherung',
         body: [
           'Räume, Gerätenamen, Zuordnungen, Szenen und Automationen als Datei. **Nicht** darin: Zugangsdaten deiner Bridges, Passwörter, Sitzungen. Die Datei darf also auf einem USB-Stick liegen.',
           'Der Preis: Auf einem *anderen* Hub muss jede Verbindung einmal neu hergestellt werden. Auf demselben Hub bleibt alles verbunden.',
+        ],
+      },
+      {
+        heading: 'Wo deine Daten liegen',
+        body: [
+          'Alles, was du eingerichtet hast, liegt in **einem Ordner außerhalb des Programmordners** – unter Linux `~/.local/share/smarthome-hub`, unter macOS `~/Library/Application Support/smarthome-hub`, unter Windows im `%APPDATA%`-Verzeichnis. Den genauen Pfad zeigt Einstellungen → „Wo deine Daten liegen".',
+          'Darin stecken Haushalt, Räume, Geräte, Szenen, Automationen, das Messwertarchiv und `secret.key` – der Schlüssel, mit dem die Zugangsdaten deiner Bridges verschlüsselt sind.',
+          'Das ist der Grund, warum du dir jederzeit die neueste Fassung holen kannst: `git pull`, ein neues Archiv, ein frischer Ordner – deine Einrichtung liegt woanders und bleibt, wie sie ist. Willst du sichern oder umziehen, kopiere **diesen einen Ordner**.',
+          'Ein alter Bestand im Programmordner (`./data` aus früheren Fassungen) zieht beim ersten Start von allein um. Wer den Ort selbst bestimmen will, setzt `DATA_DIR` – dann rührt der Hub nichts an.',
         ],
       },
       {

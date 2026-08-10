@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { sep } from 'node:path';
 import { Router } from 'express';
 import { events } from '../../core/events.js';
 import type { Container } from '../../container.js';
@@ -49,6 +50,18 @@ export function systemRoutes(container: Container): Router {
           pollIntervalSeconds: container.config.pollIntervalSeconds,
           telemetryRetentionDays: container.config.telemetryRetentionDays,
           cloudDiscovery: container.config.allowCloudDiscovery,
+        },
+        /*
+         * Wo die Daten liegen. Das ist die eine Auskunft, die man braucht, um
+         * zu sichern oder umzuziehen – und der Beleg dafür, dass sie das
+         * nächste Update überstehen, wenn der Pfad außerhalb der Arbeitskopie
+         * zeigt. Sichtbar nur für Angemeldete; es ist ihr eigener Hub.
+         */
+        storage: {
+          dataDir: container.config.dataDir,
+          /** Liegt der Ordner außerhalb des Projektordners? */
+          separateFromCode: !container.config.dataDir.startsWith(`${process.cwd()}${sep}`),
+          secretKeySource: container.config.secretKeySource,
         },
       });
     }),

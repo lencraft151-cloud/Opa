@@ -11,6 +11,22 @@ async function main(): Promise<void> {
   const config = loadConfig();
   setLogLevel(config.logLevel);
 
+  /*
+   * Wo die Daten liegen, gehört in die erste Zeile des Protokolls – es ist
+   * die eine Auskunft, die man braucht, um zu sichern, umzuziehen oder zu
+   * verstehen, warum der Assistent wieder von vorn anfängt.
+   */
+  log.info('Datenordner', {
+    pfad: config.dataDir,
+    schlüssel:
+      config.secretKeySource === 'created'
+        ? 'neu angelegt (secret.key)'
+        : config.secretKeySource === 'file'
+          ? 'aus secret.key'
+          : 'aus der Umgebung',
+  });
+  if (config.dataDirNote) log.warn(config.dataDirNote);
+
   const container = await createContainer(config);
   const app = createApp(container);
 

@@ -2018,6 +2018,8 @@ async function renderSettings() {
 
     ${accountCard()}
 
+    ${storageCard()}
+
     <div class="card">
       <h2>Sicherung ${help(
         'Räume, Namen, Zuordnungen, Szenen und Automationen als Datei – ohne Passwörter. Sie darf deshalb auf einem USB-Stick liegen.',
@@ -3056,6 +3058,73 @@ function diagnosticsReport(report) {
     ${devices}
     <h3>Übersprungen</h3>
     ${skipped}`;
+}
+
+/**
+ * Wo die Daten liegen.
+ *
+ * Die Karte beantwortet eine Frage, die sich erst beim nächsten Update
+ * stellt – und dann zu spät: Was muss ich behalten, wenn ich mir die neueste
+ * Fassung hole? Antwort: diesen einen Ordner. Er liegt außerhalb des
+ * Projektordners, damit ihn ein `git pull`, ein neues Archiv oder ein
+ * frischer Klon nicht anfasst.
+ */
+function storageCard() {
+  const storage = store.systemInfo?.storage;
+  if (!storage) return '';
+
+  const ok = storage.separateFromCode;
+
+  return `<div class="card" id="card-storage">
+    <h2>Wo deine Daten liegen ${help(
+      'Datenbank, Messwerte und der Schlüssel, mit dem Zugangsdaten verschlüsselt sind. Diesen Ordner sichern – und beim Aktualisieren stehen lassen.',
+    )}</h2>
+    <p class="muted small card-explain">
+      Hier liegen Haushalt, Räume, Geräte, Szenen, Automationen, das Messwertarchiv und
+      der Schlüssel für die gespeicherten Zugangsdaten.
+    </p>
+
+    <div class="list">
+      <div class="item">
+        <div>
+          <div class="title">${
+            ok
+              ? '<span class="badge ok">außerhalb des Programmordners</span>'
+              : '<span class="badge warn">im Programmordner</span>'
+          }</div>
+          <div class="sub"><code>${esc(storage.dataDir)}</code></div>
+          <div class="sub">Schlüssel: ${
+            storage.secretKeySource === 'env'
+              ? 'aus der Umgebung (SECRET_KEY)'
+              : 'als <code>secret.key</code> in diesem Ordner'
+          }</div>
+        </div>
+      </div>
+    </div>
+
+    ${
+      ok
+        ? `<div class="callout">
+             <strong>Aktualisieren ist damit gefahrlos</strong>
+             <span>
+               Du kannst dir jederzeit die neueste Fassung von GitHub holen – als
+               <code>git pull</code>, als Archiv oder als frischen Ordner. Deine Einrichtung
+               liegt woanders und bleibt, wie sie ist. ${wikiLink(
+                 'sicherung',
+                 'Wie ich richtig aktualisiere',
+               )}
+             </span>
+           </div>`
+        : `<div class="callout warn">
+             <strong>Dieser Ordner liegt im Programmordner</strong>
+             <span>
+               Beim nächsten Neu-Herunterladen wäre er weg. Setze <code>DATA_DIR</code> auf
+               einen Ort daneben – oder verschiebe den Ordner und starte den Hub neu, dann
+               findet er ihn selbst.
+             </span>
+           </div>`
+    }
+  </div>`;
 }
 
 /**
