@@ -2217,6 +2217,80 @@ h2 .help:focus::after {
   background: var(--surface);
 }
 
+/*
+ * Spotifys Einbettungs-Player bringt seine eigene Höhe mit: gut 150 px für
+ * einen Titel, gut 350 px für eine Playlist. 70 vh wären hier kein Rahmen,
+ * sondern ein Loch.
+ */
+.embed-frame.compact {
+  height: 380px;
+  border-radius: 12px;
+}
+
+/*
+ * Geräte ohne Raum: Karte und Bogen untereinander.
+ *
+ * Bewusst breiter als die übrigen Gerätekacheln – hier wird nicht geschaltet,
+ * sondern getippt, und ein Namensfeld in Kachelbreite ist zu schmal.
+ */
+.unassigned {
+  display: grid;
+  gap: 1rem;
+}
+.unassigned-item {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.8rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.device-editor {
+  gap: 0.6rem;
+}
+.device-editor label {
+  min-width: 8rem;
+}
+
+/* Der Bogen unter einer Gerätekachel – zu bei Ruhe, offen auf Wunsch. */
+.device-edit > summary {
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.3rem 0;
+}
+.device-edit[open] > summary {
+  margin-bottom: 0.5rem;
+}
+.device-slot {
+  display: grid;
+  align-content: start;
+  gap: 0.2rem;
+}
+
+/* Titelbild in einer Playlist- oder Senderliste. */
+.library-art {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex: 0 0 auto;
+  background: var(--surface-2);
+}
+.library-art.placeholder {
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+}
+[data-library-item] {
+  cursor: pointer;
+}
+[data-library-item]:hover,
+[data-library-item]:focus-visible {
+  background: var(--surface-2);
+}
+
 /* ------------------------------------------------------------------ Musik */
 
 .music-list {

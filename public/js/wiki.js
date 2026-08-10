@@ -69,7 +69,15 @@ export const ARTICLES = [
         body: [
           'Läuft der Hub im selben Netz wie die Geräte? In Docker braucht er `--network host`, sonst sieht er das Heimnetz gar nicht.',
           'Hängt das Gerät im Gastnetz oder hinter einem Repeater? Dann kommen Suchanfragen oft nicht durch – trage die Adresse von Hand ein.',
-          'Steht das Gerät in der Liste, aber ohne die erwartete Funktion? Unter Einstellungen → Integrationen → „Erneut verbinden und nachsehen, was fehlt" steht, welcher Kanal warum übersprungen wurde. Und unter „Geräte" lässt sich der Gerätetyp von Hand richtigstellen.',
+          'Steht das Gerät in der Liste, aber ohne die erwartete Funktion? Unter Einstellungen → Integrationen → „Erneut verbinden und nachsehen, was fehlt" steht, welcher Kanal warum übersprungen wurde.',
+        ],
+      },
+      {
+        heading: 'Ein Gerät geraderücken',
+        body: [
+          'Frisch gefundene Geräte heißen oft „Shelly 1PM 34AB9F", stecken in keinem Raum und gelten als das Falsche. **Name, Raum, Gruppe und das Entfernen** liegen deshalb beieinander – bei Geräten ohne Raum offen sichtbar unter „Räume & Geräte", sonst hinter dem Aufklapper unter jeder Gerätekachel.',
+          'Die **Gruppe** ist das, wofür der Hub das Gerät hält: Schalter, dimmbares Licht, Farblicht, Rollladen, Jalousie, Heizung. Die Angabe gilt ab sofort überall – auf der Karte, in Automationen und in Szenen. Messfähigkeiten bleiben dabei erhalten: Ein Shelly, der als Rollladen gilt, misst weiterhin Strom.',
+          '**Entfernen** wirft das Gerät nur aus dem Hub. Es selbst bleibt unberührt und taucht bei der nächsten Suche wieder auf – verloren gehen sein Name, seine Raumzuordnung und sein Platz in Szenen und Automationen.',
         ],
       },
     ],
@@ -186,6 +194,8 @@ export const ARTICLES = [
         body: [
           'Braucht kein Konto: Der Hub spricht die Lautsprecher direkt im Netz an. Sie werden bei der normalen Netzwerksuche mitgefunden; zur Not trägst du die Adresse von Hand ein (sie steht in der Sonos-App unter Einstellungen → System → Produkte → Netzwerk).',
           '**Gruppen:** Sind zwei Lautsprecher in der Sonos-App zusammengelegt, gelten Play und Pause für die ganze Gruppe – nur der Koordinator nimmt sie an, und der Hub schickt sie dorthin. Die Lautstärke bleibt bei jedem Lautsprecher einzeln.',
+          '**Playlists und Radiosender:** Unter „Playlists und Radiosender" steht, was in der Sonos-App gespeichert ist – Wiedergabelisten, „Meine Radiosender" und alles mit dem Herz-Symbol. Oben wählst du den Lautsprecher, ein Klick auf einen Eintrag legt ihn auf.',
+          'Angelegt werden diese Listen in der **Sonos-App**, nicht im Hub. Der Hub liest sie nur – er kann keine Playlist erstellen, und was du dort änderst, erscheint hier nach einem Klick auf „Neu laden".',
         ],
       },
       {
@@ -193,6 +203,8 @@ export const ARTICLES = [
         body: [
           'Einmalige Einrichtung über das Spotify-Dashboard (developer.spotify.com): App anlegen, die vom Hub angezeigte Rückleitungsadresse **zeichengenau** eintragen, Client-ID hier einsetzen. Ein Client-Geheimnis wird nicht gebraucht.',
           'Steuern (Play, Pause, Lautstärke) erlaubt Spotify nur mit Premium. Anzeigen, was läuft, geht auch ohne. Läuft gerade nirgends etwas, muss die Wiedergabe einmal auf Handy oder Rechner gestartet werden – danach kann der Hub übernehmen.',
+          '**Die eingebettete Oberfläche:** Unter „Spotify-Oberfläche" steht Spotifys eigener Player mit Titelbild und Titelliste – gezeigt wird die Playlist oder das Album, aus dem gerade gespielt wird.',
+          'Der **volle** Web-Player von `open.spotify.com` lässt sich nicht einbetten: Spotify verbietet es ausdrücklich, ein Rahmen darum bliebe leer. Eingebettet ist deshalb Spotifys offizieller Einbettungs-Player. Für den vollen Player gibt es den Knopf darunter.',
         ],
       },
       {
@@ -326,6 +338,13 @@ export const ARTICLES = [
     summary:
       'Die häufigsten Fälle und was dann hilft: ein Gerät reagiert nicht, die Anzeige hinkt hinterher, oder du kommst selbst nicht mehr hinein.',
     sections: [
+      {
+        heading: 'Die FRITZ!Box wird gefunden, lässt sich aber nicht verbinden',
+        body: [
+          'Das lag früher am Namen: Im Eintrag stand `fritz.box`, und der muss im Netz des Hubs auflösbar sein. In einem Container mit eigenem DNS, hinter einem VPN oder an einem Router ohne Namensauflösung ist er das nicht.',
+          'Der Hub trägt jetzt die **IP-Adresse** der Box ein, nicht ihren Namen; der Name steht nur noch daneben, damit man sie wiedererkennt. Klemmt es trotzdem, hilft die Adresse von Hand – sie steht in der Box unter Heimnetz → Netzwerk.',
+        ],
+      },
       {
         heading: 'Ein Gerät reagiert nicht',
         body: [

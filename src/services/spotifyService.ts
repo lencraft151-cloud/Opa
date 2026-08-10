@@ -524,12 +524,37 @@ interface RawPlayback {
   progress_ms?: number | null;
   shuffle_state?: boolean;
   device?: RawDevice;
+  /** Woraus gespielt wird: `spotify:playlist:37i9…`, `spotify:album:…` … */
+  context?: { uri?: string | null; type?: string | null } | null;
   item?: {
+    id?: string | null;
     name?: string;
     duration_ms?: number;
     artists?: Array<{ name?: string }>;
     album?: { name?: string; images?: Array<{ url?: string; width?: number }> };
   } | null;
+}
+
+/**
+ * Zerlegt eine Spotify-URI (`spotify:playlist:37i9dQZF1DX…`).
+ *
+ * Die letzte Stelle ist die Kennung, die davor sagt, um was für eine Sache es
+ * sich handelt. Alles andere – lokale Dateien etwa (`spotify:local:…`) – hat
+ * keine Entsprechung im Web und wird verworfen.
+ */
+export function parseSpotifyUri(uri: string | null | undefined): {
+  type: string;
+  id: string;
+} | null {
+  if (!uri) return null;
+  const parts = uri.split(':');
+  if (parts.length < 3) return null;
+  const type = parts[parts.length - 2] ?? '';
+  const id = parts[parts.length - 1] ?? '';
+  if (!/^(album|playlist|artist|show|episode|track)$/.test(type)) return null;
+  // Kennungen bei Spotify sind Base62 und 22 Zeichen lang.
+  if (!/^[A-Za-z0-9]{16,40}$/.test(id)) return null;
+  return { type, id };
 }
 
 export function toDevice(raw: RawDevice): SpotifyDevice {
@@ -550,6 +575,7 @@ export function toDevice(raw: RawDevice): SpotifyDevice {
  */
 export function toPlayback(raw: RawPlayback): SpotifyPlayback {
   const item = raw.item ?? null;
+  const context = parseSpotifyUri(raw.context?.uri);
   const images = item?.album?.images ?? [];
   const artwork =
     images.find((image) => (image.width ?? 0) > 200 && (image.width ?? 0) <= 400) ??
@@ -568,6 +594,9 @@ export function toPlayback(raw: RawPlayback): SpotifyPlayback {
     deviceId: raw.device?.id ?? null,
     volume: typeof raw.device?.volume_percent === 'number' ? raw.device.volume_percent : null,
     shuffle: raw.shuffle_state === true,
+    trackId: item?.id ?? null,
+    contextId: context?.id ?? null,
+    contextType: context?.type ?? null,
   };
 }
 

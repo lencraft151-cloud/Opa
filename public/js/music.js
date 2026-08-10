@@ -20,7 +20,40 @@ export const music = {
   spotify: null,
   /** Läuft gerade eine Suche nach Lautsprechern? */
   searching: false,
+  /** Playlists, Radiosender und Favoriten – erst auf Wunsch geholt. */
+  library: null,
+  /** Auf welchem Lautsprecher eine Auswahl landen soll. */
+  libraryTarget: null,
+  libraryLoading: false,
+  /** Welche der drei Listen offen ist. */
+  libraryTab: 'playlists',
+  /**
+   * Welche Aufklapper offen stehen.
+   *
+   * Muss gemerkt werden, weil die Karte sich im Fünf-Sekunden-Takt neu
+   * schreibt, sobald sich die Spielposition ändert. Ohne dieses Gedächtnis
+   * klappte ein gerade geöffneter Abschnitt nach fünf Sekunden wieder zu.
+   */
+  open: {},
 };
+
+/** Voreinstellung, solange niemand etwas anderes gesagt hat. */
+function isOpen(section, fallback = false) {
+  return music.open[section] ?? fallback;
+}
+
+/**
+ * Hängt die Aufklapper einer Karte an das Gedächtnis.
+ *
+ * @param {Element} card
+ */
+function rememberSections(card) {
+  card.querySelectorAll('details[data-section]').forEach((node) => {
+    node.addEventListener('toggle', () => {
+      music.open[node.dataset.section] = node.open;
+    });
+  });
+}
 
 /** Läuft im Hintergrund, solange der Reiter offen ist. */
 let ticker = null;
@@ -150,6 +183,7 @@ function renderSonos(card) {
     `${head}
      ${grouped}
      ${body}
+     ${players.length ? libraryPanel(players) : ''}
      <details data-section="sonos-manual">
        <summary>Lautsprecher von Hand eintragen</summary>
        <p class="muted small">
@@ -223,8 +257,163 @@ function playerCard(player) {
   </article>`;
 }
 
+/** Die drei Listen, die ein Sonos-Haushalt führt. */
+const LIBRARY_TABS = [
+  { id: 'playlists', label: '🎵 Playlists', empty: 'In der Sonos-App noch keine Wiedergabeliste gespeichert.' },
+  { id: 'radio', label: '📻 Radiosender', empty: 'Noch keine Sender unter „Meine Radiosender" abgelegt.' },
+  { id: 'favorites', label: '⭐ Favoriten', empty: 'Noch nichts mit dem Herz-Symbol markiert.' },
+];
+
+/**
+ * Playlists, Radiosender und Favoriten.
+ *
+ * Sie gehören dem Sonos-Haushalt, nicht dem einzelnen Lautsprecher – deshalb
+ * eine Liste für alle, mit der Frage „auf welchem Lautsprecher?" darüber
+ * statt derselben Liste unter jedem Gerät.
+ *
+ * Geholt wird erst beim Aufklappen: Drei Abfragen an den Lautsprecher für
+ * eine Liste, die niemand geöffnet hat, wären Verschwendung.
+ */
+function libraryPanel(players) {
+  const target =
+    players.find((player) => player.id === music.libraryTarget)?.id ?? players[0]?.id ?? '';
+  const library = music.library;
+
+  const targets = players
+    .map(
+      (player) =>
+        `<option value="${esc(player.id)}" ${player.id === target ? 'selected' : ''}>${esc(
+          player.roomName,
+        )}</option>`,
+    )
+    .join('');
+
+  const tabs = LIBRARY_TABS.map((tab) => {
+    const count = library?.[tab.id]?.length ?? 0;
+    return `<button type="button" class="chip ${tab.id === music.libraryTab ? 'active' : ''}"
+                    data-library-tab="${tab.id}">${esc(tab.label)}${
+                      library ? ` ${count}` : ''
+                    }</button>`;
+  }).join('');
+
+  let list;
+  if (music.libraryLoading) {
+    list = `<div class="list"><div class="item"><div class="title skeleton-line"></div></div></div>`;
+  } else if (!library) {
+    list = `<p class="muted small">Noch nicht geladen.</p>`;
+  } else if (library.error) {
+    list = `<div class="callout warn">
+              <strong>Die Listen waren nicht zu holen</strong>
+              <span>${esc(library.error)}</span>
+            </div>`;
+  } else {
+    const tab = LIBRARY_TABS.find((entry) => entry.id === music.libraryTab) ?? LIBRARY_TABS[0];
+    const items = library[tab.id] ?? [];
+    list = items.length
+      ? `<div class="list">${items.map(libraryItem).join('')}</div>`
+      : `<p class="muted small">${esc(tab.empty)}</p>`;
+  }
+
+  return `<details class="card" data-section="sonos-library" ${
+    isOpen('sonos-library', Boolean(music.library)) ? 'open' : ''
+  }>
+    <summary>Playlists und Radiosender</summary>
+    <p class="muted small">
+      Was in der Sonos-App gespeichert ist: Wiedergabelisten, „Meine Radiosender"
+      und alles mit dem Herz-Symbol. Ein Klick legt es auf dem gewählten
+      Lautsprecher auf – in einer Gruppe für die ganze Gruppe.
+    </p>
+    <div class="row">
+      <label class="grow">Abspielen auf
+        <select id="sonos-target">${targets}</select>
+      </label>
+      <button class="small" id="btn-sonos-library" ${music.libraryLoading ? 'disabled' : ''}>
+        ${music.libraryLoading ? 'Wird geladen …' : music.library ? 'Neu laden' : 'Listen laden'}
+      </button>
+    </div>
+    <div class="chips">${tabs}</div>
+    ${list}
+  </details>`;
+}
+
+function libraryItem(item) {
+  return `<div class="item" data-library-item="${esc(item.id)}" role="button" tabindex="0"
+               title="Auf dem gewählten Lautsprecher abspielen">
+    <div class="row tight">
+      ${
+        item.artworkUrl
+          ? `<img class="library-art" src="${esc(item.artworkUrl)}" alt="" loading="lazy" />`
+          : '<span class="library-art placeholder">🎵</span>'
+      }
+      <div>
+        <div class="title">${esc(item.title)}</div>
+        <div class="sub">${esc(item.subtitle ?? (item.container ? 'Liste' : 'Sender'))}</div>
+      </div>
+    </div>
+    <button class="small primary" type="button" tabindex="-1">▶</button>
+  </div>`;
+}
+
+async function loadLibrary() {
+  const playerId = music.libraryTarget ?? music.sonos?.players[0]?.id;
+  if (!playerId) return;
+  music.libraryLoading = true;
+  renderMusic();
+  try {
+    music.library = await api(`/sonos/${playerId}/library`);
+  } catch (err) {
+    showError(err);
+  } finally {
+    music.libraryLoading = false;
+    renderMusic();
+  }
+}
+
+async function playFromLibrary(itemId) {
+  const playerId = music.libraryTarget ?? music.sonos?.players[0]?.id;
+  if (!playerId) return;
+  const state = await guard(
+    () =>
+      api(`/sonos/${playerId}/play`, {
+        method: 'POST',
+        body: { list: music.libraryTab, itemId },
+      }),
+    { success: 'Läuft.' },
+  );
+  if (!state) return;
+  const player = music.sonos?.players.find((entry) => entry.id === playerId);
+  if (player) player.state = state;
+  renderMusic();
+}
+
 function wireSonos(card) {
+  rememberSections(card);
   card.querySelector('#btn-sonos-search')?.addEventListener('click', () => void searchSonos());
+
+  card.querySelector('#sonos-target')?.addEventListener('change', (event) => {
+    music.libraryTarget = event.target.value;
+  });
+  card.querySelector('#btn-sonos-library')?.addEventListener('click', () => void loadLibrary());
+
+  card.querySelectorAll('[data-library-tab]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      music.libraryTab = chip.dataset.libraryTab;
+      // Ohne Listen wäre der Reiterwechsel eine leere Geste.
+      if (music.library) renderMusic();
+      else void loadLibrary();
+    });
+  });
+
+  card.querySelectorAll('[data-library-item]').forEach((row) => {
+    const play = () => void playFromLibrary(row.dataset.libraryItem);
+    row.addEventListener('click', play);
+    row.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        play();
+      }
+    });
+  });
 
   card.querySelector('#form-sonos-manual')?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -382,6 +571,8 @@ function renderSpotify(card) {
          : ''
      }
 
+     ${spotifyEmbed(playback)}
+
      <details data-section="spotify-settings">
        <summary>Verbindung</summary>
        <p class="muted small">
@@ -393,6 +584,66 @@ function renderSpotify(card) {
   );
 
   wireSpotify(card);
+}
+
+/**
+ * Spotifys eigene Oberfläche, eingebettet.
+ *
+ * Eine Warnung vorweg, damit niemand sie vermisst: Der **volle Web-Player**
+ * unter `open.spotify.com` lässt sich nicht einbetten. Spotify verbietet es
+ * ausdrücklich (`frame-ancestors 'self'`), und daran führt kein Weg vorbei –
+ * ein Rahmen darum bliebe leer.
+ *
+ * Was sich einbetten lässt, ist Spotifys **offizieller Einbettungs-Player**
+ * unter `open.spotify.com/embed/…`. Er ist genau dafür gemacht: Titelbild,
+ * Titelliste und ein Abspielknopf. Wer bei Spotify angemeldet ist, hört
+ * darin den ganzen Titel; wer nicht, eine Kostprobe.
+ *
+ * Gezeigt wird bevorzugt die *Quelle* – die Playlist oder das Album, aus dem
+ * gerade gespielt wird. Sie ist die eigentliche Oberfläche; ein einzelner
+ * Titel wäre nur ein Ausschnitt davon. Gibt es keine Quelle (jemand hat einen
+ * einzelnen Titel gestartet), tritt dieser an ihre Stelle.
+ */
+function spotifyEmbed(playback) {
+  const kind = playback?.contextId
+    ? { type: playback.contextType, id: playback.contextId, what: 'Quelle' }
+    : playback?.trackId
+      ? { type: 'track', id: playback.trackId, what: 'Titel' }
+      : null;
+
+  if (!kind) {
+    return `<details class="card" data-section="spotify-embed" ${
+      isOpen('spotify-embed') ? 'open' : ''
+    }>
+      <summary>Spotify-Oberfläche</summary>
+      <p class="muted small">
+        Sobald etwas läuft, steht hier Spotifys eigener Player – mit Titelbild und
+        Titelliste. Solange nichts gewählt ist, gibt es nichts einzubetten.
+      </p>
+    </details>`;
+  }
+
+  const embed = `https://open.spotify.com/embed/${encodeURIComponent(kind.type)}/${encodeURIComponent(kind.id)}`;
+  const full = `https://open.spotify.com/${encodeURIComponent(kind.type)}/${encodeURIComponent(kind.id)}`;
+
+  return `<details class="card" data-section="spotify-embed" ${
+    isOpen('spotify-embed', true) ? 'open' : ''
+  }>
+    <summary>Spotify-Oberfläche</summary>
+    <p class="muted small">
+      Spotifys eigener Player, hier eingebettet – gezeigt wird die ${esc(kind.what)}.
+      Den vollen Web-Player kann Spotify nicht in fremde Seiten einbetten lassen;
+      dafür ist der Knopf darunter da.
+    </p>
+    <div class="embed-frame compact">
+      <iframe src="${esc(embed)}" title="Spotify" loading="lazy"
+              referrerpolicy="no-referrer"
+              allow="autoplay; clipboard-write; encrypted-media; picture-in-picture"></iframe>
+    </div>
+    <a class="button small" href="${esc(full)}" target="_blank" rel="noopener noreferrer">
+      Im Spotify-Web-Player öffnen
+    </a>
+  </details>`;
 }
 
 function spotifySetup(state) {
@@ -438,6 +689,7 @@ function spotifySetup(state) {
 }
 
 function wireSpotify(card) {
+  rememberSections(card);
   card.querySelector('#form-spotify')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);

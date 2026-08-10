@@ -7,7 +7,12 @@ import { createHash } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
-import { FritzboxAdapter } from '../src/adapters/fritzbox/adapter.ts';
+import {
+  FritzboxAdapter,
+  mergeBoxes,
+  resolveIPv4,
+  type ProbedBox,
+} from '../src/adapters/fritzbox/adapter.ts';
 import { FritzboxClient, solveChallenge } from '../src/adapters/fritzbox/client.ts';
 import {
   celsiusToHalfDegrees,
@@ -745,5 +750,103 @@ describe('Anmeldung ohne Benutzernamen', () => {
     } finally {
       box.close();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Welche Adresse in der Trefferliste landet
+// ---------------------------------------------------------------------------
+
+/**
+ * Die Box wurde gefunden – und ließ sich trotzdem nicht verbinden.
+ *
+ * Dahinter steckten zwei Fehler in derselben Zeile. Die Suche klopft mehrere
+ * Adressen an (`fritz.box`, die Werksadresse, den Standardrouter), und alle
+ * antworten, wenn es dieselbe Box ist. Zusammengefasst wurde nach der Regel
+ * „ein Name schlägt jede IP" – womit im Eintrag der *Name* stand. Ist der im
+ * Netz des Hubs nicht auflösbar (Container mit eigenem DNS, VPN, Router ohne
+ * Namensauflösung), zeigt der Eintrag ins Leere.
+ *
+ * Und stand ein zweiter Router im Netz, verschwand er ganz.
+ */
+const boxInfo = { model: 'FRITZ!Box 7590', firmware: '7.57' };
+
+const probed = (host: string, address: string | null): ProbedBox => ({
+  host,
+  address,
+  info: { ...boxInfo },
+});
+
+describe('Adresse der gefundenen FRITZ!Box', () => {
+  it('verbindet über die IP, auch wenn nur der Name geantwortet hat', () => {
+    const [entry] = mergeBoxes([probed('fritz.box', '192.168.178.1')]);
+    assert.equal(entry?.host, '192.168.178.1');
+    // Der Name bleibt sichtbar – daran erkennt man die Box wieder.
+    assert.match(entry?.name ?? '', /fritz\.box/);
+  });
+
+  it('fasst Name und Adresse derselben Box zu einem Eintrag zusammen', () => {
+    const found = mergeBoxes([
+      probed('fritz.box', '192.168.178.1'),
+      probed('fritz.box.', '192.168.178.1'),
+      probed('192.168.178.1', '192.168.178.1'),
+    ]);
+    assert.equal(found.length, 1);
+    assert.equal(found[0]?.host, '192.168.178.1');
+  });
+
+  it('lässt zwei verschiedene Boxen zwei bleiben', () => {
+    // Genau das ging vorher verloren: Die zweite Box fiel weg, weil in der
+    // Liste schon ein Name stand.
+    const found = mergeBoxes([
+      probed('fritz.box', '192.168.178.1'),
+      probed('192.168.5.1', '192.168.5.1'),
+    ]);
+    assert.deepEqual(
+      found.map((entry) => entry.host).sort(),
+      ['192.168.178.1', '192.168.5.1'],
+    );
+  });
+
+  it('behält den Namen, wenn er sich nicht auflösen lässt', () => {
+    // Geantwortet hat er ja – dann ist er auch zum Verbinden brauchbar.
+    const [entry] = mergeBoxes([probed('fritz.box', null)]);
+    assert.equal(entry?.host, 'fritz.box');
+    assert.equal(entry?.name, 'FRITZ!Box 7590');
+  });
+
+  it('vergibt je Adresse eine eigene Kennung', () => {
+    const found = mergeBoxes([
+      probed('fritz.box', '192.168.178.1'),
+      probed('192.168.5.1', '192.168.5.1'),
+    ]);
+    assert.equal(new Set(found.map((entry) => entry.externalId)).size, 2);
+  });
+});
+
+describe('Namen auflösen', () => {
+  it('reicht eine IP unverändert durch', async () => {
+    assert.equal(await resolveIPv4('192.168.178.1'), '192.168.178.1');
+  });
+
+  it('löst einen Namen ins Heimnetz auf', async () => {
+    assert.equal(await resolveIPv4('fritz.box', async () => '192.168.178.1'), '192.168.178.1');
+  });
+
+  it('verwirft eine Antwort, die ins Internet zeigt', async () => {
+    /*
+     * Manche Provider lösen unbekannte Namen auf eine eigene Suchseite auf.
+     * Ohne diese Grenze schickte der Hub sein FRITZ!Box-Kennwort dorthin.
+     */
+    assert.equal(await resolveIPv4('fritz.box', async () => '203.0.113.7'), null);
+  });
+
+  it('bleibt ruhig, wenn es keinen Eintrag gibt', async () => {
+    assert.equal(
+      await resolveIPv4('fritz.box', async () => {
+        throw new Error('ENOTFOUND');
+      }),
+      null,
+    );
   });
 });

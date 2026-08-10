@@ -694,12 +694,30 @@ function renderRooms(panel = $('#sub-rooms')) {
   });
 
   if (unassigned.length > 0) {
+    /*
+     * Hier steht der Bogen offen und nicht hinter einem Aufklapper: Ein Gerät
+     * ohne Raum *ist* die unfertige Stelle. Wer hier landet, will genau das
+     * erledigen – und nicht erst suchen, wo man es erledigt.
+     */
     groups.push(`<section class="card">
       <div class="row between">
         <h2 style="margin:0">Ohne Raum</h2>
         <span class="badge warn">${esc(plural(unassigned.length, "Gerät", "Geräte"))}</span>
       </div>
-      <div class="grid">${unassigned.map((device) => deviceCard(device)).join('')}</div>
+      <p class="muted small">
+        Diese Geräte sind da, gehören aber nirgends hin. Ohne Raum fehlen sie in den
+        Raumkacheln, in der Klimaanzeige und bei „alles im Wohnzimmer aus". Name, Raum
+        und Gruppe lassen sich gleich hier setzen – oder das Gerät entfernen, wenn es
+        nicht gebraucht wird.
+      </p>
+      <div class="unassigned">${unassigned
+        .map(
+          (device) => `<div class="unassigned-item">
+            ${deviceCard(device)}
+            ${deviceEditor(device)}
+          </div>`,
+        )
+        .join('')}</div>
     </section>`);
   }
 
@@ -711,6 +729,7 @@ function renderRooms(panel = $('#sub-rooms')) {
 
   if (!paint(panel, intro + groups.join(''))) return;
   bindDeviceControls(panel, sendCommand, deviceById);
+  wireDeviceEditors(panel);
   restoreOpenSections(panel);
 
   panel.querySelectorAll('[data-room-power]').forEach((button) => {
@@ -787,7 +806,15 @@ function renderDevices(panel = $('#sub-devices')) {
     <div class="grid" id="devices-grid">${
       devices.length
         ? devices
-            .map((device) => deviceCard(device, { showMeta: true, roomName: roomName(device.roomId) }))
+            .map(
+              (device) => `<div class="device-slot">
+                ${deviceCard(device, { showMeta: true, roomName: roomName(device.roomId) })}
+                <details class="device-edit" data-section="edit-${esc(device.id)}">
+                  <summary>Umbenennen, Raum, Gruppe, entfernen</summary>
+                  ${deviceEditor(device)}
+                </details>
+              </div>`,
+            )
             .join('')
         : emptyState('🔍', 'Keine passenden Geräte.', 'Setze den Filter zurück oder ändere die Suche.')
     }</div>
@@ -809,6 +836,7 @@ function renderDevices(panel = $('#sub-devices')) {
   if (!paint(panel, html)) return;
 
   bindDeviceControls(panel, sendCommand, deviceById);
+  wireDeviceEditors(panel);
   wireCapabilityFix(panel.querySelector('#device-types'));
   restoreOpenSections(panel);
 
@@ -3063,6 +3091,145 @@ function capabilityFixItem(device) {
       ${chips}
     </div>
   </div>`;
+}
+
+/**
+ * Der kleine Bogen, mit dem sich ein Gerät geraderücken lässt.
+ *
+ * Vier Dinge an einer Stelle: Name, Raum, Gruppe, und der Weg hinaus. Sie
+ * gehören zusammen, weil sie zusammen auftreten – ein frisch gefundenes Gerät
+ * heißt „Shelly 1PM 34AB9F", steckt in keinem Raum, gilt als Schalter und ist
+ * in Wahrheit der Rollladen im Bad. Bisher lagen die vier Handgriffe an vier
+ * verschiedenen Orten in der Oberfläche.
+ *
+ * Die eigene Kennung am Formular ist kein Schmuck: Ohne sie hielte der
+ * Entwurfsspeicher (`drafts.js`) die Namensfelder aller Geräte für dasselbe
+ * Feld.
+ */
+function deviceEditor(device) {
+  const rooms = store.rooms ?? [];
+  const kind = currentKind(device);
+  const sensors = (device.capabilities ?? []).filter((capability) =>
+    capability.startsWith('sensor.'),
+  );
+
+  const roomOptions = [
+    `<option value="" ${device.roomId ? '' : 'selected'}>— ohne Raum —</option>`,
+    ...rooms.map(
+      (room) =>
+        `<option value="${esc(room.id)}" ${room.id === device.roomId ? 'selected' : ''}>${esc(
+          room.name,
+        )}</option>`,
+    ),
+  ].join('');
+
+  const kindOptions = DEVICE_KIND_PRESETS.map(
+    (preset) =>
+      `<option value="${esc(preset.id)}" ${preset.id === kind ? 'selected' : ''}>${esc(
+        preset.label,
+      )}</option>`,
+  ).join('');
+
+  /*
+   * Wer genau einen Raum hat, soll nicht durch eine Auswahlliste mit einem
+   * Eintrag müssen. Ein Knopf sagt dasselbe in einem Klick.
+   */
+  const only = rooms.length === 1 ? rooms[0] : null;
+  const quick =
+    only && device.roomId === null
+      ? `<button type="button" class="small primary" data-quick-room="${esc(only.id)}">
+           In „${esc(only.name)}“
+         </button>`
+      : '';
+
+  return `<form class="form device-editor" id="edit-${esc(device.id)}"
+                data-edit-device="${esc(device.id)}"
+                data-sensors="${esc(sensors.join(','))}">
+    <div class="row">
+      <label class="grow">Name
+        <input name="name" value="${esc(device.name)}" maxlength="120" required />
+      </label>
+      <label>Raum
+        <select name="roomId">${roomOptions}</select>
+      </label>
+      <label>Gruppe ${help(
+        'Wofür der Hub das Gerät hält. Stimmt es nicht, lässt es sich hier richtigstellen – ' +
+          'die Angabe gilt dann überall: auf der Karte, in Automationen und in Szenen.',
+      )}
+        <select name="kind">${kindOptions}</select>
+      </label>
+    </div>
+    <div class="row tight">
+      ${quick}
+      <button type="submit" class="small primary">Speichern</button>
+      <button type="button" class="small ghost danger" data-delete-device="${esc(device.id)}"
+              title="Entfernt das Gerät aus dem Hub. Am Gerät selbst ändert das nichts.">
+        Entfernen
+      </button>
+    </div>
+  </form>`;
+}
+
+/**
+ * @param {ParentNode} root
+ */
+function wireDeviceEditors(root) {
+  if (!root) return;
+
+  root.querySelectorAll('[data-edit-device]').forEach((form) => {
+    const deviceId = form.dataset.editDevice;
+    const sensors = form.dataset.sensors ? form.dataset.sensors.split(',').filter(Boolean) : [];
+
+    const save = async (overrides = {}) => {
+      const data = new FormData(form);
+      const preset = DEVICE_KIND_PRESETS.find((entry) => entry.id === data.get('kind'));
+      const body = {
+        name: String(data.get('name') ?? '').trim(),
+        roomId: String(data.get('roomId') ?? '') || null,
+        // Sensorfähigkeiten bleiben erhalten: Ein Shelly, der als Rollladen
+        // richtiggestellt wird, misst weiterhin Strom.
+        capabilityOverride: preset?.capabilities
+          ? [...new Set([...preset.capabilities, ...sensors])]
+          : null,
+        ...overrides,
+      };
+      if (!body.name) return;
+
+      const updated = await guard(() => api(`/devices/${deviceId}`, { method: 'PATCH', body }), {
+        success: 'Gespeichert.',
+      });
+      if (!updated) return;
+      await loadDashboardData();
+      renderCurrent({ reason: 'devices' });
+    };
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void save();
+    });
+
+    form.querySelector('[data-quick-room]')?.addEventListener('click', (event) => {
+      void save({ roomId: event.currentTarget.dataset.quickRoom });
+    });
+
+    form.querySelector('[data-delete-device]')?.addEventListener('click', async () => {
+      const name = String(new FormData(form).get('name') ?? 'dieses Gerät');
+      if (
+        !confirm(
+          `„${name}" aus dem Hub entfernen?\n\n` +
+            'Das Gerät selbst bleibt unberührt und taucht bei der nächsten Suche wieder auf. ' +
+            'Verloren gehen sein Name, seine Raumzuordnung und sein Platz in Szenen und Automationen.',
+        )
+      ) {
+        return;
+      }
+      await guard(() => api(`/devices/${deviceId}`, { method: 'DELETE' }), {
+        success: 'Gerät entfernt.',
+      });
+      await loadDashboardData();
+      renderCurrent({ reason: 'devices' });
+    });
+  });
 }
 
 function wireCapabilityFix(root) {

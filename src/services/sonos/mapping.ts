@@ -206,6 +206,143 @@ export function absoluteUrl(value: string, baseUrl?: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Listen: Playlists, Radiosender, Favoriten
+// ---------------------------------------------------------------------------
+
+/**
+ * Die Behälter, in denen ein Sonos-Haushalt seine Listen führt.
+ *
+ * Das sind keine Pfade, die sich jemand ausgedacht hat, sondern die festen
+ * Kennungen aus Sonos' ContentDirectory. Sie sehen kryptisch aus und sind es
+ * auch – aber sie sind seit über zehn Jahren dieselben.
+ */
+export const SONOS_CONTAINERS = {
+  /** In der Sonos-App gespeicherte Wiedergabelisten. */
+  playlists: 'SQ:',
+  /** Sender aus „Meine Radiosender". */
+  radio: 'R:0/0',
+  /** Alles, was jemand mit dem Herz-Symbol markiert hat. */
+  favorites: 'FV:2',
+} as const;
+
+export type SonosListName = keyof typeof SONOS_CONTAINERS;
+
+export interface SonosBrowseItem {
+  /** Kennung im ContentDirectory – damit lässt sich der Eintrag wiederfinden. */
+  id: string;
+  title: string;
+  /** Interpret, Sender-Beschreibung – was eben dabeisteht. */
+  subtitle: string | null;
+  /** Die Adresse, die der Lautsprecher abspielen soll. */
+  uri: string | null;
+  /**
+   * Die Beschreibung der Quelle, wie Sonos sie selbst mitliefert.
+   *
+   * Bei Favoriten steckt sie in `r:resMD` und ist unverzichtbar: Ohne sie
+   * nimmt der Lautsprecher eine Playlist eines Musikdienstes nicht an – er
+   * weiß dann nicht, welcher Dienst gemeint ist.
+   */
+  metadata: string | null;
+  artworkUrl: string | null;
+  /**
+   * Behälter oder einzelner Titel?
+   *
+   * Das entscheidet über den Weg: Ein Behälter (Playlist, Album) wandert in
+   * die Warteschlange, ein Stream wird direkt aufgelegt.
+   */
+  container: boolean;
+  /** `object.container.playlistContainer`, `object.item.audioItem.audioBroadcast` … */
+  upnpClass: string | null;
+}
+
+/**
+ * Liest das Ergebnis einer `Browse`-Anfrage.
+ *
+ * Die Antwort ist DIDL-Lite – dasselbe Format wie beim laufenden Titel, nur
+ * mit vielen Einträgen statt einem. Behälter stehen als `<container>`, einzelne
+ * Stücke als `<item>`; unterschieden werden muss beides, weil sie verschieden
+ * abgespielt werden.
+ */
+export function parseBrowseItems(didl: string | undefined): SonosBrowseItem[] {
+  if (!didl || !didl.trim()) return [];
+  const root = tryParseXml(didl);
+  if (!root) return [];
+
+  const nodes = [...findAll(root, 'container'), ...findAll(root, 'item')];
+  const items: SonosBrowseItem[] = [];
+
+  for (const node of nodes) {
+    const id = node.attrs['id'] ?? '';
+    const title = clean(findText(node, 'title'));
+    if (!id || !title) continue;
+
+    const upnpClass = clean(findText(node, 'class'));
+    const uri = clean(findText(node, 'res'));
+
+    /*
+     * Behälter oder einzelnes Stück?
+     *
+     * Zwei Merkmale genügen nicht. Ein **Favorit** steht immer als `<item>`
+     * und trägt die Klasse `object.itemobject.item.sonos-favorite` – auch
+     * dann, wenn dahinter eine ganze Playlist eines Musikdienstes steckt.
+     * Was er wirklich ist, verrät erst seine Adresse: `x-rincon-cpcontainer:`
+     * ist ein Behälter und muss über die Warteschlange laufen. Direkt
+     * aufgelegt lehnt der Lautsprecher ihn ab.
+     */
+    const container =
+      localOf(node.name) === 'container' ||
+      (upnpClass ?? '').startsWith('object.container') ||
+      (uri ?? '').startsWith('x-rincon-cpcontainer:');
+
+    items.push({
+      id,
+      title,
+      subtitle: clean(findText(node, 'creator')) ?? clean(findText(node, 'album')),
+      uri,
+      // `r:resMD` heißt im Baum nur `resMD` – der Präfix ist abgeschnitten.
+      metadata: clean(findText(node, 'resMD')),
+      artworkUrl: clean(findText(node, 'albumArtURI')),
+      container,
+      upnpClass,
+    });
+  }
+
+  return items;
+}
+
+/**
+ * Baut eine DIDL-Beschreibung für einen Eintrag, der keine mitbringt.
+ *
+ * Gespeicherte Wiedergabelisten (`SQ:`) haben kein `r:resMD` – der
+ * Lautsprecher kennt sie ja selbst. Er will trotzdem *etwas* haben, und zwar
+ * mit der richtigen Klasse; eine leere Angabe lehnt er mit Fehler 402 ab.
+ */
+export function didlFor(item: SonosBrowseItem): string {
+  if (item.metadata) return item.metadata;
+  const cls = item.upnpClass ?? (item.container ? 'object.container' : 'object.item.audioItem');
+  return (
+    '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" ' +
+    'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ' +
+    'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">' +
+    `<item id="${escapeXml(item.id)}" parentID="" restricted="true">` +
+    `<dc:title>${escapeXml(item.title)}</dc:title>` +
+    `<upnp:class>${escapeXml(cls)}</upnp:class>` +
+    '</item></DIDL-Lite>'
+  );
+}
+
+/**
+ * Die Adresse der eigenen Warteschlange.
+ *
+ * Eine Playlist wird nicht „abgespielt", sondern in die Warteschlange gelegt;
+ * danach schaltet der Lautsprecher auf ebendiese Warteschlange um. Das ist der
+ * Umweg, den auch die Sonos-App geht.
+ */
+export function queueUri(coordinatorUuid: string): string {
+  return `x-rincon-queue:${coordinatorUuid}#0`;
+}
+
+// ---------------------------------------------------------------------------
 // Gruppen
 // ---------------------------------------------------------------------------
 

@@ -41,11 +41,12 @@ Geräte.
 | **Darstellung** | Schriftgröße, Akzentfarben, hell/dunkel, „Bewegung reduzieren“ und die Lichtvorschau – am Haushalt gespeichert und damit auf jedem Gerät gleich |
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
+| **Geräte geraderücken** | Name, Raum, Gruppe und das Entfernen an einer Stelle – bei Geräten ohne Raum offen sichtbar, sonst hinter einem Aufklapper |
 | **Erneut verbinden** | Zugangsdaten erneuern oder den Knopf an der Hue Bridge noch einmal drücken – ohne Geräte, Räume, Szenen und Automationen zu verlieren |
 | **Wiki im Hub** | Zwölf durchsuchbare Artikel zu allem – Begriffe, Einrichtung je Hersteller, Automationen, Fehlersuche – mit Verweisen aus der Oberfläche heraus |
 | **Alles verbinden** | Ein Knopf übernimmt alle gefundenen Geräte, die kein Passwort brauchen – mit Bericht, was ging und was nicht |
-| **Sonos** | Lautsprecher im eigenen Netz finden und bedienen: Titel, Titelbild, Play/Pause/Weiter und Lautstärke – gruppenfest, ohne Konto |
-| **Spotify** | Was gerade läuft, samt Steuerung und Gerätewechsel; Anmeldung mit PKCE, ohne Client-Geheimnis |
+| **Sonos** | Lautsprecher im eigenen Netz finden und bedienen: Titel, Titelbild, Play/Pause/Weiter und Lautstärke – dazu **Playlists, Radiosender und Favoriten** zum Auflegen; gruppenfest, ohne Konto |
+| **Spotify** | Was gerade läuft, samt Steuerung und Gerätewechsel, dazu Spotifys **eingebetteter Player**; Anmeldung mit PKCE, ohne Client-Geheimnis |
 | **Nextcloud** | Benachrichtigungen der eigenen Nextcloud – Talk, Freigaben, Kalender – als Einblendung im Hub, mit Verweis auf die Sache selbst |
 | **Sicherung** | Einstellungen, Räume, Geräte, Szenen und Automationen als Datei sichern und zurückspielen – ohne Passwörter in der Datei |
 | **Fassung des Hubs** | Änderungsprotokoll in der Oberfläche, Prüfung auf eine neuere Fassung und Aktualisierung auf Knopfdruck |
@@ -543,6 +544,65 @@ geklont, `npm install && npm run build`, gestartet – ohne `.env`, ohne
 demselben Passwort, unveränderter `secret.key` und ein durchlaufender
 Nextcloud-Abruf. Der braucht das entschlüsselte App-Passwort und ist damit der
 Beleg, dass Datei *und* Schlüssel den Wechsel überstanden haben.
+
+### Sonos: warum eine Playlist anders läuft als ein Radiosender
+
+Der Hub liest die Listen eines Sonos-Haushalts über das ContentDirectory:
+`SQ:` sind die gespeicherten Wiedergabelisten, `R:0/0` die eigenen
+Radiosender, `FV:2` die Favoriten. Abgespielt wird auf zwei verschiedenen
+Wegen, und sie zu verwechseln ist der übliche Fehler:
+
+- **Ein Behälter** – Playlist, Album – lässt sich nicht direkt auflegen. Er
+  wandert per `AddURIToQueue` in die Warteschlange, danach schaltet
+  `SetAVTransportURI` auf `x-rincon-queue:<Koordinator>#0` um. Denselben
+  Umweg geht auch die Sonos-App.
+- **Ein Stream** – ein Radiosender – wird unmittelbar aufgelegt. Eine
+  Warteschlange gäbe es dafür gar nicht; ein Sender hat keinen nächsten Titel.
+
+Woran man beides unterscheidet, ist die dritte Feinheit: Ein **Favorit** steht
+im DIDL immer als `<item>` und trägt die Klasse
+`object.itemobject.item.sonos-favorite` – auch dann, wenn dahinter eine ganze
+Playlist eines Musikdienstes steckt. Was er wirklich ist, verrät erst seine
+Adresse (`x-rincon-cpcontainer:` ist ein Behälter). Und seine Beschreibung aus
+`r:resMD` muss mitgeschickt werden, sonst weiß der Lautsprecher nicht, welcher
+Dienst gemeint ist, und lehnt ab.
+
+Der ganze Vorgang gehört dem **Koordinator** der Gruppe: Er führt die
+Warteschlange. Ginge er an ein Mitglied, gäbe es UPnP-Fehler 701 – oder,
+schlimmer, eine zweite Warteschlange, die niemand hört.
+
+### Spotify: was sich einbetten lässt und was nicht
+
+Spotifys **voller** Web-Player unter `open.spotify.com` lässt sich nicht in
+eine fremde Seite einbetten. Spotify verbietet es per
+`Content-Security-Policy: frame-ancestors 'self' …`; ein Rahmen darum bliebe
+leer. Daran führt kein Weg vorbei, und es hat auch keinen Sinn, es zu
+versuchen.
+
+Was sich einbetten lässt, ist Spotifys **offizieller Einbettungs-Player**
+unter `open.spotify.com/embed/<art>/<kennung>` – er sendet weder
+`frame-ancestors` noch `X-Frame-Options` und ist genau dafür gemacht.
+Gezeigt wird bevorzugt die *Quelle* der laufenden Wiedergabe (Playlist,
+Album), nicht der einzelne Titel: Sie ist die eigentliche Oberfläche. Für den
+vollen Player steht ein Knopf darunter.
+
+### Die FRITZ!Box mit der richtigen Adresse
+
+Die Suche klopft mehrere Adressen an: `fritz.box`, AVMs Werksadresse und den
+tatsächlichen Router aus `/proc/net/route`. Antworten mehrere davon, ist es
+fast immer dieselbe Box – zusammengefasst wird deshalb nach der **aufgelösten
+IP-Adresse**, und mit ihr wird auch verbunden.
+
+Das ist keine Kosmetik. Ein Eintrag, in dem `fritz.box` steht, funktioniert
+nur, solange dieser Name im Netz des Hubs auflösbar ist; im Container mit
+eigenem DNS, hinter einem VPN oder an einem Router ohne Namensauflösung ist er
+das nicht. Die Box stand dann in der Trefferliste und ließ sich trotzdem nicht
+verbinden. Und die frühere Regel „ein Name schlägt jede IP" ließ einen
+*zweiten* Router im Netz ganz verschwinden.
+
+Aufgelöste Adressen außerhalb der privaten Bereiche werden verworfen: Manche
+Provider lösen unbekannte Namen auf eine eigene Seite auf, und dorthin gehört
+kein FRITZ!Box-Kennwort.
 
 ### Wiki im Hub
 

@@ -734,6 +734,18 @@ export interface SpotifyPlayback {
   deviceId: string | null;
   volume: number | null;
   shuffle: boolean;
+  /**
+   * Kennung des laufenden Titels und der Quelle, aus der er kommt
+   * (Album, Playlist, Künstler).
+   *
+   * Gebraucht für die eingebettete Spotify-Oberfläche: Sie wird über eine
+   * Adresse der Form `open.spotify.com/embed/<art>/<kennung>` angesprochen,
+   * und ohne diese beiden Angaben wüsste sie nicht, was sie zeigen soll.
+   */
+  trackId: string | null;
+  contextId: string | null;
+  /** `album`, `playlist`, `artist` – die Art der Quelle. */
+  contextType: string | null;
 }
 
 /** Ein bei Spotify angemeldetes Abspielgerät. */

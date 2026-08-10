@@ -1,3 +1,5 @@
+import { lookup } from 'node:dns/promises';
+
 import { badRequest, errorMessage, notFound } from '../../core/errors.js';
 import { clamp } from '../../core/color.js';
 import { createLogger } from '../../core/logger.js';
@@ -10,9 +12,9 @@ import type {
 import { sha256Hex } from '../../util/crypto.js';
 import { mapWithConcurrency } from '../../util/http.js';
 import { browse, MDNS_SERVICES } from '../../util/mdns.js';
-import { defaultGateways, isIPv4, scannableHosts } from '../../util/net.js';
+import { defaultGateways, isIPv4, isPrivateIPv4, scannableHosts } from '../../util/net.js';
 import { children } from '../../util/xml.js';
-import { FritzboxClient } from './client.js';
+import { FritzboxClient, type FritzboxInfo } from './client.js';
 import { celsiusToHalfDegrees, parseDevice, type FritzDevice } from './mapping.js';
 import type {
   AdapterDevice,
@@ -29,11 +31,6 @@ const log = createLogger('fritzbox:adapter');
 type FritzboxContext = IntegrationContext<FritzboxIntegrationConfig, FritzboxIntegrationSecrets>;
 
 /**
- * Adressen, unter denen eine FRITZ!Box üblicherweise erreichbar ist. `fritz.box`
- * ist der Name, den die Box selbst im Heimnetz auflöst; die beiden Adressen
- * sind die Werkseinstellungen von AVM.
- */
-/**
  * Adressen, unter denen eine FRITZ!Box üblicherweise erreichbar ist.
  *
  * `fritz.box` ist der von AVM vergebene Name, die beiden IP-Adressen sind
@@ -43,6 +40,92 @@ type FritzboxContext = IntegrationContext<FritzboxIntegrationConfig, FritzboxInt
  * fand sie über diese Liste allein nie.
  */
 const KNOWN_HOSTS = ['fritz.box', 'fritz.box.', '192.168.178.1', '169.254.1.1'];
+
+/**
+ * Zu welcher IPv4-Adresse gehört dieser Name?
+ *
+ * Der Grund, warum das überhaupt gemacht wird: `fritz.box` ist bequem, aber
+ * nicht überall auflösbar. Läuft der Hub in einem Container mit eigenem DNS,
+ * hinter einem VPN oder an einem Router, der die Namensauflösung des Heimnetzes
+ * nicht anbietet, führt der Name ins Leere – die Box stand dann in der
+ * Trefferliste und ließ sich trotzdem nicht verbinden.
+ *
+ * Was zurückkommt, wird auf **private** Adressen begrenzt. Sonst könnte ein
+ * DNS-Server, der `fritz.box` auf eine Adresse im Internet auflöst (manche
+ * Provider tun das für nicht existierende Namen), den Hub dazu bringen, sein
+ * FRITZ!Box-Kennwort dorthin zu schicken.
+ */
+export async function resolveIPv4(
+  host: string,
+  // Nur für Tests austauschbar: Echtes DNS lässt sich nicht vorhersagen.
+  resolve: (name: string) => Promise<string> = async (name) =>
+    (await lookup(name, { family: 4 })).address,
+): Promise<string | null> {
+  if (isIPv4(host)) return host;
+  try {
+    const address = await resolve(host);
+    return isPrivateIPv4(address) ? address : null;
+  } catch {
+    // Kein DNS-Eintrag: Dann bleibt der Name – geantwortet hat er ja.
+    return null;
+  }
+}
+
+/** Eine Box, die auf eine Anfrage geantwortet hat. */
+export interface ProbedBox {
+  host: string;
+  /** Die aufgelöste Adresse, falls es eine gibt. */
+  address: string | null;
+  info: FritzboxInfo;
+}
+
+/**
+ * Fasst zusammen, was dieselbe Box ist – und wählt die Adresse zum Verbinden.
+ *
+ * `fritz.box`, `192.168.178.1` und die Adresse des Standardrouters führen fast
+ * immer auf ein und dasselbe Gerät. Bisher wurde nach der Faustregel „ein Name
+ * schlägt jede IP" ausgesiebt. Das ging zweifach schief:
+ *
+ * 1. Stand ein *zweiter* Router im Netz, fiel dessen Adresse weg – weil
+ *    irgendwo schon ein Name in der Liste stand. Aus zwei Boxen wurde eine.
+ * 2. Im Eintrag stand danach `fritz.box`, und unter diesem Namen versuchte
+ *    der Hub sich anzumelden. Der Name muss dafür aber im Netz auflösbar sein.
+ *    Im Container mit eigenem DNS, hinter einem VPN oder an einem Router, der
+ *    die Namensauflösung nicht anbietet, ist er das nicht: Die Box stand in
+ *    der Trefferliste und ließ sich trotzdem nicht verbinden.
+ *
+ * Beides behebt dieselbe Änderung – zusammengefasst wird nach der aufgelösten
+ * **Adresse**, und die Adresse ist es auch, mit der verbunden wird.
+ */
+export function mergeBoxes(
+  boxes: ReadonlyArray<ProbedBox | null>,
+  source: 'mdns' | 'scan' = 'mdns',
+): DiscoveredIntegration[] {
+  const byBox = new Map<string, ProbedBox>();
+  for (const entry of boxes) {
+    if (!entry) continue;
+    const key = entry.address ?? entry.host;
+    const seen = byBox.get(key);
+    // Bei gleicher Box gewinnt der Eintrag, der schon numerisch ist.
+    if (!seen || (!isIPv4(seen.host) && isIPv4(entry.host))) byBox.set(key, entry);
+  }
+
+  return [...byBox.values()].map(({ host, address, info }) => {
+    const target = address ?? host;
+    // Der Name bleibt sichtbar – daran erkennt man die Box wieder.
+    const alias = target === host ? null : host;
+    return {
+      type: 'fritzbox' as const,
+      host: target,
+      externalId: `fritzbox-${target}`,
+      name: alias ? `${info.model} (${alias})` : info.model,
+      model: `FRITZ!OS ${info.firmware}`,
+      authRequired: true,
+      requiresLinkButton: false,
+      source,
+    };
+  });
+}
 
 /**
  * FRITZ!Box als Smart-Home-Zentrale.
@@ -92,35 +175,15 @@ export class FritzboxAdapter implements IntegrationAdapter {
     const found = await mapWithConcurrency([...hosts], 16, async (host) => {
       try {
         const info = await FritzboxClient.probe(host, Math.min(options.timeoutMs, 2000));
-        const entry: DiscoveredIntegration = {
-          type: 'fritzbox',
-          host,
-          externalId: `fritzbox-${host}`,
-          name: info.model,
-          model: `FRITZ!OS ${info.firmware}`,
-          authRequired: true,
-          requiresLinkButton: false,
-          source: options.allowScan ? 'scan' : 'mdns',
-        };
-        return entry;
+        // Die Adresse, unter der die Box wirklich steht – siehe `resolveIPv4`.
+        const address = await resolveIPv4(host);
+        return { host, address, info };
       } catch {
         return null;
       }
     });
 
-    /*
-     * `fritz.box` und die IP-Adresse sind oft dieselbe Box. Doppelte Einträge
-     * würden im Assistenten wie zwei Geräte aussehen – der Name gewinnt, er
-     * bleibt auch nach einem Adresswechsel gültig.
-     */
-    const unique: DiscoveredIntegration[] = [];
-    for (const entry of found) {
-      if (!entry) continue;
-      const alreadyByName = unique.some((other) => !isIPv4(other.host));
-      if (isIPv4(entry.host) && alreadyByName) continue;
-      unique.push(entry);
-    }
-    return unique;
+    return mergeBoxes(found, options.allowScan ? 'scan' : 'mdns');
   }
 
   async link(req: LinkRequest): Promise<LinkResult> {

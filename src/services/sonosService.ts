@@ -9,10 +9,15 @@ import { search, SONOS_SEARCH_TARGET } from '../util/ssdp.js';
 import { createId, nowIso } from '../util/id.js';
 import { SonosClient, SONOS_PORT } from './sonos/client.js';
 import {
+  didlFor,
   groupOf,
   hostFromLocation,
   isZonePlayer,
   parseDeviceDescription,
+  queueUri,
+  SONOS_CONTAINERS,
+  type SonosBrowseItem,
+  type SonosListName,
   type ZoneGroup,
 } from './sonos/mapping.js';
 
@@ -42,6 +47,15 @@ export interface SonosOverview {
   players: Array<SonosPlayer & { state: SonosPlayerState }>;
   /** Wie viele Lautsprecher zu einer Gruppe zusammengefasst sind. */
   groups: number;
+}
+
+/** Was im Sonos-Haushalt an Listen bereitliegt. */
+export interface SonosLibrary {
+  playlists: SonosBrowseItem[];
+  radio: SonosBrowseItem[];
+  favorites: SonosBrowseItem[];
+  /** Gesetzt, wenn keine der Listen zu holen war. */
+  error: string | null;
 }
 
 /**
@@ -271,6 +285,119 @@ export class SonosService {
         break;
     }
 
+    await this.repos.sonos.patch(
+      player.id,
+      { lastSeenAt: nowIso(), lastError: null },
+      'Lautsprecher',
+    );
+    return this.stateOf(this.require(playerId), groups);
+  }
+
+  /**
+   * Playlists, Radiosender und Favoriten.
+   *
+   * Die Listen gehören dem Sonos-Haushalt, nicht dem einzelnen Lautsprecher –
+   * gefragt wird trotzdem einer, weil es keine andere Stelle gibt, die
+   * antwortet. Welcher, ist gleichgültig; genommen wird der, den die
+   * Oberfläche gerade meint.
+   *
+   * Jede Liste wird für sich geholt und darf für sich scheitern: Wer keine
+   * Radiosender gespeichert hat, soll trotzdem seine Playlists sehen.
+   */
+  async library(playerId: string, limit = 100): Promise<SonosLibrary> {
+    const player = this.require(playerId);
+    const client = new SonosClient(player.host);
+
+    const load = async (name: SonosListName): Promise<SonosBrowseItem[]> => {
+      try {
+        return await client.browse(SONOS_CONTAINERS[name], { count: limit });
+      } catch (err) {
+        log.debug('Liste nicht lesbar', { liste: name, error: errorSummary(err) });
+        return [];
+      }
+    };
+
+    const [playlists, radio, favorites] = await Promise.all([
+      load('playlists'),
+      load('radio'),
+      load('favorites'),
+    ]);
+
+    /*
+     * Alle drei leer heißt fast immer: Der Lautsprecher war nicht erreichbar.
+     * Ein Haushalt ganz ohne Playlists, Sender und Favoriten ist möglich, aber
+     * selten – und „nichts gefunden" wäre dann die falsche Auskunft.
+     */
+    let error: string | null = null;
+    if (playlists.length === 0 && radio.length === 0 && favorites.length === 0) {
+      try {
+        await client.transportState();
+      } catch (err) {
+        error = errorSummary(err);
+      }
+    }
+
+    return { playlists, radio, favorites, error };
+  }
+
+  /**
+   * Spielt einen Eintrag aus einer der Listen ab.
+   *
+   * Der Eintrag wird bewusst noch einmal beim Lautsprecher nachgeschlagen,
+   * statt Adresse und Beschreibung vom Browser entgegenzunehmen: Sonst könnte
+   * eine beliebige Adresse an den Lautsprecher durchgereicht werden.
+   *
+   * Danach trennen sich zwei Wege:
+   *
+   * - **Ein Behälter** (Playlist, Album) geht nicht direkt. Er wird in die
+   *   Warteschlange gelegt, und der Lautsprecher schaltet auf ebendiese
+   *   Warteschlange um – derselbe Umweg, den auch die Sonos-App geht.
+   * - **Ein Stream** (Radiosender) wird unmittelbar aufgelegt. Eine
+   *   Warteschlange gäbe es dafür gar nicht; ein Sender hat keinen nächsten
+   *   Titel.
+   *
+   * Beides gilt für die ganze Gruppe und nimmt deshalb nur ihr Koordinator an.
+   */
+  async playFromList(
+    playerId: string,
+    list: SonosListName,
+    itemId: string,
+  ): Promise<SonosPlayerState> {
+    const player = this.require(playerId);
+    const groups = await this.zoneGroups([player]);
+    const coordinator = this.coordinatorFor(player, groups);
+    const client = new SonosClient(coordinator.host);
+
+    const items = await client.browse(SONOS_CONTAINERS[list], { count: 200 });
+    const item = items.find((entry) => entry.id === itemId);
+    if (!item) {
+      throw badRequest(
+        'Dieser Eintrag steht nicht mehr in der Liste.',
+        undefined,
+        'In der Sonos-App geändert? Die Liste im Hub einmal neu laden.',
+      );
+    }
+    if (!item.uri) {
+      throw badRequest(
+        `„${item.title}" lässt sich nicht abspielen – der Lautsprecher nennt keine Quelle dafür.`,
+      );
+    }
+
+    // Der Koordinator ist der Anker der Warteschlange, nicht der angeklickte
+    // Lautsprecher: In einer Gruppe gibt es genau eine, und sie gehört ihm.
+    const coordinatorUuid =
+      groupOf(groups, player.uuid)?.coordinatorUuid ?? coordinator.uuid ?? player.uuid;
+
+    if (item.container) {
+      await client.clearQueue();
+      await client.addUriToQueue(item.uri, didlFor(item));
+      await client.setAvTransportUri(queueUri(coordinatorUuid));
+    } else {
+      await client.setAvTransportUri(item.uri, didlFor(item));
+    }
+    await client.play();
+
+    log.info('Liste abgespielt', { liste: list, titel: item.title, auf: coordinator.roomName });
     await this.repos.sonos.patch(
       player.id,
       { lastSeenAt: nowIso(), lastError: null },

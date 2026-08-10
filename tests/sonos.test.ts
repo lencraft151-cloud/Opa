@@ -17,14 +17,17 @@ import { DEFAULT_APPEARANCE, DEFAULT_PRESENCE } from '../src/core/types.ts';
 import { SonosClient } from '../src/services/sonos/client.ts';
 import {
   absoluteUrl,
+  didlFor,
   groupOf,
   isZonePlayer,
+  parseBrowseItems,
   parseDeviceDescription,
   parseDuration,
   parseTrackMetadata,
   parseTransportState,
   parseUpnpError,
   parseZoneGroups,
+  queueUri,
   soapEnvelope,
 } from '../src/services/sonos/mapping.ts';
 import { SonosService } from '../src/services/sonosService.ts';
@@ -206,6 +209,118 @@ const ZONE_GROUP_STATE = `<ZoneGroupState><ZoneGroups>
   </ZoneGroup>
 </ZoneGroups></ZoneGroupState>`;
 
+/*
+ * Echte Antwortformate der `Browse`-Aktion.
+ *
+ * Die drei Listen sehen verschieden aus, und die Unterschiede sind genau
+ * das, worauf es ankommt: Eine gespeicherte Wiedergabeliste ist ein
+ * `<container>` ohne `r:resMD`, ein Radiosender ein `<item>` mit
+ * Stream-Adresse, ein Favorit ein `<item>`, das die Beschreibung seiner
+ * Quelle in `r:resMD` mitbringt.
+ */
+const DIDL_HEAD =
+  '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" ' +
+  'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ' +
+  'xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" ' +
+  'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">';
+
+const EMPTY_DIDL = `${DIDL_HEAD}</DIDL-Lite>`;
+
+const PLAYLISTS_DIDL =
+  `${DIDL_HEAD}` +
+  '<container id="SQ:3" parentID="SQ:" restricted="true">' +
+  '<dc:title>Abendessen</dc:title>' +
+  '<upnp:class>object.container.playlistContainer</upnp:class>' +
+  '<res protocolInfo="x-rincon-playlist:*:*:*">file:///jffs/settings/savedqueues.rsq#3</res>' +
+  '</container>' +
+  '<container id="SQ:5" parentID="SQ:" restricted="true">' +
+  '<dc:title>Aufräumen</dc:title>' +
+  '<upnp:class>object.container.playlistContainer</upnp:class>' +
+  '<res protocolInfo="x-rincon-playlist:*:*:*">file:///jffs/settings/savedqueues.rsq#5</res>' +
+  '</container></DIDL-Lite>';
+
+const RADIO_DIDL =
+  `${DIDL_HEAD}` +
+  '<item id="R:0/0/1" parentID="R:0/0" restricted="true">' +
+  '<dc:title>Deutschlandfunk</dc:title>' +
+  '<upnp:class>object.item.audioItem.audioBroadcast</upnp:class>' +
+  '<res protocolInfo="x-rincon-mp3radio:*:*:*">x-rincon-mp3radio://st01.dlf.de/dlf/01/high/stream.mp3</res>' +
+  '</item>' +
+  '<item id="R:0/0/2" parentID="R:0/0" restricted="true">' +
+  '<dc:title>FluxFM</dc:title>' +
+  '<upnp:class>object.item.audioItem.audioBroadcast</upnp:class>' +
+  '<res protocolInfo="x-rincon-mp3radio:*:*:*">x-rincon-mp3radio://streams.fluxfm.de/live/mp3-320</res>' +
+  '</item></DIDL-Lite>';
+
+const FAVORITES_DIDL =
+  `${DIDL_HEAD}` +
+  '<item id="FV:2/12" parentID="FV:2" restricted="false">' +
+  '<dc:title>Deep Focus</dc:title>' +
+  '<dc:creator>Spotify</dc:creator>' +
+  '<upnp:class>object.itemobject.item.sonos-favorite</upnp:class>' +
+  '<upnp:albumArtURI>/getaa?u=x-sonos-spotify%3aabc&amp;v=1</upnp:albumArtURI>' +
+  '<res protocolInfo="x-rincon-cpcontainer:*:*:*">x-rincon-cpcontainer:1006206cspotify%3aplaylist%3a37i9</res>' +
+  '<r:resMD>&lt;DIDL-Lite&gt;&lt;item id="0"&gt;&lt;dc:title&gt;Deep Focus&lt;/dc:title&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</r:resMD>' +
+  '</item></DIDL-Lite>';
+
+const BROWSE_RESULTS: Record<string, string> = {
+  'SQ:': PLAYLISTS_DIDL,
+  'R:0/0': RADIO_DIDL,
+  'FV:2': FAVORITES_DIDL,
+};
+
+describe('Listen lesen', () => {
+  it('liest gespeicherte Wiedergabelisten als Behälter', () => {
+    const items = parseBrowseItems(PLAYLISTS_DIDL);
+    assert.equal(items.length, 2);
+    assert.equal(items[0]?.title, 'Abendessen');
+    assert.equal(items[0]?.id, 'SQ:3');
+    assert.equal(items[0]?.container, true);
+    assert.equal(items[0]?.uri, 'file:///jffs/settings/savedqueues.rsq#3');
+    // Ohne `r:resMD` bleibt sie leer – der Lautsprecher kennt die Liste selbst.
+    assert.equal(items[0]?.metadata, null);
+  });
+
+  it('liest Radiosender als einzelne Stücke', () => {
+    const items = parseBrowseItems(RADIO_DIDL);
+    assert.equal(items.length, 2);
+    assert.equal(items[0]?.container, false);
+    assert.match(items[0]?.uri ?? '', /^x-rincon-mp3radio:/);
+  });
+
+  it('behält bei Favoriten die Beschreibung der Quelle', () => {
+    const items = parseBrowseItems(FAVORITES_DIDL);
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.title, 'Deep Focus');
+    assert.equal(items[0]?.subtitle, 'Spotify');
+    // Genau daran hängt es: Ohne `resMD` weiß der Lautsprecher nicht, welcher
+    // Dienst gemeint ist, und lehnt die Playlist ab.
+    assert.match(items[0]?.metadata ?? '', /Deep Focus/);
+  });
+
+  it('kommt mit einer leeren Liste zurecht', () => {
+    assert.deepEqual(parseBrowseItems(EMPTY_DIDL), []);
+    assert.deepEqual(parseBrowseItems(''), []);
+    assert.deepEqual(parseBrowseItems('kein XML'), []);
+  });
+
+  it('baut eine Beschreibung, wo der Lautsprecher keine mitliefert', () => {
+    const [playlist] = parseBrowseItems(PLAYLISTS_DIDL);
+    const didl = didlFor(playlist!);
+    assert.match(didl, /object\.container\.playlistContainer/);
+    assert.match(didl, /Abendessen/);
+  });
+
+  it('reicht eine vorhandene Beschreibung unverändert durch', () => {
+    const [favorite] = parseBrowseItems(FAVORITES_DIDL);
+    assert.equal(didlFor(favorite!), favorite?.metadata);
+  });
+
+  it('nennt die Warteschlange des Koordinators', () => {
+    assert.equal(queueUri('RINCON_WOHN'), 'x-rincon-queue:RINCON_WOHN#0');
+  });
+});
+
 describe('Gruppen', () => {
   it('liest Koordinator, Mitglieder und deren Adressen', () => {
     const groups = parseZoneGroups(ZONE_GROUP_STATE);
@@ -270,6 +385,10 @@ interface FakeSonos {
   transport: string;
   /** Wird für die Gruppenauskunft genutzt; änderbar, wenn Ports feststehen. */
   zoneState: string;
+  /** Was per AddURIToQueue in der Warteschlange gelandet ist. */
+  queue: Array<{ uri: string; metadata: string }>;
+  /** Die zuletzt aufgelegte Quelle. */
+  avUri: string | null;
 }
 
 interface FakeOptions {
@@ -293,6 +412,8 @@ async function startFakeSonos(options: FakeOptions = {}): Promise<FakeSonos> {
     volume: 25,
     transport: 'PLAYING',
     zoneState: options.zoneState ?? ZONE_GROUP_STATE,
+    queue: [],
+    avUri: null,
   };
 
   const description = DESCRIPTION.replace('RINCON_B8E93758A1E001400', uuid).replace(
@@ -360,6 +481,31 @@ async function startFakeSonos(options: FakeOptions = {}): Promise<FakeSonos> {
         case 'Next':
         case 'Previous':
           xml(`<u:${action}Response/>`);
+          return;
+        case 'Browse': {
+          const objectId = body.match(/<ObjectID>([^<]*)<\/ObjectID>/)?.[1] ?? '';
+          const didl = BROWSE_RESULTS[objectId] ?? EMPTY_DIDL;
+          xml(
+            `<u:BrowseResponse><Result>${escapeXml(didl)}</Result>` +
+              '<NumberReturned>2</NumberReturned><TotalMatches>2</TotalMatches>' +
+              '</u:BrowseResponse>',
+          );
+          return;
+        }
+        case 'AddURIToQueue':
+          state.queue.push({
+            uri: body.match(/<EnqueuedURI>([^<]*)<\/EnqueuedURI>/)?.[1] ?? '',
+            metadata: body.match(/<EnqueuedURIMetaData>([\s\S]*?)<\/EnqueuedURIMetaData>/)?.[1] ?? '',
+          });
+          xml('<u:AddURIToQueueResponse><FirstTrackNumberEnqueued>1</FirstTrackNumberEnqueued></u:AddURIToQueueResponse>');
+          return;
+        case 'RemoveAllTracksFromQueue':
+          state.queue = [];
+          xml('<u:RemoveAllTracksFromQueueResponse/>');
+          return;
+        case 'SetAVTransportURI':
+          state.avUri = body.match(/<CurrentURI>([^<]*)<\/CurrentURI>/)?.[1] ?? null;
+          xml('<u:SetAVTransportURIResponse/>');
           return;
         case 'SetMute':
           // Der Nachbau spielt hier den Fehlerfall durch.
@@ -708,5 +854,91 @@ describe('Gruppierte Lautsprecher', () => {
     assert.equal(kuechePlayer?.state.coordinatorUuid, 'RINCON_WOHN');
     assert.deepEqual(kuechePlayer?.state.groupMembers, ['Wohnzimmer', 'Küche']);
     assert.equal(overview.groups, 1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Playlists und Radiosender
+  // -------------------------------------------------------------------------
+
+  const kuecheId = (): string => {
+    const player = service.list('hh_1').find((entry) => entry.roomName === 'Küche');
+    assert.ok(player, 'Die Küche muss bekannt sein');
+    return player.id;
+  };
+
+  it('holt Playlists, Radiosender und Favoriten', async () => {
+    const library = await service.library(kuecheId());
+    assert.equal(library.error, null);
+    assert.deepEqual(
+      library.playlists.map((item) => item.title),
+      ['Abendessen', 'Aufräumen'],
+    );
+    assert.deepEqual(
+      library.radio.map((item) => item.title),
+      ['Deutschlandfunk', 'FluxFM'],
+    );
+    assert.equal(library.favorites[0]?.title, 'Deep Focus');
+  });
+
+  it('legt eine Playlist in die Warteschlange des Koordinators', async () => {
+    wohnzimmer.actions.length = 0;
+    wohnzimmer.queue = [];
+    kueche.actions.length = 0;
+
+    await service.playFromList(kuecheId(), 'playlists', 'SQ:3');
+
+    /*
+     * Der ganze Vorgang gehört dem Koordinator: Er führt die Warteschlange.
+     * Ginge er ans Mitglied, bekäme man UPnP-Fehler 701 – oder, schlimmer,
+     * eine zweite Warteschlange, die niemand hört.
+     */
+    assert.equal(kueche.actions.includes('AddURIToQueue'), false);
+    assert.deepEqual(wohnzimmer.actions.slice(0, 5), [
+      'Browse',
+      'RemoveAllTracksFromQueue',
+      'AddURIToQueue',
+      'SetAVTransportURI',
+      'Play',
+    ]);
+    assert.equal(wohnzimmer.queue[0]?.uri, 'file:///jffs/settings/savedqueues.rsq#3');
+    // Und danach wird auf ebendiese Warteschlange umgeschaltet.
+    assert.equal(wohnzimmer.avUri, 'x-rincon-queue:RINCON_WOHN#0');
+  });
+
+  it('legt einen Radiosender unmittelbar auf, ohne Warteschlange', async () => {
+    wohnzimmer.actions.length = 0;
+    wohnzimmer.queue = [];
+
+    await service.playFromList(kuecheId(), 'radio', 'R:0/0/2');
+
+    // Ein Sender hat keinen nächsten Titel – eine Warteschlange wäre sinnlos.
+    assert.equal(wohnzimmer.actions.includes('AddURIToQueue'), false);
+    assert.equal(wohnzimmer.actions.includes('RemoveAllTracksFromQueue'), false);
+    assert.equal(wohnzimmer.avUri, 'x-rincon-mp3radio://streams.fluxfm.de/live/mp3-320');
+    assert.equal(wohnzimmer.queue.length, 0);
+  });
+
+  it('erkennt einen Favoriten mit Playlist dahinter als Behälter', () => {
+    // Er steht als `<item>` da und ist trotzdem eine ganze Playlist. Wer nur
+    // auf den Knotennamen sieht, legt ihn direkt auf – und der Lautsprecher
+    // lehnt ab.
+    const [favorite] = parseBrowseItems(FAVORITES_DIDL);
+    assert.equal(favorite?.container, true);
+  });
+
+  it('schickt bei einem Favoriten die Beschreibung der Quelle mit', async () => {
+    wohnzimmer.queue = [];
+    await service.playFromList(kuecheId(), 'favorites', 'FV:2/12');
+
+    // Ohne diese Beschreibung weiß der Lautsprecher nicht, welcher Dienst
+    // gemeint ist, und lehnt die Playlist ab.
+    assert.match(wohnzimmer.queue[0]?.metadata ?? '', /Deep Focus/);
+  });
+
+  it('sagt es, wenn der Eintrag nicht mehr da ist', async () => {
+    await assert.rejects(
+      () => service.playFromList(kuecheId(), 'playlists', 'SQ:999'),
+      /nicht mehr in der Liste/,
+    );
   });
 });

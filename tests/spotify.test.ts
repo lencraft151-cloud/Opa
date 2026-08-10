@@ -14,7 +14,12 @@ import { after, before, describe, it } from 'node:test';
 import { setLogLevel } from '../src/core/logger.ts';
 import type { Household } from '../src/core/types.ts';
 import { DEFAULT_APPEARANCE, DEFAULT_PRESENCE } from '../src/core/types.ts';
-import { SpotifyService, toDevice, toPlayback } from '../src/services/spotifyService.ts';
+import {
+  parseSpotifyUri,
+  SpotifyService,
+  toDevice,
+  toPlayback,
+} from '../src/services/spotifyService.ts';
 import { Database } from '../src/storage/database.ts';
 import { createRepositories } from '../src/storage/repositories.ts';
 import { decryptJson, encryptJson } from '../src/util/crypto.ts';
@@ -387,5 +392,67 @@ describe('Spotify verbinden und steuern', () => {
       () => service.execute('hh_1', { type: 'play' }),
       /kein Spotify-Konto verbunden/i,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Die eingebettete Spotify-Oberfläche
+// ---------------------------------------------------------------------------
+
+/**
+ * Woraus die Adresse des Einbettungs-Players gebaut wird.
+ *
+ * Spotifys **voller** Web-Player lässt sich nicht einbetten – das verbietet
+ * Spotify per `frame-ancestors`. Der offizielle Einbettungs-Player unter
+ * `open.spotify.com/embed/<art>/<kennung>` lässt sich sehr wohl einbetten, und
+ * genau diese beiden Angaben braucht er.
+ */
+describe('Spotify-Kennungen', () => {
+  it('zerlegt eine Playlist-Adresse', () => {
+    assert.deepEqual(parseSpotifyUri('spotify:playlist:37i9dQZF1DX0XUsuxWHRQd'), {
+      type: 'playlist',
+      id: '37i9dQZF1DX0XUsuxWHRQd',
+    });
+  });
+
+  it('kennt Alben, Künstler und Sendungen', () => {
+    assert.equal(parseSpotifyUri('spotify:album:1DFixLWuPkv3KT3TnV35m3')?.type, 'album');
+    assert.equal(parseSpotifyUri('spotify:artist:0OdUWJ0sBjDrqHygGUXeCF')?.type, 'artist');
+    assert.equal(parseSpotifyUri('spotify:show:4rOoJ6Egrf8K2IrywzwOMk')?.type, 'show');
+  });
+
+  it('verwirft, was keine Entsprechung im Web hat', () => {
+    // Lokale Dateien etwa – für die gibt es keine Seite zum Einbetten.
+    assert.equal(parseSpotifyUri('spotify:local:Kuenstler:Album:Titel:230'), null);
+    assert.equal(parseSpotifyUri('spotify:user:jemand'), null);
+    assert.equal(parseSpotifyUri('kein-uri'), null);
+    assert.equal(parseSpotifyUri(null), null);
+    assert.equal(parseSpotifyUri(undefined), null);
+  });
+
+  it('lässt keine krummen Kennungen durch', () => {
+    assert.equal(parseSpotifyUri('spotify:playlist:kurz'), null);
+    assert.equal(parseSpotifyUri('spotify:playlist:mit/schraegstrich0000'), null);
+  });
+
+  it('reicht Titel und Quelle bis in die Wiedergabe durch', () => {
+    const playback = toPlayback({
+      is_playing: true,
+      context: { uri: 'spotify:playlist:37i9dQZF1DX0XUsuxWHRQd', type: 'playlist' },
+      item: { id: '4cOdK2wGLETKBW3PvgPWqT', name: 'Never Gonna Give You Up' },
+    });
+    assert.equal(playback.trackId, '4cOdK2wGLETKBW3PvgPWqT');
+    assert.equal(playback.contextType, 'playlist');
+    assert.equal(playback.contextId, '37i9dQZF1DX0XUsuxWHRQd');
+  });
+
+  it('kommt ohne Quelle aus – dann bleibt der Titel', () => {
+    const playback = toPlayback({
+      is_playing: true,
+      item: { id: '4cOdK2wGLETKBW3PvgPWqT', name: 'Ein Titel' },
+    });
+    assert.equal(playback.contextId, null);
+    assert.equal(playback.contextType, null);
+    assert.equal(playback.trackId, '4cOdK2wGLETKBW3PvgPWqT');
   });
 });

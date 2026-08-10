@@ -50,6 +50,29 @@ export function musicRoutes(container: Container): Router {
     }),
   );
 
+  /** Playlists, Radiosender und Favoriten aus dem Sonos-Haushalt. */
+  router.get(
+    '/sonos/:id/library',
+    asyncHandler(async (req, res) => {
+      res.json(await container.sonos.library(req.params.id as string));
+    }),
+  );
+
+  /** Spielt einen Eintrag aus einer dieser Listen ab. */
+  router.post(
+    '/sonos/:id/play',
+    asyncHandler(async (req, res) => {
+      const { list, itemId } = parseBody(
+        z.object({
+          list: z.enum(['playlists', 'radio', 'favorites']),
+          itemId: z.string().min(1).max(300),
+        }),
+        req,
+      );
+      res.json(await container.sonos.playFromList(req.params.id as string, list, itemId));
+    }),
+  );
+
   router.post(
     '/sonos/:id/command',
     asyncHandler(async (req, res) => {

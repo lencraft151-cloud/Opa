@@ -4,6 +4,7 @@ import { request } from '../../util/http.js';
 import type { XmlNode } from '../../util/xml.js';
 import {
   findText,
+  parseBrowseItems,
   parseDuration,
   parseTrackMetadata,
   parseUpnpError,
@@ -11,6 +12,7 @@ import {
   parseTransportState,
   soapEnvelope,
   soapResult,
+  type SonosBrowseItem,
   type TrackInfo,
   type ZoneGroup,
 } from './mapping.js';
@@ -39,6 +41,10 @@ const SERVICES = {
   device: {
     path: '/DeviceProperties/Control',
     type: 'urn:schemas-upnp-org:service:DeviceProperties:1',
+  },
+  content: {
+    path: '/MediaServer/ContentDirectory/Control',
+    type: 'urn:schemas-upnp-org:service:ContentDirectory:1',
   },
 } as const satisfies Record<string, ServiceDef>;
 
@@ -159,6 +165,52 @@ export class SonosClient {
   async zoneGroups(): Promise<ZoneGroup[]> {
     const result = await this.soap(SERVICES.topology, 'GetZoneGroupState', {});
     return parseZoneGroups(findText(result, 'ZoneGroupState'));
+  }
+
+  /**
+   * Blättert einen Behälter des ContentDirectory auf.
+   *
+   * `count = 0` hieße bei Sonos „alles" – wird hier bewusst nicht genutzt:
+   * Wer tausend Titel gespeichert hat, bekäme ein Megabyte XML für eine Liste,
+   * die niemand durchscrollt.
+   */
+  async browse(
+    objectId: string,
+    options: { start?: number; count?: number } = {},
+  ): Promise<SonosBrowseItem[]> {
+    const result = await this.soap(SERVICES.content, 'Browse', {
+      ObjectID: objectId,
+      BrowseFlag: 'BrowseDirectChildren',
+      Filter: '*',
+      StartingIndex: options.start ?? 0,
+      RequestedCount: options.count ?? 100,
+      SortCriteria: '',
+    });
+    return parseBrowseItems(findText(result, 'Result'));
+  }
+
+  /** Legt eine Quelle auf – Radiostream, Warteschlange, einzelner Titel. */
+  async setAvTransportUri(uri: string, metadata = ''): Promise<void> {
+    await this.soap(SERVICES.transport, 'SetAVTransportURI', {
+      InstanceID: 0,
+      CurrentURI: uri,
+      CurrentURIMetaData: metadata,
+    });
+  }
+
+  async addUriToQueue(uri: string, metadata = ''): Promise<void> {
+    await this.soap(SERVICES.transport, 'AddURIToQueue', {
+      InstanceID: 0,
+      EnqueuedURI: uri,
+      EnqueuedURIMetaData: metadata,
+      // 0 heißt „ans Ende"; die Warteschlange ist an dieser Stelle ohnehin leer.
+      DesiredFirstTrackNumberEnqueued: 0,
+      EnqueueAsNext: 0,
+    });
+  }
+
+  async clearQueue(): Promise<void> {
+    await this.soap(SERVICES.transport, 'RemoveAllTracksFromQueue', { InstanceID: 0 });
   }
 
   /** Die Gerätebeschreibung, aus der Name, Modell und UUID kommen. */

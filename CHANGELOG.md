@@ -8,6 +8,75 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.11.0 – 2026-08-10
+
+**Sonos zeigt Playlists, Radiosender und Favoriten.** Bisher konnte der Hub
+steuern, was gerade lief – anfangen konnte er nichts. Unter Dienste → Sonos
+steht jetzt, was in der Sonos-App gespeichert ist: Wiedergabelisten, „Meine
+Radiosender" und alles mit dem Herz-Symbol. Ein Klick legt es auf dem
+gewählten Lautsprecher auf; in einer Gruppe für die ganze Gruppe.
+
+Dahinter stecken zwei verschiedene Wege, und sie zu verwechseln ist der
+übliche Fehler: Eine **Playlist** wird nicht abgespielt, sondern in die
+Warteschlange gelegt – erst danach schaltet der Lautsprecher auf ebendiese
+Warteschlange um. Ein **Radiosender** wird unmittelbar aufgelegt; eine
+Warteschlange gäbe es dafür gar nicht, ein Sender hat keinen nächsten Titel.
+Und ein **Favorit** sieht aus wie ein einzelnes Stück, ist aber oft eine
+ganze Playlist eines Musikdienstes – erkennbar nur an seiner Adresse.
+
+**Spotifys Oberfläche ist eingebettet.** Unter Dienste → Spotify steht
+Spotifys eigener Player mit Titelbild und Titelliste, und zwar für die
+Quelle, aus der gerade gespielt wird – die Playlist oder das Album, nicht
+nur den einen Titel.
+
+Ehrlich dazugesagt: Der **volle** Web-Player von `open.spotify.com` lässt
+sich nicht einbetten. Spotify verbietet es ausdrücklich; ein Rahmen darum
+bliebe leer. Eingebettet ist deshalb Spotifys offizieller
+Einbettungs-Player, der genau dafür gemacht ist. Wer den vollen Player
+will, kommt mit einem Knopf darunter hin.
+
+**Die FRITZ!Box wird jetzt mit ihrer Adresse verbunden, nicht mit ihrem
+Namen.** Die Suche klopft mehrere Adressen an – `fritz.box`, AVMs
+Werksadresse, den tatsächlichen Router. Antworten mehrere, ist es fast
+immer dieselbe Box. Zusammengefasst wurde bisher nach der Faustregel „ein
+Name schlägt jede IP", und das ging zweifach schief:
+
+- Im Eintrag stand danach `fritz.box`, und unter diesem Namen versuchte der
+  Hub sich anzumelden. Der Name muss dafür im Netz auflösbar sein – im
+  Container mit eigenem DNS, hinter einem VPN oder an einem Router, der die
+  Namensauflösung nicht anbietet, ist er das nicht. Die Box stand in der
+  Trefferliste und ließ sich trotzdem nicht verbinden.
+- Stand ein *zweiter* Router im Netz, verschwand er ganz – seine Adresse
+  fiel weg, weil irgendwo schon ein Name in der Liste stand.
+
+Beides behebt dieselbe Änderung: Zusammengefasst wird nach der aufgelösten
+**Adresse**, und mit ihr wird auch verbunden. Der Name bleibt daneben
+sichtbar, damit man die Box wiedererkennt. Antworten, die ins Internet
+zeigen, werden verworfen – sonst könnte ein Provider-DNS, das unbekannte
+Namen auf eine eigene Seite auflöst, das FRITZ!Box-Kennwort dorthin lenken.
+
+**Geräte ohne Raum lassen sich an Ort und Stelle geraderücken.** Ein frisch
+gefundenes Gerät heißt „Shelly 1PM 34AB9F", steckt in keinem Raum, gilt als
+Schalter und ist in Wahrheit der Rollladen im Bad. Die vier Handgriffe
+dagegen lagen an vier verschiedenen Stellen der Oberfläche.
+
+Jetzt stehen sie beieinander: **Name ändern, Raum wählen, Gruppe
+richtigstellen, Gerät entfernen** – unter „Ohne Raum" offen sichtbar, denn
+wer dort landet, will genau das erledigen. Wer nur einen Raum angelegt hat,
+bekommt einen Knopf statt einer Auswahlliste mit einem Eintrag. Und für
+jedes andere Gerät sitzt derselbe Bogen unter „Alle Geräte" hinter einem
+Aufklapper, damit sich auch später Raum, Name oder Gruppe ändern lassen.
+Sensorfähigkeiten bleiben bei einer Richtigstellung erhalten: Ein Shelly,
+der als Rollladen gilt, misst weiterhin Strom.
+
+Nachgeprüft, nicht nur behauptet: Gegen einen nachgebauten Lautsprecher
+erscheinen alle drei Listen mit Anzahl; eine Playlist kommt als
+`RemoveAllTracksFromQueue → AddURIToQueue → SetAVTransportURI → Play` an
+und schaltet auf `x-rincon-queue:…` um, ein Radiosender wird direkt
+aufgelegt und rührt die Warteschlange nicht an. Ein Gerät wurde im Browser
+umbenannt, einem Raum zugewiesen, als dimmbares Licht richtiggestellt
+(Verbrauchsmessung blieb erhalten) und anschließend entfernt.
+
 ## 1.10.0 – 2026-08-10
 
 **Räume und Geräte sind jetzt ein Reiter.** Die Trennung war künstlich: Wer
