@@ -1,5 +1,6 @@
 import { notFound } from '../core/errors.js';
 import type {
+  ActivityEntry,
   AccessToken,
   AutomationRule,
   Device,
@@ -397,6 +398,31 @@ export class SpotifyRepository extends BaseRepository<SpotifyAccount> {
   }
 }
 
+/**
+ * Der Verlauf.
+ *
+ * Anders als die übrigen Ablagen wird hier nicht einzeln eingefügt, sondern
+ * die ganze Liste ersetzt: Der Dienst hält sie im Speicher, kürzt sie auf
+ * eine feste Länge und schreibt gebündelt weg. Ein Schreibvorgang je
+ * Lichtschalter wäre bei einem Haushalt mit dreißig Geräten zu viel.
+ */
+export class ActivityRepository extends BaseRepository<ActivityEntry> {
+  constructor(db: Database) {
+    super(db, 'activity');
+  }
+
+  listByHousehold(householdId: string): ActivityEntry[] {
+    return this.all().filter((entry) => entry.householdId === householdId);
+  }
+
+  /** Ersetzt den gesamten Verlauf – siehe Klassenkommentar. */
+  async replace(entries: ActivityEntry[]): Promise<void> {
+    await this.db.update((data) => {
+      data.activity = [...entries];
+    });
+  }
+}
+
 export interface Repositories {
   households: HouseholdRepository;
   rooms: RoomRepository;
@@ -410,6 +436,7 @@ export interface Repositories {
   nextcloud: NextcloudRepository;
   sonos: SonosRepository;
   spotify: SpotifyRepository;
+  activity: ActivityRepository;
 }
 
 export function createRepositories(db: Database): Repositories {
@@ -426,5 +453,6 @@ export function createRepositories(db: Database): Repositories {
     nextcloud: new NextcloudRepository(db),
     sonos: new SonosRepository(db),
     spotify: new SpotifyRepository(db),
+    activity: new ActivityRepository(db),
   };
 }

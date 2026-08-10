@@ -10,6 +10,8 @@ export const icons = {
   devices: wrap('<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M9 17h6"/>'),
   energy: wrap('<path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5z"/>'),
   chart: wrap('<path d="M4 20V9"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>'),
+  /** Uhr – für den Verlauf: was wann war. */
+  clock: wrap('<circle cx="12" cy="12" r="9"/><path d="M12 7v5.4l3.4 2"/>'),
   automation: wrap('<circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>'),
   settings: wrap('<circle cx="12" cy="12" r="3"/><path d="M4 12h2M18 12h2M12 4v2M12 18v2"/><circle cx="12" cy="12" r="8.5"/>'),
   more: wrap('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>'),

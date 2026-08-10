@@ -2831,3 +2831,51 @@ h2 .help:focus::after {
 [data-library-item]:focus-visible .play-hint {
   opacity: 1;
 }
+
+/* ------------------------------------------------------------------ Verlauf */
+
+/*
+ * Die Zeitleiste.
+ *
+ * Uhrzeit links in fester Breite, damit die Zeiten untereinander stehen und
+ * das Auge sie als Spalte liest – eine Zeitleiste, in der die Zeiten
+ * ausfransen, ist keine.
+ */
+.timeline {
+  display: grid;
+  gap: 0.1rem;
+}
+.timeline-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1.6rem 1fr;
+  align-items: start;
+  gap: 0.5rem;
+  padding: 0.45rem 0.2rem;
+  border-top: 1px solid var(--border);
+}
+.timeline-row:first-child {
+  border-top: 0;
+}
+.timeline-row time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  padding-top: 0.05rem;
+}
+.timeline-icon {
+  text-align: center;
+  opacity: 0.75;
+}
+.timeline-row .sub {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+/* Warnungen und Fehler bekommen eine Kante – sie sollen auffallen. */
+.timeline-row.warn {
+  border-left: 3px solid var(--warn, #d79b28);
+  padding-left: 0.5rem;
+}
+.timeline-row.error {
+  border-left: 3px solid var(--error);
+  padding-left: 0.5rem;
+}

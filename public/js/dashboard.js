@@ -154,6 +154,7 @@ const RENDERERS = {
   insights: renderInsights,
   services: renderServices,
   automations: renderAutomations,
+  history: renderActivity,
   settings: renderSettings,
   wiki: renderWiki,
 };
@@ -673,6 +674,8 @@ const homeView = {
   chip: 'all',
   /** Ausgewählte Geräte für Sammelaktionen. */
   selected: new Set(),
+  /** Steht der Bogen zum Hinzufügen offen? */
+  adding: false,
 };
 
 /**
@@ -814,6 +817,8 @@ async function renderHome() {
       }
     </div>
 
+    ${addDevicePanel()}
+
     ${selectionBar()}
 
     <div id="home-body">${
@@ -829,6 +834,40 @@ async function renderHome() {
   wireRoomActions(panel);
   restoreOpenSections(panel);
   restoreDrafts(panel);
+}
+
+/**
+ * Geräte hinzufügen – dort, wo die Geräte stehen.
+ *
+ * Es gab diesen Weg schon: Einstellungen → Integrationen → aufklappen. Nur
+ * hat ihn niemand gefunden. Wer ein Gerät vermisst, sucht es dort, wo die
+ * anderen stehen – und nicht in den Einstellungen. Derselbe Bogen, dieselbe
+ * Suche, nur an der richtigen Stelle.
+ */
+function addDevicePanel() {
+  if (!homeView.adding) return '';
+  return `<section class="card" id="home-add">
+    <h2 style="margin:0 0 0.4rem">Gerät hinzufügen</h2>
+    <p class="muted small">
+      Der Hub sucht Bridges und Geräte im eigenen Netz. Was sich nicht meldet –
+      im Gastnetz, hinter einem Repeater –, trägst du mit seiner Adresse von Hand ein.
+      ${wikiLink('geraete', 'Wie kommen Geräte hierher?')}
+    </p>
+    <div class="callout">
+      <strong>Bei einer Hue Bridge zuerst den runden Knopf drücken</strong>
+      <span>Danach hast du etwa 30 Sekunden Zeit für „Verbinden".</span>
+    </div>
+    <div class="row">
+      <button class="primary" id="btn-home-discover">Netzwerk durchsuchen</button>
+      <button class="ghost" id="btn-home-scan"
+              title="Klopft zusätzlich jede Adresse im Netz ab – dauert länger, findet mehr.">
+        Gründlich suchen
+      </button>
+    </div>
+    <div class="list" id="home-discovery"></div>
+    <h3>Von Hand eintragen</h3>
+    ${manualForm('form-home-manual')}
+  </section>`;
 }
 
 function homeToolbar() {
@@ -867,6 +906,11 @@ function homeToolbar() {
               class="${homeView.layout === 'list' ? 'active' : ''}"
               title="Alle Geräte in einer Liste">📋 Liste</button>
     </div>
+
+    <button class="primary" id="btn-home-add"
+            title="Bridges und Geräte im Netz suchen oder von Hand eintragen">
+      ${homeView.adding ? '✕ Schließen' : '+ Gerät hinzufügen'}
+    </button>
   </div>`;
 }
 
@@ -1094,6 +1138,27 @@ function wireHomeToolbar(panel) {
     });
   });
 
+  panel.querySelector('#btn-home-add')?.addEventListener('click', () => {
+    homeView.adding = !homeView.adding;
+    void renderHome();
+    if (homeView.adding) $('#home-add')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
+  if (homeView.adding) {
+    // Nach dem Verbinden alles neu laden – das neue Gerät soll sofort dastehen.
+    const afterConnect = async () => {
+      await loadDashboardData();
+      void renderHome();
+    };
+    bindManualForm(panel.querySelector('#form-home-manual'), afterConnect);
+    panel.querySelector('#btn-home-discover')?.addEventListener('click', () => {
+      void runDiscovery(panel.querySelector('#home-discovery'), false, afterConnect);
+    });
+    panel.querySelector('#btn-home-scan')?.addEventListener('click', () => {
+      void runDiscovery(panel.querySelector('#home-discovery'), true, afterConnect);
+    });
+  }
+
   panel.querySelector('#home-reset')?.addEventListener('click', () => {
     homeView.search = '';
     homeView.roomId = '';
@@ -1231,6 +1296,192 @@ export function startHomeShortcuts() {
     field.focus();
     field.select();
   });
+}
+
+// ---------------------------------------------------------------------------
+// Verlauf
+// ---------------------------------------------------------------------------
+
+/**
+ * Was wann passiert ist.
+ *
+ * Bewusst getrennt von der Auswertung: Dort liegen Kurven – wie warm es war,
+ * wie viel Strom floss. Hier steht die Erzählung: Wer hat geschaltet, welche
+ * Automation lief, wann war ein Gerät weg. Die eine Frage beantwortet man mit
+ * einer Zahlenreihe, die andere mit Sätzen.
+ */
+const historyView = { kind: 'all', search: '', entries: [], counts: null, loading: false };
+
+const HISTORY_KINDS = [
+  { id: 'all', label: 'Alles', icon: '🕘' },
+  { id: 'device', label: 'Geräte', icon: '🔌' },
+  { id: 'automation', label: 'Automationen', icon: '⚙️' },
+  { id: 'scene', label: 'Szenen', icon: '🎬' },
+  { id: 'integration', label: 'Integrationen', icon: '🔗' },
+  { id: 'system', label: 'Hub', icon: '🏠' },
+];
+
+/** Holt den Verlauf neu und zeichnet ihn – für den Ereignisstrom. */
+export async function refreshHistory() {
+  await loadHistory();
+  void renderActivity();
+}
+
+export async function loadHistory() {
+  const query = new URLSearchParams({ limit: '300' });
+  if (historyView.kind !== 'all') query.set('kind', historyView.kind);
+  if (historyView.search.trim()) query.set('search', historyView.search.trim());
+  try {
+    const data = await api(`/activity?${query}`);
+    historyView.entries = data.entries ?? [];
+    historyView.counts = data.counts ?? null;
+  } catch {
+    historyView.entries = [];
+  }
+}
+
+async function renderActivity() {
+  const panel = $('#panel-history');
+  if (!panel) return;
+
+  if (!historyView.counts && !historyView.loading) {
+    historyView.loading = true;
+    await loadHistory();
+    historyView.loading = false;
+  }
+
+  const chips = HISTORY_KINDS.map((kind) => {
+    const count = historyView.counts?.[kind.id];
+    return `<button type="button" class="chip ${kind.id === historyView.kind ? 'active' : ''}"
+                    data-history-kind="${esc(kind.id)}">${kind.icon} ${esc(kind.label)}${
+                      typeof count === 'number' ? ` ${count}` : ''
+                    }</button>`;
+  }).join('');
+
+  const html = `
+    <p class="intro">
+      Was in deinem Zuhause passiert ist – geschaltet, ausgelöst, ausgefallen.
+      Zahlen und Kurven stehen unter „Auswertung"; hier steht, <em>was</em> geschehen
+      ist. ${wikiLink('auswertung', 'Was ist der Unterschied?')}
+    </p>
+
+    <div class="home-toolbar">
+      <div class="search-field">
+        <span aria-hidden="true">🔍</span>
+        <input id="history-search" type="search" value="${esc(historyView.search)}"
+               placeholder="Im Verlauf suchen …" aria-label="Im Verlauf suchen" />
+      </div>
+      <button class="small ghost danger" id="btn-history-clear"
+              title="Löscht nur den Verlauf. Messwerte, Geräte und Einstellungen bleiben.">
+        Verlauf leeren
+      </button>
+    </div>
+
+    <div class="chips">${chips}</div>
+
+    ${activityTimeline(historyView.entries)}`;
+
+  if (!paint(panel, html)) return;
+
+  panel.querySelectorAll('[data-history-kind]').forEach((chip) => {
+    chip.addEventListener('click', async () => {
+      historyView.kind = chip.dataset.historyKind;
+      await loadHistory();
+      void renderActivity();
+    });
+  });
+
+  const search = panel.querySelector('#history-search');
+  search?.addEventListener('input', () => {
+    historyView.search = search.value;
+    clearTimeout(search.dataset.timer);
+    // Nicht bei jedem Buchstaben fragen – der Verlauf liegt beim Hub.
+    search.dataset.timer = String(
+      setTimeout(async () => {
+        await loadHistory();
+        void renderActivity();
+        const again = $('#history-search');
+        again?.focus();
+        again?.setSelectionRange(again.value.length, again.value.length);
+      }, 300),
+    );
+  });
+
+  panel.querySelector('#btn-history-clear')?.addEventListener('click', async () => {
+    if (!confirm('Den ganzen Verlauf löschen?\n\nMesswerte, Geräte und Einstellungen bleiben unberührt.')) {
+      return;
+    }
+    await guard(() => api('/activity', { method: 'DELETE' }), { success: 'Verlauf geleert.' });
+    await loadHistory();
+    void renderActivity();
+  });
+
+  restoreDrafts(panel);
+}
+
+/**
+ * Die Einträge, nach Tagen gebündelt.
+ *
+ * Ohne diese Bündelung steht in einer langen Liste hundertmal dasselbe Datum.
+ * Mit ihr sieht man auf einen Blick, was *heute* war – und das ist fast immer
+ * die Frage.
+ */
+function activityTimeline(entries) {
+  if (entries.length === 0) {
+    return emptyState(
+      '🕘',
+      historyView.search || historyView.kind !== 'all'
+        ? 'Nichts passt zu dieser Suche.'
+        : 'Noch nichts passiert.',
+      historyView.search || historyView.kind !== 'all'
+        ? 'Ändere die Suche oder wähle „Alles".'
+        : 'Sobald etwas geschaltet wird oder eine Automation läuft, steht es hier.',
+    );
+  }
+
+  const days = new Map();
+  for (const entry of entries) {
+    const day = new Date(entry.at).toLocaleDateString('de-DE', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    });
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(entry);
+  }
+
+  return [...days.entries()]
+    .map(
+      ([day, list]) => `<section class="card">
+        <h2 style="margin:0 0 0.6rem">${esc(day)}</h2>
+        <div class="timeline">${list.map(activityItem).join('')}</div>
+      </section>`,
+    )
+    .join('');
+}
+
+const HISTORY_ICON = {
+  device: '🔌',
+  automation: '⚙️',
+  scene: '🎬',
+  integration: '🔗',
+  system: '🏠',
+};
+
+function activityItem(entry) {
+  const time = new Date(entry.at).toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const room = entry.roomId ? roomName(entry.roomId) : '';
+  return `<div class="timeline-row ${esc(entry.level)}">
+    <time datetime="${esc(entry.at)}">${esc(time)}</time>
+    <span class="timeline-icon" aria-hidden="true">${HISTORY_ICON[entry.kind] ?? '•'}</span>
+    <div>
+      <div>${esc(entry.message)}</div>
+      ${room ? `<div class="sub">${esc(room)}</div>` : ''}
+    </div>
+  </div>`;
 }
 
 // ---------------------------------------------------------------------------

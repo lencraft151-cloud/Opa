@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createLogger } from '../core/logger.js';
 import type {
+  ActivityEntry,
   AccessToken,
   AutomationRule,
   Device,
@@ -35,6 +36,7 @@ export interface DatabaseShape {
   nextcloud: NextcloudAccount[];
   sonos: SonosPlayer[];
   spotify: SpotifyAccount[];
+  activity: ActivityEntry[];
 }
 
 function emptyDatabase(): DatabaseShape {
@@ -52,6 +54,7 @@ function emptyDatabase(): DatabaseShape {
     nextcloud: [],
     sonos: [],
     spotify: [],
+    activity: [],
   };
 }
 
@@ -175,6 +178,8 @@ function migrate(data: DatabaseShape): DatabaseShape {
   data.nextcloud ??= [];
   data.sonos ??= [];
   data.spotify ??= [];
+  // Der Verlauf kam später dazu.
+  data.activity ??= [];
 
   // Die Richtigstellung der Fähigkeiten und die Favoriten kamen später dazu.
   for (const device of data.devices) {

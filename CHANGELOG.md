@@ -8,6 +8,48 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.13.0 – 2026-08-10
+
+**Ein Reiter „Verlauf".** Bisher beantwortete der Hub nur „wie warm war es?"
+und „wie viel Strom floss?" – Kurven, Zahlenreihen. Die andere Frage blieb
+offen: *Was ist eigentlich passiert?* Wer hat um halb acht das Licht
+angemacht, welche Automation lief, wann war der Rollladen weg.
+
+Der neue Reiter beantwortet sie. Nach Tagen gebündelt, mit Uhrzeit,
+durchsuchbar, und mit Filtern für Geräte, Automationen, Szenen,
+Integrationen und Meldungen des Hubs. Aufgezeichnet wird:
+
+- **Geschaltet** – ein, aus, Rollladen auf 40 %, Heizung auf 21 °C.
+- **Weg und wieder da** – ein Gerät, das nicht mehr antwortet, ist eine
+  Warnung; kommt es zurück, steht auch das da.
+- **Automationen und Szenen**, samt der Zahl der erreichten Geräte. Kam eine
+  Szene nur halb durch, steht „3 von 5" da statt eines Erfolgs.
+- **Integrationen**, aber nur bei einem *Wechsel*: „meldet ein Problem",
+  „antwortet wieder". Nicht bei jedem Abgleich.
+- **Meldungen des Hubs**, etwa eine bereitliegende neue Fassung.
+
+**Was ausdrücklich nicht hineinkommt: Messwerte.** Ein Sensor, der alle
+fünfzehn Sekunden 21,4 °C meldet, erzeugt keinen Eintrag. Dafür gibt es die
+Kurven unter „Auswertung" – eine Zahlenreihe und eine Erzählung in dieselbe
+Form zu pressen hätte beiden geschadet, und der Verlauf wäre nach einer
+Stunde unlesbar. Aufbewahrt werden die letzten 800 Ereignisse; geschrieben
+wird gebündelt, nicht bei jedem Lichtschalter.
+
+**Geräte lassen sich jetzt dort hinzufügen, wo die Geräte stehen.** Den Weg
+gab es schon – Einstellungen → Integrationen → aufklappen –, nur hat ihn
+niemand gefunden. Wer ein Gerät vermisst, sucht es bei den anderen, nicht in
+den Einstellungen. Unter **„Räume & Geräte"** sitzt deshalb jetzt ein Knopf
+**„+ Gerät hinzufügen"**: dieselbe Netzwerksuche, dasselbe „gründlich
+suchen", derselbe Bogen zum Eintragen von Hand – nur an der richtigen
+Stelle. Was verbunden wird, steht sofort in der Liste darunter.
+
+Nachgeprüft, nicht nur behauptet: Im Browser wurde über den neuen Knopf ein
+zweiter Shelly von Hand eingetragen (aus 2 Geräten wurden 4, die Kacheln
+standen ohne Neuladen da); im Verlauf erschienen „eingeschaltet" und
+„ausgeschaltet" mit Uhrzeit unter der Tagesüberschrift, die Filter zählten
+richtig, die Suche zeigte einen ehrlichen Leerzustand – und **kein einziger
+Messwert** stand im Verlauf.
+
 ## 1.12.2 – 2026-08-10
 
 **Radiosender ließen sich nicht abspielen.** Aus einem echten Haushalt

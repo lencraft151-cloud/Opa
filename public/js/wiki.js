@@ -62,6 +62,7 @@ export const ARTICLES = [
           '**„Gründlich suchen"** klopft zusätzlich jede Adresse im eigenen Netz ab. Das findet Geräte, die auf Suchanfragen nicht antworten, und dauert entsprechend länger. Adressen, die beim ersten Anklopfen schweigen, werden ein zweites Mal mit mehr Geduld gefragt – Geräte im WLAN brauchen manchmal länger, als man ihnen zugesteht.',
           'Die Trefferliste **wächst** über mehrere Durchgänge: Was einmal gefunden wurde, bleibt stehen, auch wenn du noch einmal suchst. Ein zweiter Durchlauf kann also nur mehr zeigen, nie weniger.',
           '**„Mit allen verbinden"** übernimmt auf einen Schlag alles, was kein Passwort braucht. Geschützte Geräte bleiben bewusst außen vor – sie fragen einzeln nach ihrem Kennwort.',
+          '**Später noch etwas dazu?** Unter „Räume & Geräte" sitzt oben rechts **„+ Gerät hinzufügen"** – dieselbe Suche, derselbe Bogen zum Eintragen von Hand. Was du verbindest, steht sofort in der Liste darunter. (Denselben Weg gibt es auch unter Einstellungen → Integrationen.)',
         ],
       },
       {
@@ -305,6 +306,36 @@ export const ARTICLES = [
     ],
   },
   {
+    id: 'verlauf',
+    title: 'Verlauf',
+    icon: '🕘',
+    summary:
+      'Was wann passiert ist: geschaltet, ausgelöst, ausgefallen. Nach Tagen gebündelt und durchsuchbar.',
+    sections: [
+      {
+        heading: 'Verlauf oder Auswertung?',
+        body: [
+          'Zwei Fragen, die leicht verwechselt werden. **„Wie warm war es gestern?"** ist eine Zahlenreihe und steht unter **Auswertung**. **„Warum ging um halb acht das Licht an?"** ist eine Erzählung und steht hier.',
+          'Im Verlauf steht, was jemand als Ereignis erkennen würde: ein- und ausgeschaltet, Rollladen gefahren, Heizung verstellt, ein Gerät weg oder wieder da, eine Automation gelaufen, eine Szene abgerufen, eine Bridge gestört.',
+        ],
+      },
+      {
+        heading: 'Warum keine Messwerte darin stehen',
+        body: [
+          'Ein Temperatursensor meldet alle fünfzehn Sekunden. Stünde jede Meldung im Verlauf, wäre er nach einer Stunde unlesbar – und die Datenbank voll. Für Zahlen gibt es die Kurven unter „Auswertung".',
+          'Aus demselben Grund melden Integrationen nur den **Wechsel** („meldet ein Problem", „antwortet wieder") und nicht jeden Abgleich.',
+        ],
+      },
+      {
+        heading: 'Suchen, filtern, leeren',
+        body: [
+          'Die Knöpfe oben filtern nach Art – Geräte, Automationen, Szenen, Integrationen, Meldungen des Hubs – und nennen jeweils die Anzahl. Das Suchfeld sucht im Text.',
+          '**„Verlauf leeren"** löscht nur diese Liste. Messwerte, Geräte, Räume, Szenen und Einstellungen bleiben unberührt. Aufbewahrt werden ohnehin nur die letzten 800 Ereignisse; ältere fallen von selbst heraus.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'sicherung',
     title: 'Sicherung, Updates, Haushalt löschen',
     icon: '💾',
@@ -419,7 +450,7 @@ export function setWikiArticle(id) {
 /**
  * Sucht in Titeln, Kurzfassungen und Fließtext.
  *
- * Bewusst simpel: kleingeschriebener Teilstring. Für zwölf Artikel ist alles
+ * Bewusst simpel: kleingeschriebener Teilstring. Für ein gutes Dutzend Artikel ist alles
  * Weitere Aufwand ohne Ertrag – und eine Suche, die nichts findet, weil sie
  * zu klug ist, wäre schlimmer als keine.
  */

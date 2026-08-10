@@ -202,8 +202,18 @@ export class DeviceService {
 
     this.telemetry.record(device, device.state);
 
-    if (changed.length > 0 || before.reachable !== reachable) {
-      events.emit('device.updated', { device, changed });
+    /*
+     * Der Wechsel der Erreichbarkeit gehört in die Liste der Änderungen.
+     * Bisher löste er zwar das Ereignis aus, stand aber nicht darin – wer
+     * mithört, konnte „ist weg" nicht von „hat einen neuen Messwert"
+     * unterscheiden.
+     */
+    const reachabilityChanged = before.reachable !== reachable;
+    if (changed.length > 0 || reachabilityChanged) {
+      events.emit('device.updated', {
+        device,
+        changed: reachabilityChanged ? [...changed, 'reachable'] : changed,
+      });
     }
     return device;
   }

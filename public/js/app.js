@@ -7,6 +7,7 @@ import {
   refreshNextcloudCard,
   renderCurrent,
   renderPanel,
+  refreshHistory,
   startHomeShortcuts,
   store,
 } from './dashboard.js';
@@ -42,6 +43,13 @@ const TABS = [
    */
   { id: 'services', label: 'Dienste', icon: icons.music },
   { id: 'automations', label: 'Automationen', icon: icons.automation },
+  /*
+   * „Verlauf" ist nicht dasselbe wie „Auswertung": Dort stehen Kurven – wie
+   * warm es war, wie viel Strom floss. Hier steht, *was* passiert ist. Beides
+   * in einen Reiter zu legen hieße, eine Zahlenreihe und eine Erzählung in
+   * dieselbe Form zu pressen.
+   */
+  { id: 'history', label: 'Verlauf', icon: icons.clock },
   { id: 'settings', label: 'Einstellungen', icon: icons.settings },
   { id: 'wiki', label: 'Wiki', icon: icons.book },
 ];
@@ -454,6 +462,8 @@ function connectEventStream() {
       timeout: origin === 'nextcloud' ? 15_000 : 8000,
     });
     if (origin === 'nextcloud') refreshNextcloudCard();
+    // Steht der Verlauf offen, gehört die Meldung sofort hinein.
+    if (activeTab === 'history') void refreshHistory();
   });
 
   source.onerror = () => {

@@ -671,6 +671,42 @@ export interface SonosPlayer {
   updatedAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Verlauf
+// ---------------------------------------------------------------------------
+
+export const ACTIVITY_KINDS = ['device', 'automation', 'scene', 'integration', 'system'] as const;
+export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
+
+/**
+ * Ein Eintrag im Verlauf: was ist wann passiert.
+ *
+ * Bewusst getrennt von den Messwerten. Eine Temperaturkurve beantwortet
+ * „wie warm war es?"; der Verlauf beantwortet „was ist geschehen?" – wer
+ * hat geschaltet, welche Automation lief, wann war ein Gerät weg. Das
+ * eine ist eine Zahlenreihe, das andere eine Erzählung, und beides in
+ * dieselbe Form zu pressen hätte beiden geschadet.
+ *
+ * Was hier *nicht* hineingehört: jede gemessene Zahl. Ein Sensor, der alle
+ * fünfzehn Sekunden 21,4 °C meldet, erzeugt keinen Eintrag – sonst wäre der
+ * Verlauf nach einer Stunde unlesbar und die Datenbank aufgebläht.
+ */
+export interface ActivityEntry {
+  id: string;
+  householdId: string;
+  /** Zeitpunkt in ISO-Form. */
+  at: string;
+  kind: ActivityKind;
+  /** Ein Satz, der ohne weiteren Zusammenhang verständlich ist. */
+  message: string;
+  level: 'info' | 'warn' | 'error';
+  /** Für Filter und den Sprung zum Gerät. */
+  deviceId: string | null;
+  roomId: string | null;
+  /** Zusatz für die Suche – Gerätename, Raumname, Herstellername. */
+  detail: string | null;
+}
+
 export const TRANSPORT_STATES = ['playing', 'paused', 'stopped', 'transitioning'] as const;
 export type TransportState = (typeof TRANSPORT_STATES)[number];
 

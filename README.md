@@ -42,11 +42,12 @@ Geräte.
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
 | **Geräte geraderücken** | Name, Raum, Gruppe und das Entfernen an einer Stelle – bei Geräten ohne Raum offen sichtbar, sonst hinter einem Aufklapper |
-| **Eine Ansicht für alles** | Räume und Geräte in *einer* Ansicht: eine Suche über Name, Raum, Hersteller und Modell, Umschalter „nach Räumen ↔ Liste“, Filter, Sortierung und Schnellfilter |
+| **Eine Ansicht für alles** | Räume und Geräte in *einer* Ansicht: eine Suche über Name, Raum, Hersteller und Modell, Umschalter „nach Räumen ↔ Liste“, Filter, Sortierung und Schnellfilter – dazu **„+ Gerät hinzufügen“** an derselben Stelle |
+| **Verlauf** | Eigener Reiter: was wann passiert ist – geschaltet, ausgelöst, ausgefallen. Nach Tagen gebündelt, durchsuchbar, gefiltert nach Geräten, Automationen, Szenen, Integrationen und Hub-Meldungen |
 | **Favoriten** | Häufig benutzte Geräte anheften – sie stehen immer oben, egal wie sortiert wird |
 | **Sammelaktionen** | Mehrere Geräte auswählen und auf einmal schalten, in einen Raum verschieben, anheften oder ausblenden |
 | **Erneut verbinden** | Zugangsdaten erneuern oder den Knopf an der Hue Bridge noch einmal drücken – ohne Geräte, Räume, Szenen und Automationen zu verlieren |
-| **Wiki im Hub** | Zwölf durchsuchbare Artikel zu allem – Begriffe, Einrichtung je Hersteller, Automationen, Fehlersuche – mit Verweisen aus der Oberfläche heraus |
+| **Wiki im Hub** | Dreizehn durchsuchbare Artikel zu allem – Begriffe, Einrichtung je Hersteller, Automationen, Fehlersuche – mit Verweisen aus der Oberfläche heraus |
 | **Alles verbinden** | Ein Knopf übernimmt alle gefundenen Geräte, die kein Passwort brauchen – mit Bericht, was ging und was nicht |
 | **Sonos** | Lautsprecher im eigenen Netz finden und bedienen: Titel, Titelbild, Play/Pause/Weiter und Lautstärke – dazu **Playlists, Radiosender und Favoriten** zum Auflegen; gruppenfest, ohne Konto |
 | **Spotify** | Was gerade läuft, samt Steuerung und Gerätewechsel, dazu Spotifys **eingebetteter Player**; Anmeldung mit PKCE, ohne Client-Geheimnis |
@@ -647,6 +648,30 @@ Leiste oben bietet alles an/aus, in einen Raum verschieben, anheften und
 ausblenden. Sie klebt beim Scrollen fest – wer zwanzig Geräte auswählt, hat
 den Knopf sonst längst aus dem Blick.
 
+### Verlauf: was passiert ist – und Messwerte: wie es war
+
+Zwei Fragen, die leicht verwechselt werden. „Wie warm war es gestern?" ist
+eine Zahlenreihe und steht unter **Auswertung**. „Warum ging um halb acht das
+Licht an?" ist eine Erzählung und steht unter **Verlauf**.
+
+Aufgezeichnet wird, was jemand als Ereignis erkennen würde: geschaltet,
+aufgefahren, verstellt, weg, wieder da, Automation gelaufen, Szene abgerufen,
+Integration gestört. **Messwerte ausdrücklich nicht** – ein Sensor, der alle
+fünfzehn Sekunden 21,4 °C meldet, würde den Verlauf binnen einer Stunde
+unlesbar machen und die Datenbank vollschreiben. Die Grenze zieht
+`activityService.ts` an den Feldern `on`, `reachable`, `position`, `tilt`
+und `targetTemperatureC`.
+
+Zwei weitere Entscheidungen sitzen an derselben Stelle:
+
+- **Integrationen melden nur den Wechsel.** `integration.updated` feuert bei
+  jedem Abgleich; ohne dieses Gedächtnis stünde alle fünfzehn Sekunden
+  „Bridge in Ordnung" im Verlauf.
+- **Geschrieben wird gebündelt.** Der Verlauf lebt im Speicher und wandert
+  alle paar Sekunden als Ganzes auf die Platte; aufbewahrt werden die letzten
+  800 Ereignisse. Ein Schreibvorgang je Lichtschalter wäre bei dreißig Geräten
+  zu viel.
+
 ### Wenn eine neue Fassung da ist
 
 Der Hub sieht von selbst nach – eine Minute nach dem Start und danach einmal
@@ -669,10 +694,10 @@ anzukündigen. Dass das so bleibt, prüft `tests/version.test.ts`.
 
 ### Wiki im Hub
 
-Ein eigener Reiter mit zwölf Artikeln: Erste Schritte, Geräte verbinden, je
+Ein eigener Reiter mit dreizehn Artikeln: Erste Schritte, Geräte verbinden, je
 einer zu Hue, Shelly, FRITZ!Box und Homematic, dazu Dienste, Räume und Szenen,
-Automationen, Auswertung, Sicherung – und „Wenn etwas klemmt". Durchsuchbar
-über den ganzen Fließtext.
+Automationen, Auswertung, **Verlauf**, Sicherung – und „Wenn etwas klemmt".
+Durchsuchbar über den ganzen Fließtext.
 
 Die Erklärungen stehen bewusst **im Programm** und nicht nur in dieser Datei:
 Wer vor einem Kasten steht, in dem „Anmeldung abgelehnt" steht, schlägt nicht
