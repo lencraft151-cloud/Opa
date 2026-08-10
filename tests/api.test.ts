@@ -115,7 +115,8 @@ describe('Einrichtung über die API', () => {
     assert.equal(status, 200);
     assert.equal(data.hasHousehold, false);
     assert.equal(data.currentStep, 'household');
-    assert.equal(data.steps.length, 5);
+    // Haushalt, Geräte, Räume, Zuordnen, Gruppen, Fertig
+    assert.equal(data.steps.length, 6);
   });
 
   it('erlaubt den Systemstatus ohne Token', async () => {

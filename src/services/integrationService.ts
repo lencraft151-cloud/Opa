@@ -167,8 +167,18 @@ export class IntegrationService {
       });
     }
 
+    /*
+     * Beim gründlichen Suchen wird länger gehorcht.
+     *
+     * Eine Suchanfrage per Multicast ist ein einzelnes UDP-Paket – geht es
+     * verloren, schweigt das Gerät, und beim nächsten Versuch ist es plötzlich
+     * da. Wer „gründlich" wählt, hat sich für Genauigkeit statt Tempo
+     * entschieden; dann darf die Suche auch das Doppelte an Zeit bekommen.
+     */
     const discoverOptions = {
-      timeoutMs: this.config.discoveryTimeoutMs,
+      timeoutMs: allowScan
+        ? Math.max(this.config.discoveryTimeoutMs * 2, 8000)
+        : this.config.discoveryTimeoutMs,
       allowCloud: this.config.allowCloudDiscovery,
       allowScan,
       scanHosts,

@@ -204,7 +204,22 @@
           </div>
         </section>
 
-        <!-- Schritt 5: Fertig -->
+        <!-- Schritt 5: Nach Gruppen sortieren -->
+        <section id="step-groups" class="card step hidden">
+          <h2>Nach Gruppen sortieren</h2>
+          <p class="muted">
+            Alle Lichter, alle Rollläden, alle Heizungen auf einen Blick. Weise eine ganze
+            Gruppe mit einem Griff einem Raum zu – oder blende aus, was du nicht brauchst.
+            Das ist ein Angebot, keine Pflicht: Wer oben schon alles zugeordnet hat, klickt
+            hier einfach weiter.
+          </p>
+          <div id="group-list" class="list"></div>
+          <div class="row end">
+            <button id="btn-to-done" class="primary">Weiter</button>
+          </div>
+        </section>
+
+        <!-- Schritt 6: Fertig -->
         <section id="step-done" class="card step hidden">
           <h2>Fast geschafft</h2>
           <div id="setup-summary" class="tiles"></div>
@@ -228,8 +243,7 @@
 
       <main class="content" id="content">
         <section id="panel-overview" class="tab-panel"></section>
-        <section id="panel-rooms" class="tab-panel hidden"></section>
-        <section id="panel-devices" class="tab-panel hidden"></section>
+        <section id="panel-home" class="tab-panel hidden"></section>
         <section id="panel-scenes" class="tab-panel hidden"></section>
         <!-- Energie und Verlauf teilen sich einen Reiter; die beiden inneren
              Bereiche behalten ihre Kennungen, damit sie einzeln neu

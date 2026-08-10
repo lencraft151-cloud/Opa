@@ -13,8 +13,17 @@
 
 import { toast } from './api.js';
 
-/** Wie oft nachgesehen wird, solange die Seite sichtbar ist. */
-const CHECK_INTERVAL_MS = 10 * 60 * 1000;
+/**
+ * Wie oft nachgesehen wird, solange die Seite sichtbar ist.
+ *
+ * Zehn Minuten waren zu lang: Nach einer Aktualisierung des Hubs stand die
+ * alte Oberfläche bis zu zehn Minuten weiter da und sprach mit einem Server,
+ * der schon eine neue Fassung ausliefert. Zwei Minuten sind ein Kompromiss –
+ * und der eigentliche Auslöser ist ohnehin ein anderer: Der Ereignisstrom
+ * bricht beim Neustart des Hubs ab, und sobald er wieder steht, wird
+ * nachgesehen (siehe `checkNow` in app.js).
+ */
+const CHECK_INTERVAL_MS = 2 * 60 * 1000;
 /** Vorlauf, bevor sichtbar neu geladen wird. */
 const COUNTDOWN_SECONDS = 8;
 /** Abstand, in dem bei laufender Eingabe erneut angefragt wird. */
@@ -45,6 +54,16 @@ export function startSelfUpdate(build) {
   });
 
   watchServiceWorker();
+}
+
+/**
+ * Sofort nachsehen – etwa, wenn der Ereignisstrom wieder steht.
+ *
+ * Genau dann lohnt es sich: Ein Abriss bedeutet fast immer, dass der Hub neu
+ * gestartet ist, und ein Neustart bedeutet oft eine neue Fassung.
+ */
+export function checkNow() {
+  return check();
 }
 
 /** Fragt den Hub, ob eine neue Fassung bereitliegt. */

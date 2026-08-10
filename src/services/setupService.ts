@@ -55,6 +55,13 @@ const STEP_DEFINITIONS: Array<{ id: SetupStep; title: string; description: strin
     description: 'Jedes Gerät einem Raum zuweisen. Hue-Räume werden automatisch übernommen.',
   },
   {
+    id: 'groups',
+    title: 'Nach Gruppen sortieren',
+    description:
+      'Alle Lichter, alle Rollläden, alle Heizungen auf einen Blick – und mit einem Griff ' +
+      'einem Raum zuweisen oder ausblenden, was du nicht brauchst.',
+  },
+  {
     id: 'done',
     title: 'Fertig',
     description: 'Der Hub sammelt Messwerte und steuert alle Geräte an einem Ort.',
@@ -113,6 +120,12 @@ export class SetupService {
       integrations: integrations.length > 0,
       rooms: rooms.length > 0,
       assign: devices.length > 0 && unassigned.length === 0,
+      /*
+       * Dieser Schritt ist ein Angebot, keine Pflicht: Wer schon beim
+       * Zuordnen fertig geworden ist, hat hier nichts mehr zu tun. Er gilt
+       * deshalb als erledigt, sobald kein Gerät mehr ohne Raum ist.
+       */
+      groups: devices.length > 0 && unassigned.length === 0,
       done: household.setupCompletedAt !== null,
     };
 

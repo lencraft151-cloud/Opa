@@ -132,7 +132,23 @@ export type PublicIntegration = Omit<Integration, 'secretsEnc'> & { hasSecrets: 
 // Haushalt / Räume
 // ---------------------------------------------------------------------------
 
-export const SETUP_STEPS = ['household', 'integrations', 'rooms', 'assign', 'done'] as const;
+/**
+ * Die Schritte der Ersteinrichtung.
+ *
+ * `groups` kam später dazu und steht bewusst *nach* dem Zuordnen: Wer dreißig
+ * Geräte einzeln in Räume sortiert hat, will danach nicht noch einmal dreißig
+ * Zeilen anfassen. Der Schritt fasst sie zu Gattungen zusammen – alle Lichter,
+ * alle Rollläden, alle Heizungen – und lässt eine ganze Gattung auf einmal
+ * einem Raum zuweisen oder ausblenden.
+ */
+export const SETUP_STEPS = [
+  'household',
+  'integrations',
+  'rooms',
+  'assign',
+  'groups',
+  'done',
+] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
 
 export interface Household {

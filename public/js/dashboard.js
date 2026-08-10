@@ -24,6 +24,7 @@ import {
 import { bindManualForm, manualForm, runDiscovery } from './integrations.js';
 import { loadMusic, renderMusic, startMusicTicker, stopMusicTicker } from './music.js';
 import { applyUpdate } from './selfupdate.js';
+import { restoreDrafts } from './drafts.js';
 import { renderWiki, setWikiArticle } from './wiki.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -148,8 +149,7 @@ export async function reloadDevices() {
 
 const RENDERERS = {
   overview: renderOverview,
-  rooms: renderRooms,
-  devices: renderDevices,
+  home: renderHome,
   scenes: renderScenes,
   insights: renderInsights,
   services: renderServices,
@@ -192,7 +192,7 @@ export function showWiki(articleId) {
  * Zeit, dann war die Eingabe weg. Diese beiden Ansichten zeigen keine
  * Messwerte; sie werden nur noch nach dem Speichern neu gezeichnet.
  */
-const DEVICE_DEPENDENT = new Set(['overview', 'rooms', 'devices', 'scenes', 'insights']);
+const DEVICE_DEPENDENT = new Set(['overview', 'home', 'scenes', 'insights']);
 
 let current = 'overview';
 
@@ -328,8 +328,16 @@ function withPreservedInput(panel, render) {
 
   const result = render();
   // Manche Ansichten laden nach; die Staffelung wartet darauf.
-  if (result && typeof result.then === 'function') void result.then(() => stagger(panel));
-  else stagger(panel);
+  const after = () => {
+    stagger(panel);
+    /*
+     * Entwürfe aus einem früheren Seitenaufbau wieder einsetzen. Muss nach
+     * dem Zeichnen passieren – vorher gibt es die Felder noch gar nicht.
+     */
+    restoreDrafts(panel);
+  };
+  if (result && typeof result.then === 'function') void result.then(after);
+  else after();
 
   for (const field of fields()) {
     const key = fieldKey(field);
@@ -640,8 +648,8 @@ async function refreshSummary() {
 // Räume
 // ---------------------------------------------------------------------------
 
-function renderRooms() {
-  const panel = $('#panel-rooms');
+function renderRooms(panel = $('#sub-rooms')) {
+  if (!panel) return;
   const unassigned = store.devices.filter((device) => device.roomId === null);
 
   if (store.rooms.length === 0 && unassigned.length === 0) {
@@ -736,8 +744,8 @@ function renderRooms() {
 
 let deviceFilter = { search: '', capability: '' };
 
-function renderDevices() {
-  const panel = $('#panel-devices');
+function renderDevices(panel = $('#sub-devices')) {
+  if (!panel) return;
   const devices = store.devices.filter((device) => {
     if (deviceFilter.capability && !device.capabilities.includes(deviceFilter.capability)) return false;
     if (
@@ -2101,6 +2109,74 @@ async function renderSettings() {
  * wohnte bis hierher in den Einstellungen und ist mit umgezogen – sie gehört
  * zu denselben Nachbarn.
  */
+/** Welche Sicht auf die Geräte zuletzt offen war. */
+let homeTab = 'rooms';
+
+/**
+ * Räume und Geräte in einem Reiter.
+ *
+ * Vorher waren es zwei, und der Unterschied war schwer zu erklären: Beide
+ * zeigen dieselben Geräte, nur einmal nach Räumen gruppiert und einmal am
+ * Stück mit Suche. Das ist keine zwei Reiter wert – es sind zwei Sichten auf
+ * dieselbe Sache, und genau so stehen sie jetzt da.
+ */
+async function renderHome() {
+  const panel = $('#panel-home');
+  if (!panel) return;
+
+  const tabs = [
+    {
+      id: 'rooms',
+      label: 'Nach Räumen',
+      icon: '🛋️',
+      count: store.rooms.length,
+    },
+    {
+      id: 'devices',
+      label: 'Alle Geräte',
+      icon: '🔌',
+      count: store.devices.length,
+    },
+  ];
+
+  if (!panel.querySelector('#home-tabs')) {
+    panel.innerHTML = `
+      <p class="intro">
+        Dieselben Geräte, zwei Sichten: nach Räumen gruppiert – oder alle am Stück,
+        mit Suche und Filter. ${wikiLink('raeume', 'Was bringen Räume?')}
+      </p>
+      <div class="subtabs" id="home-tabs" role="tablist"></div>
+      <div id="sub-rooms" class="${homeTab === 'rooms' ? '' : 'hidden'}"></div>
+      <div id="sub-devices" class="${homeTab === 'devices' ? '' : 'hidden'}"></div>`;
+  }
+
+  const bar = panel.querySelector('#home-tabs');
+  const nextBar = tabs
+    .map(
+      (tab) =>
+        `<button role="tab" data-home-tab="${esc(tab.id)}" aria-selected="${tab.id === homeTab}"
+           class="${tab.id === homeTab ? 'active' : ''}">${tab.icon} ${esc(tab.label)}
+           <span class="badge">${tab.count}</span></button>`,
+    )
+    .join('');
+
+  if (paint(bar, nextBar)) {
+    bar.querySelectorAll('[data-home-tab]').forEach((button) => {
+      button.addEventListener('click', () => {
+        homeTab = button.dataset.homeTab;
+        void renderHome();
+      });
+    });
+  }
+
+  panel.querySelector('#sub-rooms')?.classList.toggle('hidden', homeTab !== 'rooms');
+  panel.querySelector('#sub-devices')?.classList.toggle('hidden', homeTab !== 'devices');
+
+  // Nur die sichtbare Sicht zeichnen – die andere wartet, bis sie dran ist.
+  if (homeTab === 'rooms') renderRooms(panel.querySelector('#sub-rooms'));
+  else renderDevices(panel.querySelector('#sub-devices'));
+}
+
 /** Welcher Unterreiter der Dienste zuletzt offen war. */
 let serviceTab = 'sonos';
 

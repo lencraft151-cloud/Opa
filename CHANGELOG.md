@@ -8,6 +8,65 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.10.0 – 2026-08-10
+
+**Räume und Geräte sind jetzt ein Reiter.** Die Trennung war künstlich: Wer
+ein Gerät suchte, wusste selten, ob es schon in einem Raum steckt, und
+klickte zwischen beiden Ansichten hin und her. Unter **„Räume & Geräte"**
+liegen sie nebeneinander – „🛋️ Nach Räumen" und „🔌 Alle Geräte" als
+Unterreiter, mit der Anzahl gleich daneben. Die Hauptleiste wird dadurch um
+einen Eintrag kürzer.
+
+**Ein Einrichtungsschritt „Nach Gruppen sortieren".** Nach dem Zuordnen
+kommt jetzt eine Ansicht, die alle Geräte nach Gattung bündelt: Licht,
+Rollläden, Heizung, Schalter und Steckdosen, Sensoren. Eine ganze Gruppe
+lässt sich mit einem Griff einem Raum zuweisen oder ausblenden – wer zwölf
+Lampen hat, klickt nicht mehr zwölfmal. Der Schritt ist ein Angebot, keine
+Pflicht: Wer vorher schon alles zugeordnet hat, klickt weiter.
+
+**„Gründlich durchsuchen" findet beim ersten Mal, was da ist.** Bisher
+musste man den Suchlauf gelegentlich vier-, fünfmal starten, bis alle Geräte
+auftauchten – und jeder Durchgang fing bei null an, sodass Fundstücke des
+vorigen wieder verschwanden. Drei Ursachen, drei Änderungen:
+
+- **Ein zweiter, geduldiger Durchgang.** Die Netzsuche klopft jede Adresse
+  mit 400 ms ab. Das genügt einem Gerät am Kabel mühelos – ein Shelly im
+  WLAN, der gerade aus dem Stromsparmodus kommt, braucht gelegentlich das
+  Dreifache und fehlte dann. Jetzt werden alle Adressen, die geschwiegen
+  haben, ein zweites Mal mit deutlich mehr Zeit gefragt. Das kostet nichts
+  für Adressen, hinter denen ohnehin niemand ist.
+- **Mehr Zeit für Bridges und Lautsprecher.** Beim gründlichen Suchlauf
+  bekommen mDNS und SSDP – über die sich Hue Bridge und Sonos melden – die
+  doppelte Frist, mindestens acht Sekunden.
+- **Die Liste wächst, statt neu anzufangen.** Was ein Durchgang gefunden
+  hat, bleibt sichtbar, wenn der nächste startet. Zweimal suchen addiert
+  sich jetzt, statt sich zu ersetzen.
+
+**Nichts geht mehr verloren, wenn die Oberfläche neu lädt.** Was man
+eintippt, wird sofort mitgeschrieben und nach dem Neuladen wieder eingesetzt
+– ein halb ausgefüllter Raumname, eine angefangene Automation, eine
+Box-Adresse. **Kennwörter, App-Passwörter und Token ausdrücklich nicht:** Ein
+Formular, das man einmal neu ausfüllt, ist besser als ein Kennwort, das im
+Browser liegen bleibt. Gerätezustände – ein Helligkeitsregler etwa – bleiben
+ebenfalls unangetastet; sie zeigen, was die Lampe *tut*.
+
+Dazu merkt die Oberfläche eine neue Fassung schneller: Sie sieht alle zwei
+Minuten statt alle zehn nach, und vor allem sofort, wenn der Ereignisstrom
+nach einem Neustart des Hubs wieder steht. Genau dann ist fast immer eine
+neue Fassung da – vorher stand die alte Oberfläche bis zu zehn Minuten vor
+einem Server, der schon etwas anderes ausliefert.
+
+**Und die Daten bleiben, auch wenn der Ordner ganz weg ist.** Was 1.9.0
+begonnen hat, ist jetzt für den härtesten Fall nachgeprüft: Projektordner
+gelöscht, frisch von GitHub geklont, neu gebaut, gestartet – derselbe
+Haushalt, dieselben Räume, dieselben Zugangsdaten.
+
+Nachgeprüft, nicht nur behauptet: Der Einrichtungsassistent zeigt sechs
+Schritte, die Gruppenansicht ordnet zwei Geräte mit einem Griff zu, die
+Unterreiter zählen richtig, und „Wintergarten" sowie „http://fritz.box"
+stehen nach einem Neuladen wieder im Formular – während im Entwurfsspeicher
+kein Kennwort auftaucht.
+
 ## 1.9.0 – 2026-08-10
 
 **Deine Einrichtung überlebt jede Aktualisierung.** Datenbank, Messwerte und

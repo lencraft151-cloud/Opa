@@ -33,7 +33,7 @@ function render() {
     )
     .join('');
 
-  for (const id of ['household', 'integrations', 'rooms', 'assign', 'done']) {
+  for (const id of ['household', 'integrations', 'rooms', 'assign', 'groups', 'done']) {
     $(`#step-${id}`).classList.toggle('hidden', state.currentStep !== id);
   }
 
@@ -48,6 +48,7 @@ function render() {
   if (state.currentStep === 'integrations') void renderIntegrations();
   if (state.currentStep === 'rooms') void renderRooms();
   if (state.currentStep === 'assign') void renderAssign();
+  if (state.currentStep === 'groups') void renderGroups();
   if (state.currentStep === 'done') renderDone();
 }
 
@@ -145,8 +146,10 @@ function wireOnce() {
       });
       if (!saved) return;
     }
-    await goToStep('done');
+    await goToStep('groups');
   });
+
+  $('#btn-to-done').addEventListener('click', () => goToStep('done'));
 
   $('#btn-complete').addEventListener('click', async () => {
     const result = await guard(() => api('/setup/complete', { method: 'POST' }), {
@@ -274,6 +277,116 @@ async function renderAssign() {
         )
         .join('')
     : emptyState('📭', 'Keine Geräte gefunden.', 'Gehe zurück und verbinde zuerst eine Bridge.');
+}
+
+/**
+ * Geräte nach Gattungen.
+ *
+ * Der Schritt davor geht Gerät für Gerät durch – bei dreißig Geräten sind das
+ * dreißig Auswahlfelder. Hier stehen sie zu Gattungen zusammengefasst: alle
+ * Lichter, alle Rollläden, alle Heizungen, alle Sensoren. Ein Griff weist die
+ * ganze Gattung einem Raum zu.
+ *
+ * Die Gattung kommt aus den Fähigkeiten, nicht aus dem Namen: Ein Gerät, das
+ * „Deckenlampe" heißt, aber ein Rollladen ist, gehört zu den Rollläden.
+ */
+const GROUPS = [
+  { id: 'light', label: 'Licht', icon: '💡', match: (d) => d.capabilities.some((c) => ['dimmer', 'color', 'color_temperature'].includes(c)) },
+  { id: 'cover', label: 'Rollläden und Motoren', icon: '🪟', match: (d) => d.capabilities.includes('cover') },
+  { id: 'thermostat', label: 'Heizung', icon: '🌡️', match: (d) => d.capabilities.includes('thermostat') },
+  { id: 'switch', label: 'Schalter und Steckdosen', icon: '🔌', match: (d) => d.capabilities.includes('switch') },
+  { id: 'sensor', label: 'Sensoren', icon: '📊', match: (d) => d.capabilities.some((c) => c.startsWith('sensor.')) },
+];
+
+/** In welche Gattung gehört ein Gerät? Die erste, die passt. */
+export function groupOf(device) {
+  return GROUPS.find((group) => group.match(device))?.id ?? 'other';
+}
+
+async function renderGroups() {
+  const [devices, rooms] = await Promise.all([api('/devices?includeHidden=true'), api('/rooms')]);
+
+  const buckets = new Map();
+  for (const device of devices) {
+    const id = groupOf(device);
+    if (!buckets.has(id)) buckets.set(id, []);
+    buckets.get(id).push(device);
+  }
+
+  const roomOptions = rooms
+    .map((room) => `<option value="${esc(room.id)}">${esc(room.name)}</option>`)
+    .join('');
+
+  const known = [...GROUPS, { id: 'other', label: 'Übrige Geräte', icon: '❓' }];
+
+  $('#group-list').innerHTML = known
+    .filter((group) => (buckets.get(group.id) ?? []).length > 0)
+    .map((group) => {
+      const members = buckets.get(group.id) ?? [];
+      const rooms = new Set(members.map((device) => device.roomId));
+      const wo =
+        rooms.size === 1 && !rooms.has(null)
+          ? 'alle im selben Raum'
+          : `${members.filter((device) => device.roomId === null).length} ohne Raum`;
+
+      return `<div class="item-block">
+        <div class="item">
+          <div>
+            <div class="title">${group.icon} ${esc(group.label)}
+              <span class="badge">${members.length}</span></div>
+            <div class="sub">${esc(members.map((device) => device.name).join(', ').slice(0, 90))}${
+              members.map((d) => d.name).join(', ').length > 90 ? '…' : ''
+            }</div>
+            <div class="sub">${esc(wo)}</div>
+          </div>
+          <div class="row tight">
+            <select data-group-room="${esc(group.id)}"
+              title="Weist alle Geräte dieser Gruppe auf einmal einem Raum zu.">
+              <option value="">Raum wählen …</option>
+              ${roomOptions}
+            </select>
+            <button class="small" data-group-hide="${esc(group.id)}"
+              title="Blendet die ganze Gruppe im Dashboard aus – sie bleibt verbunden.">Ausblenden</button>
+          </div>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  if ($('#group-list').innerHTML === '') {
+    $('#group-list').innerHTML = emptyState('📭', 'Keine Geräte zum Sortieren.');
+  }
+
+  $$('[data-group-room]').forEach((select) => {
+    select.addEventListener('change', async () => {
+      const roomId = select.value;
+      if (!roomId) return;
+      const members = buckets.get(select.dataset.groupRoom) ?? [];
+      const saved = await guard(
+        () =>
+          api('/setup/assign', {
+            method: 'POST',
+            body: {
+              assignments: members.map((device) => ({ deviceId: device.id, roomId })),
+            },
+          }),
+        { success: `${members.length} Gerät(e) zugewiesen.` },
+      );
+      if (saved) await renderGroups();
+    });
+  });
+
+  $$('[data-group-hide]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const members = buckets.get(button.dataset.groupHide) ?? [];
+      button.disabled = true;
+      for (const device of members) {
+        await guard(() => api(`/devices/${device.id}`, { method: 'PATCH', body: { hidden: true } }));
+      }
+      button.disabled = false;
+      await renderGroups();
+    });
+  });
 }
 
 function renderDone() {

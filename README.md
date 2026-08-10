@@ -22,7 +22,7 @@ Geräte.
 
 | Bereich | Funktion |
 | --- | --- |
-| **Haushalt** | Ersteinrichtung per Assistent, Räume, mehrere Personen mit eigenem Zugang |
+| **Haushalt** | Ersteinrichtung per Assistent in sechs Schritten – bis hin zum Sortieren aller Geräte nach Gattung –, Räume, mehrere Personen mit eigenem Zugang |
 | **Anmeldung** | Benutzername und Passwort statt Zugriffstoken; Sitzungen als HttpOnly-Cookie, Rollen (Administrator/Mitbewohner), Sperre gegen Durchprobieren |
 | **Szenen** | Den jetzigen Zustand als Szene sichern und mit einem Tipp wiederherstellen – Licht, Farbe, Rollläden, Heizung |
 | **Urlaubsmodus** | Im gewählten Zeitfenster gehen unregelmäßig Lichter an und aus, damit die Wohnung bewohnt wirkt |
@@ -50,7 +50,8 @@ Geräte.
 | **Sicherung** | Einstellungen, Räume, Geräte, Szenen und Automationen als Datei sichern und zurückspielen – ohne Passwörter in der Datei |
 | **Fassung des Hubs** | Änderungsprotokoll in der Oberfläche, Prüfung auf eine neuere Fassung und Aktualisierung auf Knopfdruck |
 | **Haushalt löschen** | Alles zurücksetzen – hinter fünf Bestätigungen, von denen die letzte den abgetippten Namen verlangt |
-| **Oberfläche** | Installierbare Web-App (PWA) mit Live-Updates (SSE), Dashboard, Raum-, Geräte-, Energie- und Verlaufsansicht; aktualisiert sich nach einem Update des Hubs selbst |
+| **Angefangene Eingaben** | Was getippt ist, überlebt ein Neuladen der Oberfläche – Kennwörter und Token ausdrücklich nicht |
+| **Oberfläche** | Installierbare Web-App (PWA) mit Live-Updates (SSE), Dashboard, „Räume & Geräte“ in einem Reiter, Energie- und Verlaufsansicht; aktualisiert sich nach einem Update des Hubs selbst |
 
 ---
 
@@ -99,14 +100,21 @@ automatisch.
    Homematic-Zentralen (mDNS).
    *Gründlich suchen* scannt zusätzlich das Subnetz – nötig für Batteriegeräte
    wie den Shelly H&T, die die meiste Zeit schlafen, und für die CCU2, die kein
-   mDNS kennt.
+   mDNS kennt. Jede Adresse, die beim ersten Anklopfen schweigt, wird ein
+   zweites Mal mit mehr Geduld gefragt, und die Trefferliste wächst über
+   mehrere Durchgänge hinweg, statt jedes Mal neu anzufangen (siehe
+   [Warum manche Geräte früher nicht gefunden wurden](#warum-manche-geräte-früher-nicht-gefunden-wurden)).
    Bei Hue muss **vor** dem Klick auf „Verbinden“ der runde Knopf auf der Bridge
    gedrückt werden; sonst antwortet der Hub mit `link_button_required`.
    Passwortgeschützte Shellys fragen nach dem Passwort, die Homematic-Zentrale
    nach Benutzername und Passwort der CCU-Weboberfläche.
 3. **Räume anlegen** – aus Vorschlägen oder frei benannt.
 4. **Geräte zuordnen** – aus Hue übernommene Räume sind bereits vorausgewählt.
-5. **Abschließen** – ab jetzt laufen Polling, Messwertarchiv und Automationen.
+5. **Nach Gruppen sortieren** – alle Lichter, alle Rollläden, alle Heizungen
+   auf einen Blick. Eine ganze Gruppe lässt sich mit einem Griff einem Raum
+   zuweisen oder ausblenden. Freiwillig: Wer in Schritt 4 schon alles
+   zugeordnet hat, klickt weiter.
+6. **Abschließen** – ab jetzt laufen Polling, Messwertarchiv und Automationen.
 
 Ein abgebrochener Assistent macht beim nächsten Aufruf an der richtigen Stelle
 weiter; der Fortschritt steckt im Haushalt (`setupStep`).
@@ -274,6 +282,24 @@ Zwei weitere Lücken sind geschlossen: Der Subnetz-Scan für Hue lief bisher nur
 wenn gar keine Bridge gefunden wurde – wer zwei hat, sah die zweite nie. Und
 Gen1-Shellys wurden nur erkannt, wenn „shelly“ im mDNS-Namen stand; umbenannte
 Geräte fielen durchs Raster. Jetzt entscheidet das Gerät selbst über `/shelly`.
+
+**Und warum man trotzdem manchmal mehrfach suchen musste.** Der Subnetz-Scan
+klopft jede der 254 Adressen mit einer TCP-Verbindung ab und gibt ihr dafür
+400 ms. Das ist reichlich für ein Gerät am Kabel und knapp für einen Shelly im
+WLAN, der gerade aus dem Stromsparmodus kommt: Mal war er da, mal nicht. Da
+jeder Suchlauf zudem bei null anfing, verschwanden beim zweiten Versuch die
+Funde des ersten – deshalb der Eindruck, man müsse fünfmal suchen.
+
+Drei Änderungen, jede an einer der Ursachen:
+
+- `reachableHosts()` macht einen **zweiten Durchgang** über alles, was
+  geschwiegen hat, mit deutlich längerer Frist (`retryTimeoutMs`, mindestens
+  1200 ms). Adressen, hinter denen niemand ist, kosten dabei nur diese eine
+  zusätzliche Frist – die Durchgänge laufen mit 128 Verbindungen parallel.
+- Beim gründlichen Suchlauf bekommen **mDNS und SSDP** die doppelte Zeit,
+  mindestens acht Sekunden. Hue Bridge und Sonos melden sich darüber.
+- Die Oberfläche **sammelt** die Treffer über Durchgänge hinweg, statt die
+  Liste zu ersetzen. Zweimal suchen addiert sich.
 
 ### Fertige Automationen
 

@@ -88,8 +88,27 @@ export function discoveryItem(entry) {
  * @param {boolean} scan Auch das Netz abklopfen (findet stumme Geräte).
  * @param {() => Promise<void>} onConnected
  */
+/**
+ * Was frühere Suchläufe schon gefunden haben.
+ *
+ * Der Grund für diesen Speicher ist eine Klage, die genau ins Schwarze traf:
+ * „Ich muss fünfmal gründlich suchen, bis alles da ist." Eine Suchanfrage ist
+ * ein einzelnes UDP-Paket; geht es verloren, schweigt das Gerät – und beim
+ * nächsten Lauf fehlt dafür ein anderes. Jeder Lauf für sich ist unvollständig,
+ * aber zusammen ergeben sie ein vollständiges Bild.
+ *
+ * Also wirft die Oberfläche nichts mehr weg: Ein neuer Lauf ergänzt, was schon
+ * da war, statt die Liste zu leeren. Wer die Adresse eines Geräts einmal
+ * gesehen hat, sieht sie auch beim nächsten Mal.
+ */
+const seenBefore = new Map();
+
+export function forgetDiscovered() {
+  seenBefore.clear();
+}
+
 export function runDiscovery(target, scan, onConnected) {
-  const found = new Map();
+  const found = new Map(seenBefore);
   const started = Date.now();
   let stream;
 
@@ -171,7 +190,10 @@ export function runDiscovery(target, scan, onConnected) {
 
   stream.addEventListener('found', (event) => {
     const { entry } = JSON.parse(event.data);
-    found.set(`${entry.type}:${entry.host}`, entry);
+    const key = `${entry.type}:${entry.host}`;
+    found.set(key, entry);
+    // Auch für den nächsten Lauf merken – siehe `seenBefore`.
+    seenBefore.set(key, entry);
     render(searching(`${plural(found.size, 'Gerät gefunden', 'Geräte gefunden')} – es läuft weiter.`));
     wireStop();
   });
@@ -193,15 +215,21 @@ export function runDiscovery(target, scan, onConnected) {
     clearInterval(ticker);
     stream.close();
     if (found.size > 0) {
+      const fresh = [...found.values()].filter((entry) => entry.source !== 'zuvor').length;
       render(
         `<p class="muted small">${plural(
           found.size,
           'Gerät gefunden',
           'Geräte gefunden',
-        )} in ${seconds()}.</p>`,
+        )} in ${seconds()}.${
+          found.size > fresh
+            ? ' Darunter Geräte aus einem früheren Suchlauf – die Liste wächst mit jedem Durchgang, statt neu anzufangen.'
+            : ''
+        }</p>`,
       );
       return;
     }
+    if (found.size > 0) return;
     target.innerHTML = emptyState(
       '🔍',
       'Nichts gefunden.',

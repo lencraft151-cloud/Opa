@@ -11,15 +11,20 @@ import {
 } from './dashboard.js';
 import { icons } from './icons.js';
 import { hideLogin, showLogin } from './login.js';
-import { startSelfUpdate } from './selfupdate.js';
+import { restoreDrafts, startDrafts } from './drafts.js';
+import { checkNow, startSelfUpdate } from './selfupdate.js';
 import { initSetup } from './setup.js';
 
 const $ = (selector) => document.querySelector(selector);
 
 const TABS = [
   { id: 'overview', label: 'Übersicht', icon: icons.home, primary: true },
-  { id: 'rooms', label: 'Räume', icon: icons.rooms, primary: true },
-  { id: 'devices', label: 'Geräte', icon: icons.devices, primary: true },
+  /*
+   * Räume und Geräte waren zwei Reiter, die dieselben Geräte zeigten – einmal
+   * gruppiert, einmal am Stück. Das ist keine zwei Reiter wert; es sind zwei
+   * Sichten auf dieselbe Sache und stehen jetzt als Unterreiter beieinander.
+   */
+  { id: 'home', label: 'Räume & Geräte', icon: icons.devices, primary: true },
   { id: 'scenes', label: 'Szenen', icon: icons.scene, primary: true },
   /*
    * Energie und Verlauf standen getrennt – dabei beantworten sie dieselbe
@@ -66,6 +71,13 @@ async function boot() {
 
   // Ab hier bemerkt die Seite selbst, wenn der Hub eine neue Fassung hat.
   startSelfUpdate(info.build);
+
+  /*
+   * Und ab hier geht beim Neuladen nichts mehr verloren, was jemand gerade
+   * eintippt: Entwürfe werden mitgeschrieben und nach dem Neuladen wieder
+   * eingesetzt. Kennwörter ausgenommen – siehe drafts.js.
+   */
+  startDrafts();
 
   // Eine abgelaufene Anmeldung führt von überall zurück zur Anmeldemaske.
   setUnauthorizedHandler(() => {
@@ -369,6 +381,17 @@ function connectEventStream() {
     const { ruleName } = JSON.parse(event.data);
     toast(`Automation ausgelöst: ${ruleName}`, { kind: 'success', timeout: 4000 });
   });
+  /*
+   * Steht die Verbindung wieder, war der Hub vermutlich weg – neu gestartet,
+   * aktualisiert, oder das Netz war kurz weg. In allen drei Fällen ist jetzt
+   * der richtige Moment, nach einer neuen Fassung zu sehen, statt bis zum
+   * nächsten Takt zu warten.
+   */
+  source.addEventListener('open', () => {
+    if (reconnectDelay > 1000) void checkNow();
+    reconnectDelay = 1000;
+  });
+
   source.addEventListener('notification', (event) => {
     const { message, level, hint, link, source: origin } = JSON.parse(event.data);
     toast(message, {

@@ -150,28 +150,68 @@ export function defaultGateways(): string[] {
  */
 export async function reachableHosts(
   hosts: readonly string[],
-  options: { ports?: number[]; timeoutMs?: number; concurrency?: number } = {},
+  options: {
+    ports?: number[];
+    timeoutMs?: number;
+    concurrency?: number;
+    /** Zweiter, geduldigerer Durchgang für alles, was nicht geantwortet hat. */
+    retryTimeoutMs?: number;
+    /**
+     * Wie eine einzelne Adresse abgeklopft wird.
+     *
+     * Nur für Tests austauschbar: Ein echter Durchgang hängt davon ab, ob im
+     * Netz gerade jemand schweigt – und das lässt sich nicht herstellen.
+     */
+    probe?: (host: string, ports: number[], timeoutMs: number) => Promise<boolean>;
+  } = {},
 ): Promise<string[]> {
   const ports = options.ports ?? [80, 443];
   const timeoutMs = options.timeoutMs ?? 400;
   // Ein TCP-Verbindungsversuch kostet fast nichts; die Grenze schützt nur
   // davor, dem Betriebssystem die Dateideskriptoren auszugehen.
   const concurrency = options.concurrency ?? 128;
+  /*
+   * Warum ein zweiter Durchgang?
+   *
+   * 400 ms genügen einem Gerät am Kabel mühelos. Ein Shelly im WLAN, der
+   * gerade aus dem Stromsparmodus kommt, braucht gelegentlich das Dreifache –
+   * und fehlt dann in der Trefferliste. Beim nächsten Versuch ist er da, beim
+   * übernächsten wieder nicht. Genau das ist das „ich muss fünfmal suchen".
+   *
+   * Der zweite Durchgang kostet nichts für die Adressen, hinter denen ohnehin
+   * niemand ist – die sind schnell wieder weg –, und er läuft nur über das,
+   * was beim ersten Mal geschwiegen hat.
+   */
+  const retryTimeoutMs = options.retryTimeoutMs ?? Math.max(timeoutMs, 1200);
+  const probe = options.probe ?? anyPortAnswers;
 
-  const alive: string[] = [];
-  let index = 0;
+  const sweep = async (candidates: readonly string[], budget: number): Promise<Set<string>> => {
+    const found = new Set<string>();
+    let index = 0;
 
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const current = index++;
-      if (current >= hosts.length) return;
-      const host = hosts[current] as string;
-      if (await anyPortAnswers(host, ports, timeoutMs)) alive.push(host);
-    }
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const current = index++;
+        if (current >= candidates.length) return;
+        const host = candidates[current] as string;
+        if (await probe(host, ports, budget)) found.add(host);
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, candidates.length) }, worker),
+    );
+    return found;
   };
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, hosts.length) }, worker));
-  return alive.sort();
+  const first = await sweep(hosts, timeoutMs);
+  const silent = hosts.filter((host) => !first.has(host));
+
+  if (silent.length > 0 && retryTimeoutMs > timeoutMs) {
+    for (const host of await sweep(silent, retryTimeoutMs)) first.add(host);
+  }
+
+  return [...first].sort();
 }
 
 function anyPortAnswers(host: string, ports: number[], timeoutMs: number): Promise<boolean> {

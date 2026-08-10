@@ -33,6 +33,7 @@ export const ARTICLES = [
         heading: 'In welcher Reihenfolge?',
         body: [
           'Zuerst **Geräte verbinden** (Einstellungen → „Weitere Bridge oder weiteres Gerät hinzufügen"), dann **Räume anlegen**, dann die Geräte den Räumen **zuordnen**. Alles Weitere – Szenen, Automationen, Auswertung – baut darauf auf.',
+          'Beides findest du danach unter **„Räume & Geräte"** – ein Reiter mit zwei Ansichten: „Nach Räumen" zeigt das Zuhause, „Alle Geräte" die vollständige Liste mit Suchfeld.',
           'Die Reihenfolge ist kein Selbstzweck: Ohne Räume gibt es keine Raumkacheln, keine Klimaanzeige und keine Sammelbefehle („alles im Wohnzimmer aus").',
         ],
       },
@@ -58,7 +59,8 @@ export const ARTICLES = [
         heading: 'Suchen und verbinden',
         body: [
           'Die normale Suche horcht ins Netz (mDNS und SSDP) und fragt bekannte Adressen ab. Sie dauert wenige Sekunden, und jeder Treffer erscheint sofort – du musst nicht warten, bis alles fertig ist.',
-          '**„Gründlich suchen"** klopft zusätzlich jede Adresse im eigenen Netz ab. Das findet Geräte, die auf Suchanfragen nicht antworten, und dauert entsprechend länger.',
+          '**„Gründlich suchen"** klopft zusätzlich jede Adresse im eigenen Netz ab. Das findet Geräte, die auf Suchanfragen nicht antworten, und dauert entsprechend länger. Adressen, die beim ersten Anklopfen schweigen, werden ein zweites Mal mit mehr Geduld gefragt – Geräte im WLAN brauchen manchmal länger, als man ihnen zugesteht.',
+          'Die Trefferliste **wächst** über mehrere Durchgänge: Was einmal gefunden wurde, bleibt stehen, auch wenn du noch einmal suchst. Ein zweiter Durchlauf kann also nur mehr zeigen, nie weniger.',
           '**„Mit allen verbinden"** übernimmt auf einen Schlag alles, was kein Passwort braucht. Geschützte Geräte bleiben bewusst außen vor – sie fragen einzeln nach ihrem Kennwort.',
         ],
       },
@@ -212,7 +214,9 @@ export const ARTICLES = [
       {
         heading: 'Räume',
         body: [
-          'Anlegen in den Einstellungen, zuordnen unter „Geräte". Danach zeigt jeder Raum Temperatur, Feuchte und Verbrauch, und du kannst alles darin auf einmal schalten.',
+          'Anlegen in den Einstellungen, zuordnen unter **„Räume & Geräte" → „Alle Geräte"**. Danach zeigt jeder Raum Temperatur, Feuchte und Verbrauch, und du kannst alles darin auf einmal schalten.',
+          'Räume und Geräte stehen bewusst in *einem* Reiter: Wer ein Gerät sucht, weiß meist nicht, ob es schon in einem Raum steckt. Die beiden Unterreiter zeigen dieselben Geräte, nur anders sortiert.',
+          'Viele Geräte auf einmal ordnest du im Einrichtungsassistenten unter **„Nach Gruppen sortieren"** zu: Dort stehen alle Lichter, alle Rollläden, alle Heizungen beieinander, und eine ganze Gruppe wandert mit einem Griff in einen Raum.',
         ],
       },
       {
@@ -333,6 +337,22 @@ export const ARTICLES = [
         heading: 'Die Anzeige hinkt hinterher',
         body: [
           'Der Hub fragt die Geräte im eingestellten Takt ab (Einstellungen → „Wie oft der Hub nachsieht"). Kürzer heißt: schneller auf dem Bildschirm. Länger heißt: weniger Last für Bridges und Batteriegeräte. Die Hue Bridge meldet ohnehin von selbst.',
+        ],
+      },
+      {
+        heading: 'Ein Gerät taucht in der Suche nicht auf',
+        body: [
+          'Such einfach noch einmal: Die Trefferliste wächst über mehrere Durchgänge, statt neu anzufangen. Was einmal da war, bleibt stehen.',
+          'Hilft das nicht, nimm **„Gründlich suchen"**. Der Lauf klopft jede Adresse im Netz an – auch zweimal, damit langsame Geräte im WLAN nicht durchfallen – und dauert dafür deutlich länger.',
+          'Bleibt es dabei, trage die IP-Adresse von Hand ein. Batteriegeräte wie der Shelly H&T schlafen die meiste Zeit und antworten nur, wenn sie gerade wach sind.',
+        ],
+      },
+      {
+        heading: 'Die Seite lädt neu und mein Formular ist leer',
+        body: [
+          'Das sollte nicht mehr passieren: Was du eintippst, wird mitgeschrieben und nach dem Neuladen wieder eingesetzt.',
+          '**Kennwörter, App-Passwörter und Token ausgenommen** – die werden bewusst nie zwischengespeichert. Ein Formular noch einmal auszufüllen ist besser, als ein Kennwort im Browser liegen zu lassen.',
+          'Neu geladen wird, wenn der Hub eine neuere Fassung der Oberfläche ausliefert. Solange jemand tippt, wartet der Hub damit; sonst kündigt er es mit acht Sekunden Vorlauf an.',
         ],
       },
       {
