@@ -230,6 +230,13 @@ export type SonosListName = keyof typeof SONOS_CONTAINERS;
 export interface SonosBrowseItem {
   /** Kennung im ContentDirectory – damit lässt sich der Eintrag wiederfinden. */
   id: string;
+  /**
+   * Der Behälter, in dem der Eintrag steht.
+   *
+   * Sieht nach Beiwerk aus, ist aber Pflicht: Sonos lehnt eine Beschreibung
+   * mit leerem `parentID` mit Fehler 402 ab.
+   */
+  parentId: string;
   title: string;
   /** Interpret, Sender-Beschreibung – was eben dabeisteht. */
   subtitle: string | null;
@@ -296,6 +303,7 @@ export function parseBrowseItems(didl: string | undefined): SonosBrowseItem[] {
 
     items.push({
       id,
+      parentId: node.attrs['parentID'] ?? '-1',
       title,
       subtitle: clean(findText(node, 'creator')) ?? clean(findText(node, 'album')),
       uri,
@@ -319,16 +327,55 @@ export function parseBrowseItems(didl: string | undefined): SonosBrowseItem[] {
  */
 export function didlFor(item: SonosBrowseItem): string {
   if (item.metadata) return item.metadata;
-  const cls = item.upnpClass ?? (item.container ? 'object.container' : 'object.item.audioItem');
+
+  /*
+   * Drei Dinge müssen stimmen, und alle drei haben gefehlt.
+   *
+   * 1. **Der Knotenname.** Ein Behälter ist `<container>`, ein Stück
+   *    `<item>`. Ein Behälter, der als `<item>` beschrieben wird, ist für
+   *    den Lautsprecher schlicht etwas anderes.
+   * 2. **Der `parentID`.** Leer ist keine gültige Angabe.
+   * 3. **Das `<desc>` mit dem `cdudn`-Marker.** Er sagt dem Lautsprecher,
+   *    *wessen* Inhalt das ist – der eigene Haushalt oder ein Musikdienst.
+   *    Ohne ihn antwortet Sonos mit Fehler 402, und das ist die Meldung
+   *    „Der Lautsprecher konnte mit der Angabe nichts anfangen".
+   *
+   * Genau daran scheiterten die Radiosender: Ihre Einträge bringen kein
+   * eigenes `r:resMD` mit, also wurde diese Beschreibung gebaut – und sie
+   * war unvollständig.
+   */
+  const element = item.container ? 'container' : 'item';
+  const cls =
+    item.upnpClass ??
+    (item.container ? 'object.container' : 'object.item.audioItem.audioBroadcast');
+
   return (
     '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" ' +
     'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ' +
+    'xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" ' +
     'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">' +
-    `<item id="${escapeXml(item.id)}" parentID="" restricted="true">` +
+    `<${element} id="${escapeXml(item.id)}" parentID="${escapeXml(item.parentId || '-1')}" ` +
+    'restricted="true">' +
     `<dc:title>${escapeXml(item.title)}</dc:title>` +
     `<upnp:class>${escapeXml(cls)}</upnp:class>` +
-    '</item></DIDL-Lite>'
+    '<desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">' +
+    `${escapeXml(cdudnFor(item.uri))}</desc>` +
+    `</${element}></DIDL-Lite>`
   );
+}
+
+/**
+ * Wem gehört diese Quelle?
+ *
+ * `SA_RINCON65031_` ist TuneIn – darüber laufen die Radiosender, die Sonos
+ * selbst führt. Alles andere gehört dem eigenen Haushalt; dafür steht der
+ * Platzhalter `RINCON_AssociatedZPUDN`, den der Lautsprecher durch seine
+ * eigene Kennung ersetzt.
+ */
+export function cdudnFor(uri: string | null): string {
+  return (uri ?? '').startsWith('x-sonosapi-stream:')
+    ? 'SA_RINCON65031_'
+    : 'RINCON_AssociatedZPUDN';
 }
 
 /**
@@ -459,10 +506,16 @@ export function parseUpnpError(xml: string): { code: string; message: string } |
   if (!fault) return null;
   const code = (findText(fault, 'errorCode') ?? '').trim();
   const description = (findText(fault, 'errorDescription') ?? '').trim();
-  return {
-    code,
-    message: UPNP_ERRORS[code] ?? description ?? 'Der Lautsprecher hat den Befehl abgelehnt.',
-  };
+  /*
+   * `??` griff hier nicht: `errorDescription` ist nach dem Trimmen ein
+   * *leerer String*, kein `undefined`. Ein unbekannter Fehlercode ergab
+   * damit eine Meldung ohne Text – im Protokoll stand nur „WARN [http]"
+   * und sonst nichts. Deshalb `||`, und der Code gehört dazu: Ohne ihn ist
+   * ein unbekannter Fehler nicht nachschlagbar.
+   */
+  const known = UPNP_ERRORS[code];
+  const fallback = description || `Der Lautsprecher hat den Befehl abgelehnt (Fehler ${code || '?'}).`;
+  return { code, message: known ?? fallback };
 }
 
 /** Der erste Kindknoten der SOAP-Antwort – dort stehen die Rückgabewerte. */

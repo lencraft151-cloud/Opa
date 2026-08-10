@@ -203,6 +203,7 @@ export const ARTICLES = [
           '**Gruppen:** Sind zwei Lautsprecher in der Sonos-App zusammengelegt, gelten Play und Pause für die ganze Gruppe – nur der Koordinator nimmt sie an, und der Hub schickt sie dorthin. Die Lautstärke bleibt bei jedem Lautsprecher einzeln.',
           '**Playlists und Radiosender:** Unter „Playlists und Radiosender" steht, was in der Sonos-App gespeichert ist – Wiedergabelisten, „Meine Radiosender" und alles mit dem Herz-Symbol. Oben wählst du den Lautsprecher, ein Klick auf einen Eintrag legt ihn auf.',
           'Angelegt werden diese Listen in der **Sonos-App**, nicht im Hub. Der Hub liest sie nur – er kann keine Playlist erstellen, und was du dort änderst, erscheint hier nach einem Klick auf „Neu laden".',
+          'Sagt der Lautsprecher „konnte mit der Angabe nichts anfangen": Dann stimmte die Beschreibung der Quelle nicht. Seit Fassung 1.12.2 baut der Hub sie vollständig – lade die Listen einmal neu und versuche es erneut.',
         ],
       },
       {

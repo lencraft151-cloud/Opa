@@ -17,6 +17,7 @@ import { DEFAULT_APPEARANCE, DEFAULT_PRESENCE } from '../src/core/types.ts';
 import { SonosClient } from '../src/services/sonos/client.ts';
 import {
   absoluteUrl,
+  cdudnFor,
   didlFor,
   groupOf,
   isZonePlayer,
@@ -260,7 +261,20 @@ const FAVORITES_DIDL =
   '<upnp:class>object.itemobject.item.sonos-favorite</upnp:class>' +
   '<upnp:albumArtURI>/getaa?u=x-sonos-spotify%3aabc&amp;v=1</upnp:albumArtURI>' +
   '<res protocolInfo="x-rincon-cpcontainer:*:*:*">x-rincon-cpcontainer:1006206cspotify%3aplaylist%3a37i9</res>' +
-  '<r:resMD>&lt;DIDL-Lite&gt;&lt;item id="0"&gt;&lt;dc:title&gt;Deep Focus&lt;/dc:title&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</r:resMD>' +
+  /*
+   * So sieht ein echtes `r:resMD` aus – mitsamt `<desc id="cdudn">`. Genau
+   * deshalb liefen Favoriten schon vorher: Sie bringen die vollständige
+   * Beschreibung mit. Die Radiosender taten es nicht.
+   */
+  '<r:resMD>&lt;DIDL-Lite xmlns:dc=&quot;http://purl.org/dc/elements/1.1/&quot; ' +
+  'xmlns:upnp=&quot;urn:schemas-upnp-org:metadata-1-0/upnp/&quot; ' +
+  'xmlns:r=&quot;urn:schemas-rinconnetworks-com:metadata-1-0/&quot; ' +
+  'xmlns=&quot;urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/&quot;&gt;' +
+  '&lt;container id=&quot;1006206cspotify%3aplaylist%3a37i9&quot; parentID=&quot;0&quot; ' +
+  'restricted=&quot;true&quot;&gt;&lt;dc:title&gt;Deep Focus&lt;/dc:title&gt;' +
+  '&lt;upnp:class&gt;object.container.playlistContainer&lt;/upnp:class&gt;' +
+  '&lt;desc id=&quot;cdudn&quot; nameSpace=&quot;urn:schemas-rinconnetworks-com:metadata-1-0/&quot;&gt;' +
+  'SA_RINCON2311_X_#Svc2311-0-Token&lt;/desc&gt;&lt;/container&gt;&lt;/DIDL-Lite&gt;</r:resMD>' +
   '</item></DIDL-Lite>';
 
 const BROWSE_RESULTS: Record<string, string> = {
@@ -318,6 +332,87 @@ describe('Listen lesen', () => {
 
   it('nennt die Warteschlange des Koordinators', () => {
     assert.equal(queueUri('RINCON_WOHN'), 'x-rincon-queue:RINCON_WOHN#0');
+  });
+
+  /*
+   * Der Fehler aus dem echten Haushalt.
+   *
+   * Radiosender ließen sich nicht abspielen: „Der Lautsprecher konnte mit der
+   * Angabe nichts anfangen" (UPnP 402), immer wieder. Ursache war die selbst
+   * gebaute Beschreibung – ihr fehlten drei Dinge, die Sonos verlangt.
+   */
+  it('beschreibt einen Behälter als Behälter, nicht als Stück', () => {
+    const [playlist] = parseBrowseItems(PLAYLISTS_DIDL);
+    const didl = didlFor(playlist!);
+    assert.match(didl, /<container /);
+    assert.equal(/<item /.test(didl), false, 'ein Behälter ist kein <item>');
+  });
+
+  it('nennt den Behälter, in dem der Eintrag steht', () => {
+    const [playlist] = parseBrowseItems(PLAYLISTS_DIDL);
+    assert.equal(playlist?.parentId, 'SQ:');
+    // Ein leerer parentID ist genau das, was Sonos mit 402 ablehnt.
+    assert.match(didlFor(playlist!), /parentID="SQ:"/);
+  });
+
+  it('setzt den cdudn-Marker – ohne ihn lehnt Sonos ab', () => {
+    const [sender] = parseBrowseItems(RADIO_DIDL);
+    const didl = didlFor(sender!);
+    assert.match(didl, /<desc id="cdudn"/);
+    assert.match(didl, /nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0\/"/);
+  });
+
+  it('unterscheidet TuneIn von eigenen Inhalten', () => {
+    // Sonos' eigene Radiosender laufen über TuneIn und haben einen anderen
+    // Marker als alles, was dem Haushalt selbst gehört.
+    assert.equal(cdudnFor('x-sonosapi-stream:s12345?sid=254'), 'SA_RINCON65031_');
+    assert.equal(cdudnFor('x-rincon-mp3radio://stream.example/live'), 'RINCON_AssociatedZPUDN');
+    assert.equal(cdudnFor(null), 'RINCON_AssociatedZPUDN');
+  });
+
+  it('gibt einem Radiosender die Klasse, die Sonos erwartet', () => {
+    const [sender] = parseBrowseItems(RADIO_DIDL);
+    assert.match(didlFor(sender!), /object\.item\.audioItem\.audioBroadcast/);
+  });
+
+  it('lässt eine fertige Beschreibung unangetastet', () => {
+    // Favoriten bringen ihre eigene mit – daran wird nichts gebastelt.
+    const [favorite] = parseBrowseItems(FAVORITES_DIDL);
+    assert.equal(didlFor(favorite!), favorite?.metadata);
+  });
+});
+
+describe('Fehlermeldungen des Lautsprechers', () => {
+  const fault = (code: string, description = ''): string =>
+    '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+    '<s:Fault><faultstring>UPnPError</faultstring><detail><UPnPError>' +
+    `<errorCode>${code}</errorCode>` +
+    (description ? `<errorDescription>${description}</errorDescription>` : '') +
+    '</UPnPError></detail></s:Fault></s:Body></s:Envelope>';
+
+  it('übersetzt bekannte Codes in Sätze', () => {
+    assert.match(parseUpnpError(fault('402'))?.message ?? '', /nichts anfangen/);
+    assert.match(parseUpnpError(fault('701'))?.message ?? '', /läuft nichts/);
+  });
+
+  it('bleibt bei einem unbekannten Code nicht stumm', () => {
+    /*
+     * Im Protokoll stand „WARN [http]" und sonst nichts – eine Meldung ohne
+     * Text. Grund: `errorDescription` ist nach dem Trimmen ein *leerer
+     * String*, kein `undefined`, und `??` greift darauf nicht.
+     */
+    const message = parseUpnpError(fault('714'))?.message ?? '';
+    assert.notEqual(message.trim(), '');
+  });
+
+  it('nennt den Code, wenn es keinen fertigen Satz gibt', () => {
+    const message = parseUpnpError(fault('9999'))?.message ?? '';
+    assert.match(message, /9999/);
+  });
+
+  it('lässt die Erklärung des Lautsprechers gelten, wenn er eine hat', () => {
+    const message = parseUpnpError(fault('9999', 'Zone nicht bereit'))?.message ?? '';
+    assert.equal(message, 'Zone nicht bereit');
   });
 });
 
@@ -389,6 +484,32 @@ interface FakeSonos {
   queue: Array<{ uri: string; metadata: string }>;
   /** Die zuletzt aufgelegte Quelle. */
   avUri: string | null;
+  /** Die Beschreibung, die dazu geschickt wurde. */
+  avMetadata: string | null;
+}
+
+/**
+ * Wie streng ein echter Sonos die Beschreibung nimmt.
+ *
+ * Das ist keine Erfindung für den Test, sondern der Grund, warum im echten
+ * Haushalt kein Radiosender lief: Eine leere Angabe nimmt der Lautsprecher an,
+ * eine *unvollständige* nicht. Fehlt der `cdudn`-Marker, ist der `parentID`
+ * leer, oder wird ein Behälter als `<item>` ausgegeben, antwortet er mit
+ * Fehler 402 – „Der Lautsprecher konnte mit der Angabe nichts anfangen".
+ */
+function acceptsMetadata(escaped: string): boolean {
+  if (!escaped.trim()) return true;
+  // `&amp;` zuletzt – sonst würde aus `&amp;lt;` fälschlich `<`.
+  const didl = escaped
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+  if (!/<desc[^>]+id="cdudn"/.test(didl)) return false;
+  if (/parentID=""/.test(didl)) return false;
+  if (/<upnp:class>object\.container/.test(didl) && !/<container/.test(didl)) return false;
+  return true;
 }
 
 interface FakeOptions {
@@ -414,6 +535,7 @@ async function startFakeSonos(options: FakeOptions = {}): Promise<FakeSonos> {
     zoneState: options.zoneState ?? ZONE_GROUP_STATE,
     queue: [],
     avUri: null,
+    avMetadata: null,
   };
 
   const description = DESCRIPTION.replace('RINCON_B8E93758A1E001400', uuid).replace(
@@ -434,6 +556,17 @@ async function startFakeSonos(options: FakeOptions = {}): Promise<FakeSonos> {
       state.actions.push(action);
       const xml = (inner: string): void => {
         res.writeHead(200, { 'content-type': 'text/xml' }).end(soapBody(inner));
+      };
+      /** So antwortet ein echter Sonos auf eine Angabe, die er ablehnt. */
+      const refuse = (code: number): void => {
+        res
+          .writeHead(500, { 'content-type': 'text/xml' })
+          .end(
+            soapBody(
+              '<s:Fault><faultstring>UPnPError</faultstring><detail><UPnPError>' +
+                `<errorCode>${code}</errorCode></UPnPError></detail></s:Fault>`,
+            ),
+          );
       };
 
       switch (action) {
@@ -492,21 +625,28 @@ async function startFakeSonos(options: FakeOptions = {}): Promise<FakeSonos> {
           );
           return;
         }
-        case 'AddURIToQueue':
+        case 'AddURIToQueue': {
+          const meta = body.match(/<EnqueuedURIMetaData>([\s\S]*?)<\/EnqueuedURIMetaData>/)?.[1] ?? '';
+          if (!acceptsMetadata(meta)) return refuse(402);
           state.queue.push({
             uri: body.match(/<EnqueuedURI>([^<]*)<\/EnqueuedURI>/)?.[1] ?? '',
-            metadata: body.match(/<EnqueuedURIMetaData>([\s\S]*?)<\/EnqueuedURIMetaData>/)?.[1] ?? '',
+            metadata: meta,
           });
           xml('<u:AddURIToQueueResponse><FirstTrackNumberEnqueued>1</FirstTrackNumberEnqueued></u:AddURIToQueueResponse>');
           return;
+        }
         case 'RemoveAllTracksFromQueue':
           state.queue = [];
           xml('<u:RemoveAllTracksFromQueueResponse/>');
           return;
-        case 'SetAVTransportURI':
+        case 'SetAVTransportURI': {
+          const meta = body.match(/<CurrentURIMetaData>([\s\S]*?)<\/CurrentURIMetaData>/)?.[1] ?? '';
+          if (!acceptsMetadata(meta)) return refuse(402);
           state.avUri = body.match(/<CurrentURI>([^<]*)<\/CurrentURI>/)?.[1] ?? null;
+          state.avMetadata = meta;
           xml('<u:SetAVTransportURIResponse/>');
           return;
+        }
         case 'SetMute':
           // Der Nachbau spielt hier den Fehlerfall durch.
           res

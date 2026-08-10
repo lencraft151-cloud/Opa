@@ -2813,3 +2813,21 @@ h2 .help:focus::after {
     box-shadow: var(--shadow);
   }
 }
+
+/*
+ * Der Abspiel-Pfeil in einer Playlist-Zeile.
+ *
+ * Bewusst kein Knopf: Die ganze Zeile *ist* der Knopf. Ein zweites
+ * anklickbares Element darin bedeutete zwei Klick-Ereignisse für einen
+ * Klick – und damit zwei Anfragen an den Lautsprecher.
+ */
+.play-hint {
+  color: var(--accent);
+  font-size: 0.95rem;
+  flex: none;
+  opacity: 0.55;
+}
+[data-library-item]:hover .play-hint,
+[data-library-item]:focus-visible .play-hint {
+  opacity: 1;
+}

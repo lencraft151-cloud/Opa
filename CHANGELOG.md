@@ -8,6 +8,43 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.12.2 – 2026-08-10
+
+**Radiosender ließen sich nicht abspielen.** Aus einem echten Haushalt
+gemeldet: „Der Lautsprecher konnte mit der Angabe nichts anfangen", immer
+wieder, bei jedem Sender. Drei Fehler, die zusammen genau dieses Bild
+ergaben.
+
+**Erstens: die Beschreibung war unvollständig.** Ein Eintrag, der keine
+eigene Beschreibung mitbringt – und das tun die Radiosender nicht –, bekam
+eine selbst gebaute. Ihr fehlten drei Dinge, die Sonos verlangt:
+
+- Der Marker **`<desc id="cdudn">`**, der sagt, wem die Quelle gehört. Für
+  Sonos' eigene Sender ist das TuneIn (`SA_RINCON65031_`), für alles andere
+  der eigene Haushalt. Ohne ihn: Fehler 402.
+- Ein gültiger **`parentID`**. Er stand leer – auch das lehnt Sonos ab.
+- Der richtige **Knotenname**: Eine Playlist ist ein `<container>`, kein
+  `<item>`. Als `<item>` beschrieben ist sie für den Lautsprecher etwas
+  anderes.
+
+Favoriten liefen deshalb schon vorher: Sie bringen ihre Beschreibung selbst
+mit. Genau das machte den Fehler so schwer zu sehen.
+
+**Zweitens: ein Klick löste mehrere Anfragen aus.** Die Dienste-Karte
+frischt sich alle fünf Sekunden auf. Änderte sich nichts, blieb der Baum
+stehen – aber die Knöpfe bekamen trotzdem jedes Mal einen weiteren Zuhörer.
+Nach zehn Takten wurden aus einem Klick elf Anfragen. Im Protokoll standen
+drei `/play` innerhalb von zwanzig Millisekunden. Jetzt wird nur verdrahtet,
+wenn auch wirklich neu gezeichnet wurde; dazu wartet ein zweiter Klick, bis
+der erste beantwortet ist, und die Zeile hat nur noch **ein** Klickziel
+statt einer Zeile mit einem Knopf darin.
+
+**Drittens: eine Fehlermeldung ohne Text.** Im Protokoll stand `WARN [http]`
+und dahinter nichts. Grund war ein `??`, das nicht griff: Die Erklärung des
+Lautsprechers ist nach dem Trimmen ein *leerer String*, kein `undefined`.
+Unbekannte Fehlercodes ergaben damit eine leere Meldung. Jetzt fällt der
+Hub auf einen Satz zurück – und nennt den Code, damit er nachschlagbar ist.
+
 ## 1.12.1 – 2026-08-10
 
 **Das Aktualisieren zog den falschen Zweig – und warf den Hub damit auf einen

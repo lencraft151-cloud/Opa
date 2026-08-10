@@ -178,7 +178,19 @@ function renderSonos(card) {
          </p>`
       : '';
 
-  paintCard(
+  /*
+   * Nur verdrahten, wenn wirklich neu gezeichnet wurde.
+   *
+   * `paintCard` lässt den Baum unangetastet, wenn sich nichts geändert hat –
+   * und genau dann hingen bisher trotzdem neue Zuhörer an denselben Knöpfen.
+   * Nach zehn Takten löste ein Klick elf Anfragen aus. Im Protokoll sah das
+   * so aus:
+   *
+   *   18:04:09.545 WARN [http] … /play
+   *   18:04:09.556 WARN [http] … /play
+   *   18:04:09.566 WARN [http] … /play
+   */
+  const gezeichnet = paintCard(
     card,
     `${head}
      ${grouped}
@@ -197,7 +209,7 @@ function renderSonos(card) {
      </details>`,
   );
 
-  wireSonos(card);
+  if (gezeichnet) wireSonos(card);
 }
 
 function playerCard(player) {
@@ -350,7 +362,7 @@ function libraryItem(item) {
         <div class="sub">${esc(item.subtitle ?? (item.container ? 'Liste' : 'Sender'))}</div>
       </div>
     </div>
-    <button class="small primary" type="button" tabindex="-1">▶</button>
+    <span class="play-hint" aria-hidden="true">▶</span>
   </div>`;
 }
 
@@ -369,21 +381,30 @@ async function loadLibrary() {
   }
 }
 
+/** Läuft gerade eine Abspielanfrage? Dann wartet der nächste Klick. */
+let playPending = false;
+
 async function playFromLibrary(itemId) {
   const playerId = music.libraryTarget ?? music.sonos?.players[0]?.id;
-  if (!playerId) return;
-  const state = await guard(
-    () =>
-      api(`/sonos/${playerId}/play`, {
-        method: 'POST',
-        body: { list: music.libraryTab, itemId },
-      }),
-    { success: 'Läuft.' },
-  );
-  if (!state) return;
-  const player = music.sonos?.players.find((entry) => entry.id === playerId);
-  if (player) player.state = state;
-  renderMusic();
+  if (!playerId || playPending) return;
+
+  playPending = true;
+  try {
+    const state = await guard(
+      () =>
+        api(`/sonos/${playerId}/play`, {
+          method: 'POST',
+          body: { list: music.libraryTab, itemId },
+        }),
+      { success: 'Läuft.' },
+    );
+    if (!state) return;
+    const player = music.sonos?.players.find((entry) => entry.id === playerId);
+    if (player) player.state = state;
+    renderMusic();
+  } finally {
+    playPending = false;
+  }
 }
 
 function wireSonos(card) {
@@ -494,8 +515,7 @@ function renderSpotify(card) {
   }
 
   if (!state.account?.connected) {
-    paintCard(card, spotifySetup(state));
-    wireSpotify(card);
+    if (paintCard(card, spotifySetup(state))) wireSpotify(card);
     return;
   }
 
@@ -512,7 +532,7 @@ function renderSpotify(card) {
     )
     .join('');
 
-  paintCard(
+  const spotifyGezeichnet = paintCard(
     card,
     `<div class="row between">
        <h2 style="margin:0">Spotify <span class="badge ok">verbunden</span> ${help(
@@ -583,7 +603,7 @@ function renderSpotify(card) {
      </details>`,
   );
 
-  wireSpotify(card);
+  if (spotifyGezeichnet) wireSpotify(card);
 }
 
 /**

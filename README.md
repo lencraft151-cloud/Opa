@@ -570,6 +570,21 @@ Adresse (`x-rincon-cpcontainer:` ist ein Behälter). Und seine Beschreibung aus
 `r:resMD` muss mitgeschickt werden, sonst weiß der Lautsprecher nicht, welcher
 Dienst gemeint ist, und lehnt ab.
 
+**Und was passiert, wenn ein Eintrag keine Beschreibung mitbringt?** Dann baut
+der Hub eine – und daran ist er zuerst gescheitert. Radiosender aus
+„Meine Radiosender" haben kein `r:resMD`, und die selbst gebaute Beschreibung
+war unvollständig. Sonos antwortete mit **Fehler 402**, „konnte mit der Angabe
+nichts anfangen". Drei Dinge müssen darin stehen:
+
+| | |
+| --- | --- |
+| `<desc id="cdudn">` | Wem die Quelle gehört. `SA_RINCON65031_` für Sonos' eigene Sender (TuneIn), `RINCON_AssociatedZPUDN` für alles aus dem Haushalt |
+| `parentID` | Der Behälter, in dem der Eintrag steht. Leer ist keine gültige Angabe |
+| Knotenname | `<container>` für eine Playlist, `<item>` für ein einzelnes Stück |
+
+Favoriten liefen deshalb schon vorher – sie bringen alles drei selbst mit.
+Genau das machte den Fehler schwer zu sehen.
+
 Der ganze Vorgang gehört dem **Koordinator** der Gruppe: Er führt die
 Warteschlange. Ginge er an ein Mitglied, gäbe es UPnP-Fehler 701 – oder,
 schlimmer, eine zweite Warteschlange, die niemand hört.
