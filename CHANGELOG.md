@@ -8,6 +8,34 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.8.0 – 2026-08-09
+
+**Ein Wiki im Hub.** Zwölf Artikel, durchsuchbar, mit Verweisen aus der
+Oberfläche heraus: Erste Schritte, Geräte verbinden, je ein Artikel zu Hue,
+Shelly, FRITZ!Box und Homematic, dazu Dienste, Räume und Szenen,
+Automationen, Auswertung, Sicherung – und „Wenn etwas klemmt".
+
+Warum die Erklärungen *im* Programm stehen und nicht in einer Datei daneben:
+Wer vor einem Kasten steht, in dem „Anmeldung abgelehnt" steht, schlägt nicht
+in einer README nach. Er sucht dort, wo er gerade ist. Deshalb führen aus den
+Ansichten heraus Verweise direkt in den passenden Artikel – ein Klick, kein
+Satz „siehe Dokumentation".
+
+**„Dienste" hat jetzt Unterreiter:** Sonos, Spotify, Nextcloud – und
+FRITZ!Box, sobald eine verbunden ist. Vorher standen alle Karten untereinander
+auf einer langen Seite; jetzt sieht man eine Sache auf einmal.
+
+**Der FRITZ!Box-Reiter zeigt, was die Box tut.** Verbindungszustand mit
+„Verbindung prüfen" und „Geräte neu einlesen", darunter alle Geräte, die per
+DECT an ihr hängen – mit voller Steuerung, zusammen an einem Ort statt
+verstreut zwischen Hue und Shelly. Ganz unten die Oberfläche der Box selbst.
+
+**Erklärungen und Hinweise beim Überfahren.** Jede Karte hat einen Satz, der
+sagt, worum es geht, und an den erklärungsbedürftigen Stellen sitzt ein
+Fragezeichen mit dem Rest. Es reagiert auf Maus *und* Tastatur – der
+Browser-Tooltip lässt eine Sekunde verstreichen und ist ohne Maus gar nicht
+erreichbar; wer unsicher ist, hat da schon weitergeklickt.
+
 ## 1.7.1 – 2026-08-09
 
 **Sonos wird jetzt überall gesucht.** „Netzwerk durchsuchen" kannte bisher nur

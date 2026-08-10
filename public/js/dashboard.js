@@ -3,7 +3,15 @@
 import { api, errorBanner, guard, toast } from './api.js';
 import { ACCENT_PRESETS, applyAppearance, FONT_SCALES, THEMES } from './appearance.js';
 import { barList, gauge, lineChart } from './charts.js';
-import { bindDeviceControls, deviceCard, emptyState, skeletonGrid, tile } from './components.js';
+import {
+  bindDeviceControls,
+  cardHead,
+  deviceCard,
+  emptyState,
+  help,
+  skeletonGrid,
+  tile,
+} from './components.js';
 import {
   CAPABILITY_LABEL,
   changelogHtml,
@@ -16,6 +24,7 @@ import {
 import { bindManualForm, manualForm, runDiscovery } from './integrations.js';
 import { loadMusic, renderMusic, startMusicTicker, stopMusicTicker } from './music.js';
 import { applyUpdate } from './selfupdate.js';
+import { renderWiki, setWikiArticle } from './wiki.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -146,7 +155,33 @@ const RENDERERS = {
   services: renderServices,
   automations: renderAutomations,
   settings: renderSettings,
+  wiki: renderWiki,
 };
+
+/**
+ * Aus einer Ansicht heraus ins Wiki springen.
+ *
+ * Der Weg „lies dort nach" ist nur dann einer, wenn er ein Klick ist. Steht
+ * er als Satz da („siehe Wiki"), sucht ihn niemand.
+ */
+/**
+ * Ein Verweis ins Wiki, der wie ein Verweis aussieht und einer ist.
+ *
+ * Absichtlich ein Knopf im Fließtext statt eines Satzes „siehe Wiki": Der
+ * Weg dorthin muss ein Klick sein, sonst geht ihn niemand.
+ */
+export function wikiLink(articleId, label = 'Mehr dazu im Wiki') {
+  return `<button class="wiki-jump" data-wiki="${esc(articleId)}"
+    title="Öffnet die Erklärung im Wiki">${esc(label)}</button>`;
+}
+
+export function showWiki(articleId) {
+  setWikiArticle(articleId);
+  renderPanel('wiki');
+  document.querySelectorAll('[data-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.tab === 'wiki');
+  });
+}
 
 /**
  * Welche Ansichten überhaupt von Gerätezuständen abhängen.
@@ -220,6 +255,17 @@ export function paint(element, html) {
  *   kam nur ein neuer Messwert herein. Ansichten ohne Gerätebezug bleiben
  *   dann unangetastet.
  */
+/**
+ * Verweise ins Wiki funktionieren überall gleich – deshalb einmal zentral
+ * statt in jeder Ansicht neu.
+ */
+document.addEventListener('click', (event) => {
+  const jump = event.target.closest?.('[data-wiki]');
+  if (!jump) return;
+  event.preventDefault();
+  showWiki(jump.dataset.wiki);
+});
+
 export function renderCurrent(options = {}) {
   if (options.reason === 'devices' && !DEVICE_DEPENDENT.has(current)) return;
   const panel = $(`#panel-${current}`);
@@ -649,7 +695,13 @@ function renderRooms() {
     </section>`);
   }
 
-  if (!paint(panel, groups.join(''))) return;
+  const intro = `<p class="intro">
+      Jeder Raum zeigt seine Geräte, dazu Temperatur, Feuchte und Leistung.
+      Mit den Knöpfen oben rechts schaltest du alles darin auf einmal.
+      ${wikiLink('raeume', 'Was bringen Räume?')}
+    </p>`;
+
+  if (!paint(panel, intro + groups.join(''))) return;
   bindDeviceControls(panel, sendCommand, deviceById);
   restoreOpenSections(panel);
 
@@ -699,8 +751,10 @@ function renderDevices() {
 
   const html = `
     <p class="intro">
-      Alle eingebundenen Geräte an einem Ort – Hue, Shelly und Homematic nebeneinander,
-      neue Geräte genauso wie alte. Unter jedem Namen steht, was das Gerät kann.
+      Alle eingebundenen Geräte an einem Ort – Hue, Shelly, Homematic und FRITZ!Box
+      nebeneinander, neue Geräte genauso wie alte. Unter jedem Namen steht, was das
+      Gerät kann: schaltbar, dimmbar, Farbe, Rollladen, Heizung, Sensor.
+      ${wikiLink('geraete', 'Wie kommen Geräte hierher?')}
     </p>
     <div class="row">
       <input id="device-search" class="grow" placeholder="Geräte durchsuchen…"
@@ -792,7 +846,9 @@ async function renderScenes() {
   panel.innerHTML = `
     <p class="intro">
       Eine Szene merkt sich, wie dein Zuhause gerade ist – Licht, Farbe, Rollläden, Heizung.
-      Ein Tipp später steht alles wieder genauso.
+      Ein Tipp später steht alles wieder genauso. Du klickst dafür keine Kommandos
+      zusammen: Du stellst ein, wie du es magst, und drückst auf sichern.
+      ${wikiLink('raeume', 'Wie Szenen funktionieren')}
     </p>
 
     <div class="grid scenes">
@@ -1106,7 +1162,12 @@ const PERIODS = [
 async function renderInsights() {
   const panel = $('#panel-insights');
   if (!panel.querySelector('#panel-energy')) {
-    panel.innerHTML = '<div id="panel-energy"></div><div id="panel-history"></div>';
+    panel.innerHTML = `<p class="intro">
+        Was war? Links der Stromverbrauch mit Kosten, darunter die Messwertkurven.
+        Beide beantworten dieselbe Frage aus zwei Richtungen.
+        ${wikiLink('auswertung', 'Woher die Zahlen kommen')}
+      </p>
+      <div id="panel-energy"></div><div id="panel-history"></div>`;
   }
   await Promise.all([renderEnergy(), renderHistory()]);
 }
@@ -1364,7 +1425,7 @@ async function renderAutomations() {
     <p class="intro">
       Eine Automation macht etwas von allein: „Wenn es im Bad unter 19 °C fällt, schalte den
       Heizlüfter ein.“ Am schnellsten geht es mit einer der fertigen Vorlagen – die passenden
-      Geräte sind schon ausgewählt.
+      Geräte sind schon ausgewählt. ${wikiLink('automationen', 'Auslöser, Takte und Dauer erklärt')}
     </p>
 
     <div class="section-head"><h2>Fertige Vorlagen</h2>
@@ -1820,8 +1881,16 @@ async function renderSettings() {
   const updates = store.updates;
 
   panel.innerHTML = `
+    <p class="intro">
+      Hier stellst du ein, wie sich der Hub verhält: wie oft er nachsieht, was er kostet,
+      wie er aussieht – und hier verbindest du weitere Geräte.
+      ${wikiLink('start', 'Wo fange ich an?')}
+    </p>
+
     <div class="card">
-      <h2>Firmware-Updates</h2>
+      <h2>Firmware-Updates ${help(
+        'Der Hub prüft zweimal täglich, ob es für Bridges und Geräte neue Firmware gibt. Installiert wird nur auf Knopfdruck oder im gewählten Nachtfenster.',
+      )}</h2>
       <p class="muted small">
         Der Hub prüft zweimal täglich. Automatische Installation läuft nur im gewählten
         Zeitfenster – die Geräte starten dabei neu.
@@ -1863,7 +1932,9 @@ async function renderSettings() {
     </div>
 
     <div class="card">
-      <h2>Wie oft der Hub nachsieht</h2>
+      <h2>Wie oft der Hub nachsieht ${help(
+        'Kurz heißt: Was du am Lichtschalter machst, steht schneller auf dem Bildschirm. Lang heißt: weniger Last für Bridges und Batteriegeräte. Die Hue Bridge meldet ohnehin von selbst.',
+      )}</h2>
       <p class="muted small">
         In diesem Takt fragt der Hub alle Geräte nach ihrem Zustand. Kurz heißt: Was du
         am Lichtschalter oder von Hand am Rollladen machst, steht schneller auf dem
@@ -1886,7 +1957,9 @@ async function renderSettings() {
     </div>
 
     <div class="card">
-      <h2>Stromtarif</h2>
+      <h2>Stromtarif ${help(
+        'Grundlage der Kostenrechnung unter „Auswertung". Ohne Preis zeigt der Hub Kilowattstunden, aber keine Kosten.',
+      )}</h2>
       <form id="form-tariff" class="form">
         <div class="field-row">
           <label>Preis pro kWh
@@ -1908,7 +1981,9 @@ async function renderSettings() {
     ${fritzboxCard()}
 
     <div class="card">
-      <h2>Integrationen</h2>
+      <h2>Integrationen ${help(
+        'Eine Integration ist die Verbindung zu einem Hersteller – deine Hue Bridge, ein Shelly, die FRITZ!Box. Über sie kommen die Geräte in den Hub.',
+      )}</h2>
       <div class="row">
         <button class="ghost" id="btn-sync-all">Alle synchronisieren</button>
       </div>
@@ -1944,7 +2019,9 @@ async function renderSettings() {
     ${accountCard()}
 
     <div class="card">
-      <h2>Sicherung</h2>
+      <h2>Sicherung ${help(
+        'Räume, Namen, Zuordnungen, Szenen und Automationen als Datei – ohne Passwörter. Sie darf deshalb auf einem USB-Stick liegen.',
+      )}</h2>
       <p class="muted small">
         Räume, Geräte­namen, Automationen, Szenen und alle Einstellungen als Datei –
         für den Umzug auf neue Hardware oder als Rückweg, wenn etwas schiefgeht.
@@ -2022,11 +2099,223 @@ async function renderSettings() {
  * wohnte bis hierher in den Einstellungen und ist mit umgezogen – sie gehört
  * zu denselben Nachbarn.
  */
+/** Welcher Unterreiter der Dienste zuletzt offen war. */
+let serviceTab = 'sonos';
+
+/**
+ * Welche Unterreiter es gibt.
+ *
+ * Die FRITZ!Box erscheint nur, wenn eine verbunden ist – ein Reiter für ein
+ * Gerät, das niemand hat, ist eine leere Versprechung. Sonos und Spotify
+ * stehen dagegen immer da: Dort steht auch, *wie* man sie einrichtet.
+ */
+function serviceTabs() {
+  const boxes = (store.integrations ?? []).filter((entry) => entry.type === 'fritzbox');
+  return [
+    { id: 'sonos', label: 'Sonos', icon: '🔈' },
+    { id: 'spotify', label: 'Spotify', icon: '🎧' },
+    { id: 'nextcloud', label: 'Nextcloud', icon: '☁️' },
+    ...(boxes.length > 0
+      ? [{ id: 'fritzbox', label: 'FRITZ!Box', icon: '📶', badge: boxes.length > 1 ? String(boxes.length) : '' }]
+      : []),
+  ];
+}
+
 async function renderServices() {
-  renderMusic();
-  await Promise.all([loadMusic(), loadNextcloud()]);
-  renderMusic();
-  renderNextcloudCard();
+  const panel = $('#panel-services');
+  if (!panel) return;
+
+  const tabs = serviceTabs();
+  if (!tabs.some((tab) => tab.id === serviceTab)) serviceTab = 'sonos';
+
+  // Gerüst einmalig aufbauen; danach werden nur die Unterbereiche gefüllt.
+  if (!panel.querySelector('#service-tabs')) {
+    panel.innerHTML = `
+      <p class="intro">
+        Alles, was kein Gerät ist: Lautsprecher, Musik, Benachrichtigungen – und die
+        FRITZ!Box, sobald eine verbunden ist. Bei einer Lampe gibt es an und aus; hier
+        gibt es Titel, Konten und Meldungen. Deshalb stehen sie getrennt.
+      </p>
+      <div class="subtabs" id="service-tabs" role="tablist"></div>
+      <div id="service-body"></div>`;
+  }
+
+  const bar = panel.querySelector('#service-tabs');
+  const nextBar = tabs
+    .map(
+      (tab) =>
+        `<button role="tab" data-service-tab="${esc(tab.id)}" aria-selected="${tab.id === serviceTab}"
+           class="${tab.id === serviceTab ? 'active' : ''}">${tab.icon} ${esc(tab.label)}${
+             tab.badge ? `<span class="badge">${esc(tab.badge)}</span>` : ''
+           }</button>`,
+    )
+    .join('');
+
+  if (paint(bar, nextBar)) {
+    bar.querySelectorAll('[data-service-tab]').forEach((button) => {
+      button.addEventListener('click', () => {
+        serviceTab = button.dataset.serviceTab;
+        void renderServices();
+      });
+    });
+  }
+
+  const body = panel.querySelector('#service-body');
+  const wanted = `sub-${serviceTab}`;
+  if (!body.querySelector(`#${wanted}`)) {
+    body.innerHTML = `<div class="card" id="${wanted}"></div>`;
+  }
+
+  if (serviceTab === 'sonos' || serviceTab === 'spotify') {
+    await loadMusic();
+    renderMusic(serviceTab);
+  } else if (serviceTab === 'nextcloud') {
+    await loadNextcloud();
+    renderNextcloudCard();
+  } else {
+    await renderFritzboxPanel(body.querySelector('#sub-fritzbox'));
+  }
+}
+
+/**
+ * Der FRITZ!Box-Reiter: Zustand, ihre Geräte und ihre eigene Oberfläche.
+ *
+ * Warum die Geräte hier noch einmal auftauchen, obwohl sie auch unter
+ * „Geräte" stehen: Wer wissen will, ob die Box tut, was sie soll, will sie
+ * *zusammen* sehen – Steckdose, Heizkörperregler und Rollladen an derselben
+ * Box, mit dem Verbindungszustand darüber. Unter „Geräte" stehen sie
+ * zwischen Hue und Shelly, nach Räumen sortiert.
+ */
+async function renderFritzboxPanel(card) {
+  if (!card) return;
+
+  const boxes = (store.integrations ?? []).filter((entry) => entry.type === 'fritzbox');
+  const devices = store.devices.filter((device) => device.vendor === 'fritzbox');
+  const url = store.household?.fritzboxUrl ?? '';
+
+  const status = boxes
+    .map((box) => {
+      const ok = box.status === 'linked';
+      return `<div class="item">
+        <div>
+          <div class="title">${esc(box.name)} ${
+            ok
+              ? '<span class="badge ok">verbunden</span>'
+              : `<span class="badge error">${esc(box.status)}</span>`
+          }</div>
+          <div class="sub">${esc(box.config.host)}${
+            box.config.model ? ` · ${esc(box.config.model)}` : ''
+          } · ${esc(plural(box.deviceCount ?? 0, 'Gerät', 'Geräte'))}</div>
+          ${box.lastError ? `<div class="sub">${esc(box.lastError)}</div>` : ''}
+        </div>
+        <div class="row tight">
+          <button class="small" data-box-test="${esc(box.id)}"
+            title="Fragt die Box einmal ab und meldet, ob die Anmeldung noch steht.">Verbindung prüfen</button>
+          <button class="small" data-box-sync="${esc(box.id)}"
+            title="Liest die Geräteliste der Box neu ein – nach neuen DECT-Geräten.">Geräte neu einlesen</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  paint(
+    card,
+    `${cardHead(
+      'FRITZ!Box',
+      'Alles, was per DECT an der Box hängt: Schaltsteckdosen, Heizkörperregler, ' +
+        'Lampen und Rollläden. Darunter die Oberfläche der Box selbst.',
+      {
+        tip:
+          'Der Hub spricht die AHA-Schnittstelle der Box. Klemmt die Anmeldung, ' +
+          'liegt es fast immer am Benutzernamen oder an der fehlenden Berechtigung ' +
+          '„Smart-Home-Geräte und Automatisierung steuern".',
+      },
+    )}
+
+     <div class="list">${status}</div>
+
+     <h3>Geräte an dieser Box ${help(
+       'Dieselben Geräte stehen auch unter „Geräte" – dort nach Räumen sortiert, hier nach Herkunft.',
+     )}</h3>
+     <div class="grid" id="fritzbox-devices">${
+       devices.length
+         ? devices.map((device) => deviceCard(device)).join('')
+         : emptyState(
+             '🔌',
+             'An dieser Box hängt noch kein Gerät.',
+             'DECT-Geräte müssen zuerst an der Box angemeldet werden (Taste „Connect/DECT"). ' +
+               'Danach hilft „Geräte neu einlesen".',
+           )
+     }</div>
+
+     <hr class="divider" />
+     <h3>Oberfläche der Box ${help(
+       'Der direkte Weg in die Box – nützlich für alles, was der Hub nicht kann: WLAN, Telefonie, Anrufliste.',
+     )}</h3>
+     ${
+       url
+         ? `<div class="row tight" style="margin:.4rem 0">
+              <a class="linkbutton" href="${esc(url)}" target="_blank" rel="noreferrer noopener"
+                 title="Öffnet die Box in einem eigenen Fenster – das klappt immer.">
+                In neuem Fenster öffnen ↗
+              </a>
+              <span class="muted small">Adresse ändern: Einstellungen → FRITZ!Box-Oberfläche</span>
+            </div>
+            <div class="embed-frame">
+              <iframe src="${esc(url)}" title="FRITZ!Box" loading="lazy" referrerpolicy="no-referrer"></iframe>
+            </div>
+            <p class="muted small">
+              Bleibt der Rahmen leer, verbietet deine Box das Einbetten. Dann führt nur der
+              Knopf darüber zum Ziel – das ist eine Einstellung der Box, keine des Hubs.
+            </p>`
+         : `<p class="muted small">
+              Noch keine Adresse hinterlegt. Unter <b>Einstellungen → FRITZ!Box-Oberfläche</b>
+              eintragen (meist <code>http://fritz.box</code>), dann erscheint sie hier.
+            </p>`
+     }`,
+  ) && wireFritzboxPanel(card);
+}
+
+function wireFritzboxPanel(card) {
+  bindDeviceControls(card, sendCommand, deviceById);
+
+  card.querySelectorAll('[data-box-test]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      const result = await guard(() =>
+        api(`/integrations/${button.dataset.boxTest}/test`, { method: 'POST' }),
+      );
+      button.disabled = false;
+      if (!result) return;
+      toast(
+        result.status === 'linked' ? 'Die Box antwortet.' : `Zustand: ${result.status}`,
+        { kind: result.status === 'linked' ? 'success' : 'warn' },
+      );
+      store.integrations = await api('/integrations');
+      void renderServices();
+    });
+  });
+
+  card.querySelectorAll('[data-box-sync]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      button.textContent = 'Liest ein …';
+      const result = await guard(() =>
+        api(`/integrations/${button.dataset.boxSync}/sync`, { method: 'POST' }),
+      );
+      button.disabled = false;
+      button.textContent = 'Geräte neu einlesen';
+      if (!result) return;
+      toast(
+        `${plural(result.added ?? 0, 'neues Gerät', 'neue Geräte')}, ${
+          result.updated ?? 0
+        } aktualisiert.`,
+        { kind: 'success' },
+      );
+      await reloadDevices();
+      void renderServices();
+    });
+  });
 }
 
 /** Konto, Personen und angemeldete Geräte bedienen. */
@@ -2785,7 +3074,9 @@ function fritzboxCard() {
   const url = store.household?.fritzboxUrl ?? '';
 
   return `<div class="card" id="card-fritzbox">
-    <h2>FRITZ!Box-Oberfläche</h2>
+    <h2>FRITZ!Box-Oberfläche ${help(
+      'Der direkte Weg in die Box – für alles, was der Hub nicht kann: WLAN, Telefonie, Anrufliste. Die Ansicht erscheint auch unter Dienste → FRITZ!Box.',
+    )}</h2>
     <p class="muted small">
       Trage hier die Adresse deiner Box ein, dann kannst du sie direkt aus dem Hub heraus
       bedienen. Nützlich, solange die Smart-Home-Anbindung klemmt: In der Box-Oberfläche
@@ -3007,7 +3298,7 @@ function nextcloudNotificationItem(notification) {
  * Anfrage für eine Karte, die niemand offen hat.
  */
 export function refreshNextcloudCard() {
-  if (!$('#card-nextcloud')) return;
+  if (!$('#sub-nextcloud')) return;
   void loadNextcloud({ force: true });
 }
 
@@ -3020,7 +3311,7 @@ async function loadNextcloud({ force = false } = {}) {
 }
 
 function renderNextcloudCard() {
-  const card = $('#card-nextcloud');
+  const card = $('#sub-nextcloud');
   if (!card) return;
   card.innerHTML = nextcloudCard();
   wireNextcloud(card);

@@ -42,6 +42,7 @@ Geräte.
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
 | **Erneut verbinden** | Zugangsdaten erneuern oder den Knopf an der Hue Bridge noch einmal drücken – ohne Geräte, Räume, Szenen und Automationen zu verlieren |
+| **Wiki im Hub** | Zwölf durchsuchbare Artikel zu allem – Begriffe, Einrichtung je Hersteller, Automationen, Fehlersuche – mit Verweisen aus der Oberfläche heraus |
 | **Alles verbinden** | Ein Knopf übernimmt alle gefundenen Geräte, die kein Passwort brauchen – mit Bericht, was ging und was nicht |
 | **Sonos** | Lautsprecher im eigenen Netz finden und bedienen: Titel, Titelbild, Play/Pause/Weiter und Lautstärke – gruppenfest, ohne Konto |
 | **Spotify** | Was gerade läuft, samt Steuerung und Gerätewechsel; Anmeldung mit PKCE, ohne Client-Geheimnis |
@@ -465,6 +466,23 @@ erneuert, danach liest der Hub die Geräteliste neu ein; die Geräte werden übe
 ihre `externalId` wiedererkannt. Bei Hue heißt das: Knopf drücken, „Erneut
 verbinden“ wählen, fertig.
 
+### Wiki im Hub
+
+Ein eigener Reiter mit zwölf Artikeln: Erste Schritte, Geräte verbinden, je
+einer zu Hue, Shelly, FRITZ!Box und Homematic, dazu Dienste, Räume und Szenen,
+Automationen, Auswertung, Sicherung – und „Wenn etwas klemmt". Durchsuchbar
+über den ganzen Fließtext.
+
+Die Erklärungen stehen bewusst **im Programm** und nicht nur in dieser Datei:
+Wer vor einem Kasten steht, in dem „Anmeldung abgelehnt" steht, schlägt nicht
+in einer README nach – er sucht dort, wo er gerade ist. Aus den Ansichten
+heraus führen deshalb Verweise direkt in den passenden Artikel.
+
+Dazu trägt jede Karte einen Satz, der sagt, worum es geht, und an den
+erklärungsbedürftigen Stellen sitzt ein Fragezeichen mit dem Rest. Es reagiert
+auf Maus *und* Tastatur; der Browser-Tooltip allein wäre zu langsam und ohne
+Maus gar nicht erreichbar.
+
 ### Sonos und Spotify
 
 *Dienste → Sonos* sucht die Lautsprecher im eigenen Netz. Ein Konto braucht es
@@ -761,7 +779,7 @@ lässt der Hub nicht zu – häufiger wäre nur Last ohne Nutzen.
 ## Tests
 
 ```bash
-npm test        # 503 Tests, node:test
+npm test        # 514 Tests, node:test
 npm run typecheck   # prüft Quellen und Tests
 ```
 
@@ -819,6 +837,11 @@ Abgedeckt sind unter anderem:
   ihrer Anmeldeaufgabe selbst nennt (`fritz3000` statt leerer Kennung), und
   dass eine fehlende Smart-Home-Berechtigung beim Namen genannt wird statt als
   HTTP 403 durchgereicht
+- Wiki: dass es zu jedem Bereich einen Artikel gibt, dass die Suche über den
+  Fließtext findet und bei Unbekanntem ehrlich nichts zurückgibt, dass die
+  Auszeichnung kein HTML durchreicht – und dass die Stolpersteine, die wirklich
+  auftreten (Benutzername der Box, Smart-Home-Berechtigung, App-Passwort,
+  Premium, Sonos-Gruppen, `--network host`), tatsächlich erklärt werden
 - Sonos in der allgemeinen Suche: dass ein Lautsprecher als Treffer erscheint,
   ohne Passwort und ohne Knopfdruck übernommen werden kann, als „bereits
   verbunden" markiert wird – und einmal gezählt wird, auch wenn er unter zwei

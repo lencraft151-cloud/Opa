@@ -293,6 +293,10 @@ Schließt die Einrichtung ab. `400`, solange keine Integration verbunden ist.
 | --- | --- | --- |
 | `GET` | `/household` | Stammdaten |
 | `PATCH` | `/household` | `pollIntervalSeconds` (3–300, gilt sofort), `name`, `timezone`, `locale`, `pricePerKwh`, `currency`, `basePricePerMonth`, `autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`, `appearance`, `fritzboxUrl` |
+
+`fritzboxUrl` ist die Adresse der Box-Oberfläche (`http://fritz.box`). Sie wird
+in der Oberfläche unter *Dienste → FRITZ!Box* eingebettet angezeigt; leer heißt
+„nicht anzeigen". Erlaubt sind nur `http`- und `https`-Adressen.
 | `GET` | `/household/summary` | Kennzahlen fürs Dashboard inkl. gestörter Integrationen |
 | `GET` | `/household/tokens` | Tokens (ohne Hash) |
 | `POST` | `/household/tokens` | `{ "name": "Handy" }` → neues Token |

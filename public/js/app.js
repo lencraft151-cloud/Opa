@@ -36,6 +36,7 @@ const TABS = [
   { id: 'services', label: 'Dienste', icon: icons.music },
   { id: 'automations', label: 'Automationen', icon: icons.automation },
   { id: 'settings', label: 'Einstellungen', icon: icons.settings },
+  { id: 'wiki', label: 'Wiki', icon: icons.book },
 ];
 
 let activeTab = 'overview';

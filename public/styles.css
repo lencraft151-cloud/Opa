@@ -1953,6 +1953,250 @@ button.round {
 }
 
 /*
+ * Ein Verweis ins Wiki, mitten im Fließtext.
+ *
+ * Sieht aus wie ein Verweis, nicht wie ein Knopf – im Satz wäre ein Knopf
+ * ein Fremdkörper, und niemand liest über ihn hinweg.
+ */
+.wiki-jump {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  overflow: visible;
+}
+.wiki-jump::after {
+  content: ' →';
+  text-decoration: none;
+}
+.wiki-jump:hover {
+  background: none;
+  filter: brightness(1.15);
+}
+
+/* -------------------------------------------------------------------- Wiki */
+
+/*
+ * Zwei Spalten: links die Artikel, rechts der Text. Unter 900 px wird daraus
+ * eine Spalte – auf dem Handy ist eine Seitenleiste neben Fließtext nur
+ * verlorene Breite.
+ */
+.wiki {
+  display: grid;
+  grid-template-columns: minmax(13rem, 17rem) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+.wiki-nav {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.wiki-nav input {
+  width: 100%;
+}
+.wiki-nav nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.wiki-nav button {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-weight: 600;
+}
+.wiki-nav button:hover:not(.active) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.wiki-nav button.active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.wiki-article {
+  /* Lesbarkeit vor Ausnutzung: lange Zeilen ermüden. */
+  max-width: 46rem;
+}
+.wiki-summary {
+  font-size: 1.02rem;
+  color: var(--text);
+  border-left: 3px solid var(--accent);
+  padding-left: 0.8rem;
+  margin: 0 0 1.2rem;
+}
+.wiki-article section {
+  margin-bottom: 1.3rem;
+}
+.wiki-article h3 {
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+}
+.wiki-article p {
+  margin: 0 0 0.6rem;
+}
+
+@media (max-width: 900px) {
+  .wiki {
+    grid-template-columns: 1fr;
+  }
+  .wiki-nav {
+    position: static;
+  }
+  .wiki-nav nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .wiki-nav button {
+    border: 1px solid var(--border);
+  }
+}
+
+/* -------------------------------------------------------------- Erklärungen */
+
+/*
+ * Der Hilfe-Punkt und seine Sprechblase.
+ *
+ * Die Blase liegt absolut über allem (`z-index`) und bricht bewusst um: Eine
+ * Erklärung, die in eine Zeile gepresst wird, erklärt nichts. Sie erscheint
+ * beim Überfahren *und* bei Tastaturfokus – wer ohne Maus arbeitet, hat sonst
+ * gar keinen Zugang dazu.
+ */
+.help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15em;
+  height: 1.15em;
+  margin-left: 0.35em;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: 0.78em;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  position: relative;
+  vertical-align: middle;
+  user-select: none;
+}
+.help:hover,
+.help:focus {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.help::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  width: max-content;
+  max-width: min(22rem, 80vw);
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.14s var(--ease),
+    transform 0.14s var(--ease);
+  z-index: 60;
+}
+.help:hover::after,
+.help:focus::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+/* Am linken Rand würde die Blase sonst aus dem Bild laufen. */
+.card > .row .help::after,
+h2 .help::after {
+  left: 0;
+  transform: translateX(0) translateY(4px);
+}
+.card > .row .help:hover::after,
+.card > .row .help:focus::after,
+h2 .help:hover::after,
+h2 .help:focus::after {
+  transform: translateX(0) translateY(0);
+}
+
+.card-explain {
+  margin: 0.35rem 0 0.9rem;
+}
+
+/* --------------------------------------------------------- Unterreiter */
+
+/*
+ * Reiter innerhalb einer Ansicht.
+ *
+ * Sie sehen absichtlich anders aus als die Hauptreiter oben: kleiner, in
+ * einer Leiste mit Rand. Zwei gleich aussehende Reiterreihen übereinander
+ * wären eine Einladung, sich zu verklicken.
+ */
+.subtabs {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.3rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.subtabs::-webkit-scrollbar {
+  display: none;
+}
+.subtabs button {
+  border: 0;
+  background: transparent;
+  padding: 0.45rem 0.8rem;
+  border-radius: 7px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+}
+.subtabs button:hover:not(.active) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.subtabs button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.subtabs .badge {
+  margin-left: 0.4rem;
+}
+
+/*
  * Eingebettete fremde Oberfläche (FRITZ!Box).
  *
  * Feste Höhe statt „so hoch wie der Inhalt": Wie hoch der Inhalt ist, sagt

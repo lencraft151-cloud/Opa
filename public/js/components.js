@@ -18,6 +18,40 @@ export function tile({ value, label, trend, accent = false }) {
   </div>`;
 }
 
+/**
+ * Ein kleiner Hilfe-Punkt, der beim Überfahren erklärt, worum es geht.
+ *
+ * Drei Dinge, die er absichtlich anders macht als ein nacktes `title`:
+ *
+ * 1. **Er erscheint sofort.** Der Browser-Tooltip lässt eine Sekunde
+ *    verstreichen; wer unsicher ist, hat da schon weitergeklickt.
+ * 2. **Er geht mit der Tastatur.** `tabindex` und `:focus-visible` –
+ *    sonst wäre die Erklärung für alle unerreichbar, die keine Maus benutzen.
+ * 3. **Er ist auch für Vorleseprogramme da** (`role="note"` samt Beschriftung).
+ *
+ * Das `title` bleibt trotzdem stehen: auf Geräten ohne Mauszeiger ist es der
+ * einzige Weg, und doppelt hilft hier mehr als es stört.
+ */
+export function help(text, { label = 'Erklärung' } = {}) {
+  return `<span class="help" tabindex="0" role="note" title="${esc(text)}"
+     aria-label="${esc(label)}: ${esc(text)}" data-tip="${esc(text)}">?</span>`;
+}
+
+/**
+ * Überschrift mit Erklärung darunter – der Standardkopf einer Karte.
+ *
+ * Warum das ein eigener Baustein ist: Eine Karte ohne Satz darunter ist eine
+ * Karte, die man raten muss. Mit dem Baustein kostet die Erklärung eine
+ * Zeile, ohne ihn kostet sie Überwindung.
+ */
+export function cardHead(title, explanation, { tip = '', actions = '' } = {}) {
+  return `<div class="row between">
+      <h2 style="margin:0">${esc(title)}${tip ? ` ${help(tip)}` : ''}</h2>
+      ${actions ? `<div class="row tight">${actions}</div>` : ''}
+    </div>
+    ${explanation ? `<p class="muted small card-explain">${esc(explanation)}</p>` : ''}`;
+}
+
 export function emptyState(emoji, title, hint = '') {
   return `<div class="empty">
     <span class="emoji">${esc(emoji)}</span>

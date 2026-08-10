@@ -9,7 +9,7 @@
  */
 
 import { api, guard, showError, toast } from './api.js';
-import { emptyState } from './components.js';
+import { cardHead, emptyState, help } from './components.js';
 import { esc } from './format.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -82,22 +82,20 @@ export function stopMusicTicker() {
 // Zeichnen
 // ---------------------------------------------------------------------------
 
-export function renderMusic() {
-  const panel = $('#panel-services');
-  if (!panel) return;
+/**
+ * Zeichnet den offenen Unterreiter.
+ *
+ * Der Behälter kommt aus `dashboard.js` (dort liegt die Reiterleiste); hier
+ * wird nur gefüllt. Ohne Angabe wird gezeichnet, was gerade da ist – das
+ * braucht der Fünf-Sekunden-Takt, der nicht wissen muss, welcher Reiter offen
+ * ist.
+ */
+export function renderMusic(which) {
+  const sonos = $('#sub-sonos');
+  const spotify = $('#sub-spotify');
 
-  if (!panel.querySelector('#card-sonos')) {
-    panel.innerHTML = `
-      <p class="intro">
-        Dienste, die kein Gerät sind: Lautsprecher, Musik und Benachrichtigungen.
-      </p>
-      <div class="card" id="card-sonos"></div>
-      <div class="card" id="card-spotify"></div>
-      <div class="card" id="card-nextcloud"></div>`;
-  }
-
-  renderSonos(panel.querySelector('#card-sonos'));
-  renderSpotify(panel.querySelector('#card-spotify'));
+  if (sonos && which !== 'spotify') renderSonos(sonos);
+  if (spotify && which !== 'sonos') renderSpotify(spotify);
 }
 
 // ---------------------------------------------------------------------------
@@ -108,14 +106,20 @@ function renderSonos(card) {
   const state = music.sonos;
   const players = state?.players ?? [];
 
-  const head = `<div class="row between">
-      <h2 style="margin:0">Sonos</h2>
-      <div class="row tight">
-        <button class="small" id="btn-sonos-search" ${music.searching ? 'disabled' : ''}>
+  const head = cardHead(
+    'Sonos',
+    'Lautsprecher im eigenen Netz. Kein Konto, kein Passwort – der Hub spricht direkt ' +
+      'mit ihnen. Gefunden werden sie von allein; sonst hilft die Adresse von Hand.',
+    {
+      tip:
+        'Sind zwei Lautsprecher in der Sonos-App gruppiert, gelten Play und Pause für die ' +
+        'ganze Gruppe. Die Lautstärke bleibt bei jedem Lautsprecher einzeln.',
+      actions: `<button class="small" id="btn-sonos-search" ${music.searching ? 'disabled' : ''}
+          title="Sucht per SSDP im Netz und klopft notfalls Port 1400 ab.">
           ${music.searching ? 'Suche läuft …' : 'Lautsprecher suchen'}
-        </button>
-      </div>
-    </div>`;
+        </button>`,
+    },
+  );
 
   if (!state) {
     paintCard(card, `${head}<div class="list"><div class="item"><div>
@@ -210,7 +214,8 @@ function playerCard(player) {
                </button>
                <button class="small" data-cmd="next" title="Nächster Titel">⏭</button>
                <input type="range" class="volume" min="0" max="100" step="1"
-                      value="${state.volume ?? 0}" data-volume aria-label="Lautstärke" />
+                      value="${state.volume ?? 0}" data-volume aria-label="Lautstärke"
+                      title="Lautstärke dieses Lautsprechers – in einer Gruppe bleiben die anderen unberührt." />
                <span class="muted small volume-value">${state.volume ?? '–'}%</span>
              </div>`
       }
@@ -292,7 +297,10 @@ async function searchSonos(options = {}) {
 function renderSpotify(card) {
   const state = music.spotify;
   if (!state) {
-    paintCard(card, '<h2>Spotify</h2><div class="list"><div class="item"><div class="title skeleton-line"></div></div></div>');
+    paintCard(
+      card,
+      '<h2>Spotify</h2><div class="list"><div class="item"><div class="title skeleton-line"></div></div></div>',
+    );
     return;
   }
 
@@ -318,7 +326,9 @@ function renderSpotify(card) {
   paintCard(
     card,
     `<div class="row between">
-       <h2 style="margin:0">Spotify <span class="badge ok">verbunden</span></h2>
+       <h2 style="margin:0">Spotify <span class="badge ok">verbunden</span> ${help(
+         'Steuern (Play, Pause, Lautstärke) erlaubt Spotify nur mit Premium. Anzeigen, was läuft, geht auch ohne.',
+       )}</h2>
        <span class="muted small">${esc(state.account.displayName ?? state.account.clientId)}</span>
      </div>
 
