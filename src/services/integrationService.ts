@@ -11,8 +11,10 @@ import type {
 } from '../core/types.js';
 import { decryptJson, encryptJson } from '../util/crypto.js';
 import { createId, nowIso } from '../util/id.js';
+import { reachableHosts, scannableHosts } from '../util/net.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import type {
+  DiscoverOptions,
   AdapterDevice,
   DiscoveredIntegration,
   IntegrationContext,
@@ -32,6 +34,31 @@ export interface SyncResult {
   devices: Device[];
 }
 
+/**
+ * Was während einer laufenden Suche gemeldet wird.
+ *
+ * `progress` sagt, wer noch sucht – damit die Oberfläche zeigen kann, worauf
+ * gerade gewartet wird, statt nur „bitte warten".
+ */
+export type DiscoveryEvent =
+  | { kind: 'found'; entry: DiscoveredIntegration }
+  | { kind: 'progress'; pending: string[]; message: string }
+  | { kind: 'failed'; adapter: string; message: string }
+  | { kind: 'done'; count: number };
+
+/**
+ * Etwas, das mitsucht, ohne ein Adapter zu sein.
+ *
+ * Gebraucht für Sonos: Die Lautsprecher gehören in dieselbe Trefferliste,
+ * aber nicht in das Integrationsmodell – sie haben keine Zugangsdaten, keine
+ * Geräteliste im Sinne des Hubs und keinen Zustand, den man pollen müsste.
+ */
+export interface ExtraDiscoverer {
+  readonly type: string;
+  readonly displayName: string;
+  findAsCandidates(options: DiscoverOptions): Promise<DiscoveredIntegration[]>;
+}
+
 export interface AddIntegrationInput extends LinkRequest {
   type: IntegrationType;
   /** Gefundene Geräte direkt in Räume einsortieren (Hue liefert Räume mit). */
@@ -45,6 +72,8 @@ export class IntegrationService {
     private readonly rooms: RoomService,
     private readonly telemetry: TelemetryService,
     private readonly config: AppConfig,
+    /** Mitsucher außerhalb des Adaptermodells – siehe `ExtraDiscoverer`. */
+    private readonly extras: readonly ExtraDiscoverer[] = [],
   ) {}
 
   list(householdId: string): Integration[] {
@@ -68,43 +97,152 @@ export class IntegrationService {
     type?: IntegrationType,
     allowScan = false,
   ): Promise<DiscoveredIntegration[]> {
-    const adapters = type ? [this.registry.get(type)] : this.registry.list();
-    const options = {
-      timeoutMs: this.config.discoveryTimeoutMs,
-      allowCloud: this.config.allowCloudDiscovery,
-      allowScan,
-    };
-
-    const settled = await Promise.allSettled(
-      adapters.map(async (adapter) => adapter.discover(options)),
-    );
-
     const results: DiscoveredIntegration[] = [];
-    for (const [index, outcome] of settled.entries()) {
-      const adapter = adapters[index];
-      if (outcome.status === 'fulfilled') {
-        results.push(...outcome.value);
-      } else {
-        log.warn('Discovery fehlgeschlagen', {
-          adapter: adapter?.type,
-          error: errorMessage(outcome.reason),
-        });
-      }
-    }
+    await this.discoverStream(householdId, { type, allowScan }, (event) => {
+      if (event.kind === 'found') results.push(event.entry);
+    });
+    return results.sort((a, b) => Number(a.alreadyLinked) - Number(b.alreadyLinked));
+  }
 
-    // Bereits eingebundene Geräte markieren statt ausblenden – so sieht der
-    // Nutzer im Assistenten, dass die Bridge gefunden wurde.
+  /**
+   * Wie `discover`, meldet aber jeden Treffer sofort.
+   *
+   * Der Grund ist Wartezeit, die sich nicht wegoptimieren lässt: Eine
+   * mDNS-Suche muss die volle Zeit lauschen, wenn auf einen Diensttyp
+   * *niemand* antwortet – ein schlafender Batteriesensor darf sich auch spät
+   * noch melden. Fünf Sekunden vor einem leeren Kasten fühlen sich aber an wie
+   * ein Fehler, und genau so wurde es auch gemeldet: „dauert lange oder geht
+   * nicht".
+   *
+   * Also wird nicht schneller gesucht, sondern früher berichtet: Jeder
+   * Hersteller meldet, sobald er fertig ist, und was er gefunden hat, steht
+   * sofort auf dem Bildschirm.
+   */
+  async discoverStream(
+    householdId: string,
+    options: { type?: IntegrationType; allowScan?: boolean },
+    emit: (event: DiscoveryEvent) => void,
+  ): Promise<void> {
+    const allowScan = options.allowScan ?? false;
+    const adapters = options.type ? [this.registry.get(options.type)] : this.registry.list();
     const existing = this.list(householdId);
-    for (const entry of results) {
-      entry.alreadyLinked = existing.some(
+    const seen = new Set<string>();
+
+    const publish = (entry: DiscoveredIntegration): void => {
+      const key = `${entry.type}:${entry.host}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      // Bereits eingebundene Geräte markieren statt ausblenden – so sieht der
+      // Nutzer im Assistenten, dass die Bridge gefunden wurde. Ein Mitsucher
+      // darf das selbst schon festgestellt haben; seine Angabe bleibt stehen.
+      entry.alreadyLinked ||= existing.some(
         (integration) =>
           integration.type === entry.type &&
           (externalIdOf(integration) === entry.externalId ||
             (integration.config as { host?: string }).host === entry.host),
       );
+      emit({ kind: 'found', entry });
+    };
+
+    /*
+     * Beim gründlichen Suchen einmal feststellen, welche Adressen überhaupt
+     * belegt sind – und die Liste allen Herstellern geben.
+     *
+     * Vorher klopfte jeder Adapter das ganze Subnetz selbst mit einer
+     * HTTP-Anfrage ab: vier Hersteller × 254 Adressen, gemessene 54 Sekunden.
+     * Ein TCP-Verbindungsversuch ist um Größenordnungen billiger als eine
+     * HTTP-Anfrage mit Zeitüberschreitung, und danach bleiben statt 254
+     * Adressen die paar übrig, hinter denen wirklich ein Gerät steht.
+     */
+    let scanHosts: string[] | undefined;
+    if (allowScan) {
+      const started = Date.now();
+      const candidates = scannableHosts();
+      scanHosts = await reachableHosts(candidates);
+      log.info('Netz abgeklopft', {
+        geprüft: candidates.length,
+        belegt: scanHosts.length,
+        ms: Date.now() - started,
+      });
     }
 
-    return results.sort((a, b) => Number(a.alreadyLinked) - Number(b.alreadyLinked));
+    /*
+     * Beim gründlichen Suchen wird länger gehorcht.
+     *
+     * Eine Suchanfrage per Multicast ist ein einzelnes UDP-Paket – geht es
+     * verloren, schweigt das Gerät, und beim nächsten Versuch ist es plötzlich
+     * da. Wer „gründlich" wählt, hat sich für Genauigkeit statt Tempo
+     * entschieden; dann darf die Suche auch das Doppelte an Zeit bekommen.
+     */
+    const discoverOptions = {
+      timeoutMs: allowScan
+        ? Math.max(this.config.discoveryTimeoutMs * 2, 8000)
+        : this.config.discoveryTimeoutMs,
+      allowCloud: this.config.allowCloudDiscovery,
+      allowScan,
+      scanHosts,
+    };
+
+    // Mitsucher gehören in dieselbe Runde – gefiltert wie die Adapter auch.
+    const extras = options.type
+      ? this.extras.filter((extra) => extra.type === options.type)
+      : this.extras;
+
+    emit({
+      kind: 'progress',
+      pending: [...adapters.map((adapter) => adapter.type), ...extras.map((extra) => extra.type)],
+      message: allowScan
+        ? `${scanHosts?.length ?? 0} belegte Adressen im Netz – sie werden jetzt abgefragt.`
+        : 'Der Hub horcht ins Netz.',
+    });
+
+    // Jeder Hersteller meldet für sich, sobald er fertig ist.
+    const pending = new Set<string>([
+      ...adapters.map((adapter) => adapter.type),
+      ...extras.map((extra) => extra.type),
+    ]);
+
+    const finish = (type: string, displayName: string, started: number): void => {
+      pending.delete(type);
+      emit({
+        kind: 'progress',
+        pending: [...pending],
+        message: `${displayName}: fertig nach ${Math.round((Date.now() - started) / 100) / 10} s`,
+      });
+    };
+
+    const extraJobs = extras.map(async (extra) => {
+      const started = Date.now();
+      try {
+        for (const entry of await extra.findAsCandidates(discoverOptions)) publish(entry);
+      } catch (err) {
+        log.warn('Discovery fehlgeschlagen', { adapter: extra.type, error: errorMessage(err) });
+        emit({ kind: 'failed', adapter: extra.type, message: errorMessage(err) });
+      } finally {
+        finish(extra.type, extra.displayName, started);
+      }
+    });
+
+    await Promise.all([
+      ...extraJobs,
+      ...adapters.map(async (adapter) => {
+        const started = Date.now();
+        try {
+          for (const entry of await adapter.discover(discoverOptions)) publish(entry);
+        } catch (err) {
+          log.warn('Discovery fehlgeschlagen', {
+            adapter: adapter.type,
+            error: errorMessage(err),
+          });
+          emit({ kind: 'failed', adapter: adapter.type, message: errorMessage(err) });
+        } finally {
+          finish(adapter.type, adapter.displayName, started);
+        }
+      }),
+    ]);
+
+    emit({ kind: 'done', count: seen.size });
   }
 
   // -------------------------------------------------------------------------
@@ -147,6 +285,7 @@ export class IntegrationService {
       secretsEnc: result.secrets ? encryptJson(result.secrets, this.config.secretKey) : null,
       lastSeenAt: nowIso(),
       lastError: null,
+      updateInfo: null,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -155,6 +294,49 @@ export class IntegrationService {
 
     const sync = await this.sync(integration.id, input.importRooms ?? true);
     return { integration: this.get(integration.id), sync };
+  }
+
+  /**
+   * Erneut verbinden – mit neuen Zugangsdaten oder nach einem Knopfdruck an
+   * der Bridge.
+   *
+   * Der entscheidende Unterschied zum Entfernen und Neuanlegen: Die
+   * Integration behält ihre ID. Damit bleiben Geräte, Raumzuordnungen,
+   * Szenen und Automationen erhalten – sonst müsste man nach einem
+   * Passwortwechsel die halbe Wohnung neu einrichten.
+   */
+  async relink(
+    id: string,
+    input: { host?: string; username?: string; password?: string },
+  ): Promise<{ integration: Integration; sync: SyncResult }> {
+    const integration = this.get(id);
+    const adapter = this.registry.get(integration.type);
+    const host = input.host?.trim() || (integration.config as { host?: string }).host;
+    if (!host) throw badRequest('Es wurde keine Adresse angegeben');
+
+    const linkRequest: LinkRequest = { host, name: integration.name };
+    if (input.username !== undefined) linkRequest.username = input.username;
+    if (input.password !== undefined) linkRequest.password = input.password;
+
+    const result = await adapter.link(linkRequest);
+
+    const updated = await this.repos.integrations.patch(
+      id,
+      {
+        // Der Anzeigename bleibt: Er wurde vielleicht von Hand vergeben.
+        config: result.config,
+        secretsEnc: result.secrets ? encryptJson(result.secrets, this.config.secretKey) : null,
+        status: 'linked',
+        lastError: null,
+        lastSeenAt: nowIso(),
+      },
+      'Integration',
+    );
+    events.emit('integration.updated', { integration: updated });
+    log.info('Integration erneut verbunden', { name: updated.name, host });
+
+    const sync = await this.sync(id, false);
+    return { integration: this.get(id), sync };
   }
 
   async rename(id: string, name: string): Promise<Integration> {
@@ -263,9 +445,11 @@ export class IntegrationService {
           model: adapterDevice.model ?? null,
           firmware: adapterDevice.firmware ?? null,
           capabilities: adapterDevice.capabilities,
+          capabilityOverride: null,
           state: { ...adapterDevice.state, updatedAt: nowIso() },
           reachable: adapterDevice.reachable,
           hidden: false,
+          favorite: false,
           lastSeenAt: adapterDevice.reachable ? nowIso() : null,
           createdAt: nowIso(),
           updatedAt: nowIso(),
@@ -277,6 +461,11 @@ export class IntegrationService {
         continue;
       }
 
+      /*
+       * Die vom Gerät gemeldeten Fähigkeiten werden immer aktualisiert – ein
+       * Firmware-Update kann neue bringen. Eine Richtigstellung des Nutzers
+       * steht daneben und überlebt jeden Abgleich (siehe `effectiveDevice`).
+       */
       const patch: Partial<Device> = {
         capabilities: adapterDevice.capabilities,
         state: { ...current.state, ...adapterDevice.state, updatedAt: nowIso() },

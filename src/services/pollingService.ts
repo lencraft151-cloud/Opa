@@ -28,6 +28,8 @@ export class PollingService {
   private readonly unsubscribers = new Map<string, () => void>();
   private tickCount = 0;
   private running = false;
+  /** Takt, mit dem gerade gearbeitet wird – für `restart` und die Anzeige. */
+  private intervalSeconds = 0;
   private busy = false;
 
   constructor(
@@ -39,6 +41,20 @@ export class PollingService {
     private readonly config: AppConfig,
   ) {}
 
+  /**
+   * Übernimmt einen geänderten Takt, ohne den Rest anzuhalten.
+   *
+   * Ein `setInterval` lässt sich nicht umstellen; es muss neu gesetzt werden.
+   * Deshalb hier stoppen und starten – die Abonnements auf Push-Ereignisse
+   * werden dabei mit neu aufgebaut, was nach einer Änderung ohnehin richtig
+   * ist.
+   */
+  async applyInterval(householdId: string, seconds: number): Promise<void> {
+    if (!this.running || seconds === this.intervalSeconds) return;
+    await this.stop();
+    await this.start(householdId);
+  }
+
   isRunning(): boolean {
     return this.running;
   }
@@ -49,7 +65,16 @@ export class PollingService {
 
     await this.attachSubscriptions(householdId);
 
-    const intervalMs = this.config.pollIntervalSeconds * 1000;
+    /*
+     * Der Takt steht am Haushalt, nicht mehr nur in der Umgebung: Wer den
+     * Rollladen von Hand bewegt, will das schneller sehen; wer dreißig Lampen
+     * an einer Bridge hat, will sie nicht alle fünf Sekunden fragen. Fehlt
+     * die Angabe (alter Datenstand), gilt weiter die Umgebungsvariable.
+     */
+    const household = this.repos.households.find(householdId);
+    const seconds = household?.pollIntervalSeconds ?? this.config.pollIntervalSeconds;
+    this.intervalSeconds = seconds;
+    const intervalMs = seconds * 1000;
     this.timer = setInterval(() => {
       void this.tick(householdId);
     }, intervalMs);
@@ -68,7 +93,7 @@ export class PollingService {
     }, PRUNE_INTERVAL_MS);
     this.pruneTimer.unref?.();
 
-    log.info('Geräteabfrage gestartet', { intervalSeconds: this.config.pollIntervalSeconds });
+    log.info('Geräteabfrage gestartet', { intervalSeconds: seconds });
 
     // Erster Durchlauf sofort, damit das Dashboard nicht leer startet.
     void this.tick(householdId);

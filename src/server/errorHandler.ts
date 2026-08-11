@@ -25,13 +25,7 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     } else {
       log.debug(err.message, { path: req.path, code: err.code });
     }
-    res.status(err.status).json({
-      error: {
-        code: err.code,
-        message: err.message,
-        ...(err.details !== undefined ? { details: err.details } : {}),
-      },
-    });
+    res.status(err.status).json({ error: err.toJSON() });
     return;
   }
 
@@ -39,9 +33,10 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     res.status(400).json({
       error: {
         code: 'bad_request',
-        message: 'Die übergebenen Daten sind ungültig',
+        message: describeIssues(err),
+        hint: 'Korrigiere die unten genannten Felder und sende die Anfrage erneut.',
         details: err.issues.map((issue) => ({
-          path: issue.path.join('.'),
+          path: issue.path.join('.') || '(root)',
           message: issue.message,
         })),
       },
@@ -51,7 +46,11 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
 
   if (err instanceof SyntaxError && 'body' in err) {
     res.status(400).json({
-      error: { code: 'bad_request', message: 'Der Request-Body ist kein gültiges JSON' },
+      error: {
+        code: 'bad_request',
+        message: 'Der gesendete Inhalt ist kein gültiges JSON.',
+        hint: 'Prüfe Anführungszeichen und Kommas – häufig fehlt eine schließende Klammer.',
+      },
     });
     return;
   }
@@ -59,9 +58,23 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   const error = err as Error;
   log.error('Unerwarteter Fehler', { path: req.path, error: error.message, stack: error.stack });
   res.status(500).json({
-    error: { code: 'internal_error', message: 'Interner Fehler im Hub' },
+    error: {
+      code: 'internal_error',
+      message: 'Im Hub ist ein unerwarteter Fehler aufgetreten.',
+      hint: 'Das Server-Log enthält die Einzelheiten. Bitte melde den Vorgang mit Zeitstempel.',
+    },
   });
 };
+
+/** Baut aus Zod-Fehlern einen Satz, den man auch ohne Details versteht. */
+function describeIssues(error: ZodError): string {
+  const fields = [
+    ...new Set(error.issues.map((issue) => issue.path.join('.')).filter((path) => path.length > 0)),
+  ];
+  if (fields.length === 0) return 'Die übergebenen Daten sind ungültig.';
+  if (fields.length === 1) return `Das Feld "${fields[0]}" ist ungültig.`;
+  return `Diese Felder sind ungültig: ${fields.join(', ')}.`;
+}
 
 /** Wandelt beliebige Fehler in AppError um (für Aufrufe außerhalb von Express). */
 export function toAppError(err: unknown): AppError {

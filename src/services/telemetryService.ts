@@ -26,6 +26,9 @@ const SIGNIFICANT_CHANGE: Record<Metric, number> = {
   energyWh: 10,
   batteryPercent: 2,
   brightness: 10,
+  // Solltemperatur ändert sich in Stufen von 0,5 °C.
+  targetTemperatureC: 0.4,
+  valvePosition: 5,
 };
 
 /** Auch ohne Änderung wird spätestens nach dieser Zeit ein Wert geschrieben. */

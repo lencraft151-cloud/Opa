@@ -5,14 +5,22 @@ import { createLogger } from '../core/logger.js';
 import type { Container } from '../container.js';
 import { createAuthMiddleware } from './auth.js';
 import { errorHandler, notFoundHandler } from './errorHandler.js';
+import { authRoutes } from './routes/auth.js';
 import { automationRoutes } from './routes/automations.js';
 import { deviceRoutes } from './routes/devices.js';
+import { energyRoutes } from './routes/energy.js';
 import { householdRoutes } from './routes/household.js';
 import { integrationRoutes } from './routes/integrations.js';
+import { musicRoutes } from './routes/music.js';
+import { activityRoutes } from './routes/activity.js';
+import { effectRoutes } from './routes/effects.js';
+import { nextcloudRoutes } from './routes/nextcloud.js';
 import { roomRoutes } from './routes/rooms.js';
+import { sceneRoutes } from './routes/scenes.js';
 import { setupRoutes } from './routes/setup.js';
 import { systemRoutes } from './routes/system.js';
 import { telemetryRoutes } from './routes/telemetry.js';
+import { updateRoutes } from './routes/updates.js';
 
 const log = createLogger('http');
 
@@ -26,7 +34,23 @@ export function createApp(container: Container): express.Express {
   const app = express();
 
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '256kb' }));
+
+  /*
+   * Zwei Größenbeschränkungen statt einer.
+   *
+   * Für alles Normale reichen 256 kB mit weitem Abstand; eine großzügigere
+   * Grenze wäre nur eine Einladung, den Hub mit einer einzigen Anfrage
+   * lahmzulegen. Eine zurückgespielte Sicherung ist die eine Ausnahme: Ein
+   * Haushalt mit ein paar hundert Geräten und deren Zuständen kommt schnell
+   * über ein Megabyte.
+   */
+  const RESTORE_PATH = '/api/system/restore';
+  const normalBody = express.json({ limit: '256kb' });
+  const restoreBody = express.json({ limit: '16mb' });
+  app.use((req, res, next) => {
+    if (req.path === RESTORE_PATH) return restoreBody(req, res, next);
+    return normalBody(req, res, next);
+  });
 
   app.use((req, res, next) => {
     const startedAt = Date.now();
@@ -44,6 +68,7 @@ export function createApp(container: Container): express.Express {
   const api = express.Router();
   api.use(createAuthMiddleware(container));
   api.use(systemRoutes(container));
+  api.use(authRoutes(container));
   api.use(setupRoutes(container));
   api.use(householdRoutes(container));
   api.use(roomRoutes(container));
@@ -51,6 +76,13 @@ export function createApp(container: Container): express.Express {
   api.use(deviceRoutes(container));
   api.use(telemetryRoutes(container));
   api.use(automationRoutes(container));
+  api.use(energyRoutes(container));
+  api.use(updateRoutes(container));
+  api.use(sceneRoutes(container));
+  api.use(nextcloudRoutes(container));
+  api.use(musicRoutes(container));
+  api.use(activityRoutes(container));
+  api.use(effectRoutes(container));
   app.use('/api', api);
 
   app.use(express.static(PUBLIC_DIR, { index: 'index.html', maxAge: '1h' }));

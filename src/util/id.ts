@@ -9,9 +9,13 @@ export function createUuid(): string {
   return randomUUID();
 }
 
-/** Zufälliges Zugriffstoken für die API. */
-export function createToken(): string {
-  return `sh_${randomBytes(32).toString('base64url')}`;
+/**
+ * Zufälliger Schlüssel. `sh_` für Zugriffstoken (Skripte), `ss_` für
+ * Sitzungen (angemeldete Browser) – am Präfix ist sofort erkennbar, was man
+ * vor sich hat, etwa in einem Logauszug.
+ */
+export function createToken(prefix: 'sh' | 'ss' = 'sh'): string {
+  return `${prefix}_${randomBytes(32).toString('base64url')}`;
 }
 
 /** Deterministische, stabile ID aus Integrations-ID und externer Geräte-ID. */

@@ -207,8 +207,24 @@ describe('Kommandos für die Hue Bridge', () => {
     assert.equal(result.optimistic.hue, 120);
   });
 
-  it('lehnt Positionierung für Leuchten ab', () => {
-    assert.throws(() => buildLightUpdate({ type: 'setPosition', position: 50 }, {}), /Positionierung/);
+  it('lehnt Rollladen-Kommandos für Leuchten mit einem Hinweis ab', () => {
+    for (const command of [
+      { type: 'setPosition', position: 50 },
+      { type: 'openCover' },
+      { type: 'closeCover' },
+      { type: 'stopCover' },
+      { type: 'setTilt', tilt: 40 },
+    ] as const) {
+      assert.throws(
+        () => buildLightUpdate(command, {}),
+        (err: Error) => {
+          assert.match(err.message, /Rollladen/);
+          assert.match((err as { hint?: string }).hint ?? '', /cover/);
+          return true;
+        },
+        `Kommando ${command.type}`,
+      );
+    }
   });
 });
 

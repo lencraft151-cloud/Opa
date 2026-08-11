@@ -1,9 +1,11 @@
 import { badRequest } from '../core/errors.js';
-import type { Household, SetupStep } from '../core/types.js';
+import type { Household, Session, SetupStep } from '../core/types.js';
 import type { Repositories } from '../storage/repositories.js';
 import type { DeviceService } from './deviceService.js';
 import type { HouseholdService, CreateHouseholdInput } from './householdService.js';
 import type { RoomService } from './roomService.js';
+import { normalizeUsername, type PublicUser, type UserService } from './userService.js';
+import { assertUsablePassword } from '../util/password.js';
 
 export interface SetupStepInfo {
   id: SetupStep;
@@ -33,7 +35,8 @@ const STEP_DEFINITIONS: Array<{ id: SetupStep; title: string; description: strin
   {
     id: 'household',
     title: 'Haushalt anlegen',
-    description: 'Name und Zeitzone festlegen. Danach gibt es ein Zugriffstoken für die API.',
+    description:
+      'Name, Zeitzone und dein Zugang: Anmeldename und Passwort, mit denen du dich künftig anmeldest.',
   },
   {
     id: 'integrations',
@@ -50,6 +53,13 @@ const STEP_DEFINITIONS: Array<{ id: SetupStep; title: string; description: strin
     id: 'assign',
     title: 'Geräte zuordnen',
     description: 'Jedes Gerät einem Raum zuweisen. Hue-Räume werden automatisch übernommen.',
+  },
+  {
+    id: 'groups',
+    title: 'Nach Gruppen sortieren',
+    description:
+      'Alle Lichter, alle Rollläden, alle Heizungen auf einen Blick – und mit einem Griff ' +
+      'einem Raum zuweisen oder ausblenden, was du nicht brauchst.',
   },
   {
     id: 'done',
@@ -69,6 +79,7 @@ export class SetupService {
     private readonly households: HouseholdService,
     private readonly rooms: RoomService,
     private readonly devices: DeviceService,
+    private readonly users: UserService,
   ) {}
 
   state(): SetupState {
@@ -109,6 +120,12 @@ export class SetupService {
       integrations: integrations.length > 0,
       rooms: rooms.length > 0,
       assign: devices.length > 0 && unassigned.length === 0,
+      /*
+       * Dieser Schritt ist ein Angebot, keine Pflicht: Wer schon beim
+       * Zuordnen fertig geworden ist, hat hier nichts mehr zu tun. Er gilt
+       * deshalb als erledigt, sobald kein Gerät mehr ohne Raum ist.
+       */
+      groups: devices.length > 0 && unassigned.length === 0,
       done: household.setupCompletedAt !== null,
     };
 
@@ -147,11 +164,70 @@ export class SetupService {
     };
   }
 
+  /**
+   * Legt Haushalt und erstes Benutzerkonto in einem Schritt an.
+   *
+   * Beides gehört zusammen: Ein Haushalt ohne Konto wäre für niemanden
+   * erreichbar, und ein Konto ohne Haushalt hätte nichts zu verwalten. Der
+   * erste Benutzer ist immer Administrator.
+   */
   async createHousehold(
-    input: CreateHouseholdInput,
-  ): Promise<{ household: Household; token: string; state: SetupState }> {
-    const { household, token } = await this.households.create(input);
-    return { household, token, state: this.state() };
+    input: CreateHouseholdInput & { username: string; password: string; displayName?: string },
+  ): Promise<{
+    household: Household;
+    user: PublicUser;
+    sessionToken: string;
+    session: Session;
+    state: SetupState;
+  }> {
+    /*
+     * Zuerst prüfen, dann anlegen.
+     *
+     * Andersherum ging es schief, und zwar endgültig: Der Haushalt entstand,
+     * das Passwort wurde danach abgelehnt („enthält den Anmeldenamen"), und
+     * zurück blieb ein Haushalt ohne einen einzigen Zugang. Ab da griff die
+     * Anmeldepflicht – aber es gab niemanden, der sich hätte anmelden können.
+     * Der Hub war zugesperrt, und der Schlüssel lag drinnen.
+     */
+    const username = normalizeUsername(input.username);
+    assertUsablePassword(input.password, username);
+
+    /*
+     * Ein Haushalt ohne Zugang ist keine abgeschlossene Einrichtung, sondern
+     * ein Abbruch. Der nächste Versuch übernimmt ihn, statt an „es existiert
+     * bereits ein Haushalt" zu scheitern – sonst bliebe ein so entstandener
+     * Stand für immer unbenutzbar.
+     */
+    const existing = this.households.current();
+    const adopt = existing !== undefined && this.users.count(existing.id) === 0;
+    const household = adopt ? await this.households.update(input) : await this.households.create(input);
+
+    let user: PublicUser;
+    try {
+      user = await this.users.create(household.id, {
+        username,
+        password: input.password,
+        displayName: input.displayName,
+        role: 'admin',
+      });
+    } catch (err) {
+      // Gürtel und Hosenträger: Sollte das Anlegen doch scheitern, bleibt
+      // kein halber Haushalt zurück, den niemand mehr betreten kann.
+      if (!adopt) await this.households.remove(household.id);
+      throw err;
+    }
+
+    // Direkt angemeldet weitermachen – ein zweites Formular an dieser Stelle
+    // wäre nur eine Hürde.
+    const login = await this.users.login(household.id, username, input.password);
+
+    return {
+      household,
+      user,
+      sessionToken: login.token,
+      session: login.session,
+      state: this.state(),
+    };
   }
 
   async goToStep(step: SetupStep): Promise<SetupState> {

@@ -2,26 +2,98 @@
 
 Basis-URL: `http://<host>:8080/api`
 
-## Authentifizierung
+## Anmeldung
 
-Alle Endpunkte außer `/health`, `/system/info` und `/setup/state` verlangen ein
+Zwei Wege führen herein.
+
+**Menschen** melden sich mit Name und Passwort an; das Ergebnis ist eine
+Sitzung, die als `HttpOnly`-Cookie (`sh_session`) zurückkommt und bei jedem
+weiteren Aufruf automatisch mitreist.
+
+```bash
+curl -c cookies.txt -X POST localhost:8080/api/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"username":"anna","password":"drei zufaellige woerter"}'
+
+curl -b cookies.txt localhost:8080/api/devices
+```
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `POST` | `/auth/login` | `{ username, password }` → setzt das Sitzungs-Cookie |
+| `POST` | `/auth/logout` | Beendet die eigene Sitzung |
+| `GET` | `/auth/me` | Wer angemeldet ist (`{ user: null }`, wenn niemand) – ohne Anmeldung erreichbar |
+| `POST` | `/auth/password` | `{ currentPassword, newPassword }`; meldet alle anderen Geräte ab |
+| `GET` | `/auth/sessions` | Angemeldete Geräte, `current` markiert das eigene |
+| `DELETE` | `/auth/sessions/:id` | Ein Gerät abmelden |
+| `POST` | `/auth/sessions/end-others` | Alle außer dem eigenen abmelden |
+| `GET` | `/auth/users` | Personen im Haushalt |
+| `POST` | `/auth/users` | Person anlegen (nur Administratoren) |
+| `PATCH` | `/auth/users/:id` | `displayName`, `role` (nur Administratoren) |
+| `POST` | `/auth/users/:id/password` | Passwort zurücksetzen (nur Administratoren) |
+| `DELETE` | `/auth/users/:id` | Person entfernen (nur Administratoren) |
+
+Regeln, die der Hub durchsetzt:
+
+- Anmeldenamen sind klein geschrieben und eindeutig; erlaubt sind Buchstaben,
+  Ziffern, Punkt, Bindestrich und Unterstrich.
+- Passwörter brauchen mindestens 10 Zeichen, dürfen nicht auf der Liste der
+  meistgenutzten stehen und nicht im Kern der Anmeldename sein. Geprüft wird
+  der Name als Baustein – am Anfang, am Ende, bei Namen ab vier Zeichen auch
+  mittendrin. Eine zufällige Buchstabenfolge zählt nicht: „Winterabend-77"
+  ist für „ben" erlaubt.
+- Nach fünf Fehlversuchen ist das Konto 15 Minuten gesperrt. Ob Name oder
+  Passwort falsch war, sagt die Antwort nicht.
+- Der letzte Administrator lässt sich weder löschen noch herabstufen.
+- Ein **Zugriffstoken** (siehe unten) gehört einem Programm, nicht einer
+  Person. Es hat keine Rolle und reicht für `/auth/users` nicht.
+
+---
+
+## Authentifizierung für Programme
+
+Skripte und andere Programme, die sich nicht anmelden können, nehmen ein
 Zugriffstoken:
 
 ```
 Authorization: Bearer sh_…
 ```
 
-Alternativ `X-Access-Token: sh_…` oder – nur für `EventSource`, das keine Header
-setzen kann – `?access_token=sh_…`.
+Alternativ `X-Access-Token: sh_…` oder `?access_token=sh_…`.
 
-Solange noch kein Haushalt existiert, ist die API offen. Das erste Token entsteht
-beim Anlegen des Haushalts und wird **einmalig** zurückgegeben.
+Token werden unter **Einstellungen → Zugänge für Programme** erstellt
+(`POST /household/tokens`) und **einmalig** im Klartext ausgegeben; gespeichert
+wird nur ihr SHA-256-Hash. Sie gehören keinem Benutzer und reichen deshalb nicht
+für `/auth/users`. Jedes Token lässt sich einzeln widerrufen – auch das letzte,
+denn ausgesperrt ist damit niemand mehr.
+
+Offen ohne Anmeldung sind `/health`, `/system/info`, `/setup/state` und
+`/auth/login`. Solange noch kein Haushalt existiert, ist die API entsperrt –
+anders käme man nicht durch die Ersteinrichtung.
+
+Dieselbe Ausnahme gilt für `/setup/household` und `/auth/users`, solange ein
+Haushalt zwar existiert, aber **kein einziges Konto**. Das ist kein
+eingerichteter Hub, sondern ein Abbruch mittendrin – ohne diese Ausnahme gäbe
+es kein Zurück, denn die Anmeldepflicht griffe, ohne dass jemand ihr genügen
+könnte. Zu schützen gibt es dort nichts: Wer den ersten Zugang anlegt, tut, was
+der Besitzer als Nächstes getan hätte.
 
 ## Fehlerformat
 
 ```json
-{ "error": { "code": "bad_request", "message": "…", "details": [ … ] } }
+{
+  "error": {
+    "code": "upstream_error",
+    "message": "192.168.1.42 ist im Netzwerk nicht erreichbar.",
+    "hint": "Prüfe, ob Hub und Gerät im selben Netz hängen. In Docker braucht der Hub \"--network host\".",
+    "details": { "code": "EHOSTUNREACH" }
+  }
+}
 ```
+
+`message` sagt, **was** nicht geht, `hint` sagt, **was jetzt zu tun ist**. Rohe
+Fehlercodes wie `ECONNREFUSED` tauchen nie in der Meldung auf – sie stehen
+allenfalls unter `details`.
 
 | Code | Status | Bedeutung |
 | --- | --- | --- |
@@ -42,12 +114,132 @@ beim Anlegen des Haushalts und wird **einmalig** zurückgegeben.
 Ohne Token. `{ status, uptimeSeconds, polling }`
 
 ### `GET /system/info`
-Ohne Token. Version, Node-Version, verfügbare Adapter, aktive Einstellungen.
+Ohne Token. Version, Node-Version, verfügbare Adapter, aktive Einstellungen –
+und `build`: eine Kennung aller ausgelieferten Dateien unter `public/`.
+
+Die Weboberfläche fragt sie regelmäßig ab; ändert sie sich, verwirft sie ihren
+Zwischenspeicher und lädt sich neu. Gleicher Stand ⇒ gleiche Kennung, jede
+Änderung ⇒ neue Kennung. Der Wert wird 15 Sekunden lang zwischengespeichert.
+
+```json
+{ "name": "Smart-Home-Hub", "version": "1.5.0", "build": "9617df2505a1",
+  "node": "v22.22.0", "hasHousehold": true, "setupCompleted": true,
+  "authRequired": true,
+  "adapters": [ { "type": "homematic", "displayName": "Homematic",
+                  "supportsPush": false } ] }
+```
+
+### `GET /system/version`
+Fassung des **Hubs selbst** – nicht zu verwechseln mit der Firmware der Geräte
+unter `/updates`.
+
+```json
+{ "currentVersion": "1.3.0", "latestVersion": "1.3.0", "updateAvailable": false,
+  "pending": [], "current": { "version": "1.3.0", "date": "2026-08-09",
+  "body": "**FRITZ!Box (experimentell).** …" },
+  "checkedAt": null, "canUpdate": true, "mode": "pull", "reason": null }
+```
+
+`pending` sind alle Abschnitte zwischen der laufenden und der neuesten Fassung –
+was eine Aktualisierung brächte, *bevor* man sie auslöst.
+
+`mode` sagt, was beim Aktualisieren passieren würde:
+
+| Wert | Bedeutung |
+| --- | --- |
+| `pull` | Es gibt eine Arbeitskopie, sie wird nachgezogen |
+| `bootstrap` | Es gibt keine – der Hub holt sie sich zuerst selbst |
+| `none` | Geht nicht; `reason` sagt, warum |
+
+`reason` steht bei `bootstrap` ebenfalls – dort als Ankündigung, nicht als
+Absage.
+
+Als Hindernis zählen nur **geänderte verfolgte** Dateien. Unverfolgtes (`data/`,
+`.env`, `node_modules/`) fasst ein `git pull --ff-only` nicht an und blockiert
+deshalb nichts.
+
+### `GET /system/changelog`
+Das vollständige Änderungsprotokoll, neueste Fassung zuerst:
+`{ "entries": [ { "version", "date", "body" } ] }`. `body` ist Markdown.
+
+### `POST /system/version/check`
+Fragt nach der neuesten Fassung und liefert dieselbe Struktur wie
+`GET /system/version`. Nur Administratoren.
+
+Ohne gesetztes `HUB_UPDATE_CHECK_URL` fragt der Hub **niemanden**; der Aufruf
+setzt dann nur `checkedAt`. Ein Haushalts-Hub telefoniert nicht ungefragt nach
+Hause.
+
+### `POST /system/version/install`
+Führt `git pull --ff-only`, `npm install --omit=dev` und `npm run build` aus.
+Nur Administratoren.
+
+Bei `mode: "bootstrap"` gehen `git init`, `git remote add`, `git fetch` und
+`git checkout -f` voraus – der Hub macht aus der Installation zuerst eine
+Arbeitskopie. Git fasst dabei nur verfolgte Dateien an; `DATA_DIR`, `.env` und
+`node_modules/` bleiben liegen. Führt das Repository einen Pfad, unter dem
+`DATA_DIR` liegt, bricht er vorher ab.
+
+Antwort `202`: `{ "log": ["$ git pull --ff-only", "…"], "restartRequired": true }`.
+Den Neustart des Dienstes übernimmt der Hub **nicht** – das ist Sache von
+systemd, Docker oder pm2.
+
+### `DELETE /household`
+Löscht den Haushalt und alles daran: Räume, Geräte, Automationen, Szenen,
+Benutzerkonten, Sitzungen, Zugriffstoken, die hinterlegten Zugangsdaten der
+Bridges und das Messwertarchiv. Nur Administratoren.
+
+Body: `{ "confirmName": "<Name des Haushalts>" }` – muss genau stimmen, sonst
+`400`. Die Oberfläche fragt zusätzlich fünfmal nach; der Server verlässt sich
+darauf nicht, weil er nicht nur von ihr aufgerufen wird.
+
+Danach ist der Hub wie frisch installiert: Der Einrichtungsassistent startet,
+die Hintergrunddienste sind angehalten, der Prozess läuft weiter. Die eigene
+Sitzung ist mit gelöscht – die Antwort löscht auch das Cookie.
+
+```json
+{ "rooms": 4, "devices": 23, "rules": 6, "scenes": 3, "integrations": 3,
+  "users": 2, "telemetryFiles": 87,
+  "message": "Der Haushalt wurde gelöscht. …" }
+```
+
+### `GET /system/backup`
+Lädt die Konfiguration als JSON-Datei herunter (`Content-Disposition:
+attachment`). Nur Administratoren.
+
+Enthalten: Haushalt samt Einstellungen, Räume, Geräte (Namen, Raumzuordnung,
+Richtigstellungen), Automationen, Szenen und die Integrationen mit Typ und
+Adresse.
+
+**Nicht** enthalten: Zugangsdaten zu Bridges, Passwörter, Sitzungen,
+Zugriffstoken. Die Datei darf deshalb auf einem USB-Stick liegen. Pro
+Integration merkt sich `hadSecrets` nur, *dass* es Zugangsdaten gab.
+
+### `POST /system/restore`
+Nimmt eine solche Datei als Body und ersetzt Haushalt, Räume, Geräte,
+Automationen und Szenen vollständig. Nur Administratoren.
+
+Benutzer, Sitzungen und Zugriffstoken bleiben unangetastet – wer die
+Wiederherstellung anstößt, soll danach nicht ausgesperrt sein. Der
+wiederhergestellte Haushalt übernimmt dafür die ID des laufenden.
+
+Zugangsdaten bestehender Verbindungen bleiben erhalten, wenn Typ und Adresse
+übereinstimmen. Alles andere steht in `needRelink` und braucht einmal
+`POST /integrations/:id/relink`.
+
+```json
+{ "rooms": 4, "devices": 23, "rules": 6, "scenes": 3, "integrations": 3,
+  "needRelink": ["Hue Bridge Flur"] }
+```
 
 ### `GET /events`
 Server-Sent-Events-Strom. Ereignisse: `device.added`, `device.updated`,
 `device.removed`, `integration.updated`, `room.updated`, `telemetry.sample`,
 `automation.triggered`, `notification`.
+
+`notification` trägt `{ message, level, hint?, link?, source? }`. `source` ist
+`hub` (oder fehlt) für eigene Meldungen und `nextcloud` für das, was aus der
+verbundenen Nextcloud kommt; `link` zeigt dann auf die Sache selbst.
 
 ```js
 const source = new EventSource('/api/events?access_token=' + token);
@@ -62,11 +254,17 @@ source.addEventListener('device.updated', (e) => console.log(JSON.parse(e.data))
 Ohne Token. Aktueller Schritt, Fortschritt, Kennzahlen und Hinweise.
 
 ### `POST /setup/household`
+Legt Haushalt und erstes Benutzerkonto zusammen an – beides gehört zusammen:
+Ein Haushalt ohne Konto wäre für niemanden erreichbar.
+
 ```json
-{ "name": "Wohnung Musterstraße", "timezone": "Europe/Berlin", "locale": "de-DE" }
+{ "name": "Wohnung Musterstraße", "timezone": "Europe/Berlin", "locale": "de-DE",
+  "pricePerKwh": 0.35, "currency": "EUR", "basePricePerMonth": 12.9,
+  "username": "anna", "password": "drei zufaellige woerter", "displayName": "Anna" }
 ```
-→ `201` mit `{ household, state, accessToken }`. **Das Token wird nur hier
-ausgegeben.** Ein zweiter Haushalt wird mit `409` abgelehnt.
+→ `201` mit `{ household, state, user }` und einem gesetzten Sitzungs-Cookie:
+Man ist direkt angemeldet. Der erste Benutzer ist immer Administrator. Ein
+zweiter Haushalt wird mit `409` abgelehnt.
 
 ### `POST /setup/step`
 `{ "step": "rooms" }` – springt im Assistenten. Erlaubt: `household`,
@@ -94,17 +292,47 @@ Schließt die Einrichtung ab. `400`, solange keine Integration verbunden ist.
 | Methode | Pfad | Beschreibung |
 | --- | --- | --- |
 | `GET` | `/household` | Stammdaten |
-| `PATCH` | `/household` | `name`, `timezone`, `locale` ändern |
-| `GET` | `/household/summary` | Kennzahlen fürs Dashboard |
+| `PATCH` | `/household` | `pollIntervalSeconds` (3–300, gilt sofort), `name`, `timezone`, `locale`, `pricePerKwh`, `currency`, `basePricePerMonth`, `autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`, `appearance`, `fritzboxUrl` |
+
+`fritzboxUrl` ist die Adresse der Box-Oberfläche (`http://fritz.box`). Sie wird
+in der Oberfläche unter *Dienste → FRITZ!Box* eingebettet angezeigt; leer heißt
+„nicht anzeigen". Erlaubt sind nur `http`- und `https`-Adressen.
+| `GET` | `/household/summary` | Kennzahlen fürs Dashboard inkl. gestörter Integrationen |
 | `GET` | `/household/tokens` | Tokens (ohne Hash) |
 | `POST` | `/household/tokens` | `{ "name": "Handy" }` → neues Token |
 | `DELETE` | `/household/tokens/:id` | Token widerrufen (das letzte nicht) |
+
+### Darstellung
+
+`appearance` gehört zum Haushalt und gilt damit auf jedem Gerät, auf dem der
+Hub geöffnet wird. Übergebene Felder werden mit den gespeicherten
+zusammengeführt – wer nur die Schriftgröße ändert, verliert seine Farben nicht.
+
+```json
+{ "appearance": { "fontScale": 1.3, "accentColor": "#1f8a4c",
+                  "accentColorAlt": "#7cc242", "theme": "dark",
+                  "reduceMotion": false, "automationNotifications": false } }
+```
+
+| Feld | Werte | Bedeutung |
+| --- | --- | --- |
+| `fontScale` | `0.85` – `1.6` | Skalierung der gesamten Oberfläche, nicht nur des Textes |
+| `accentColor` | `#rrggbb` oder `null` | `null` = mitgelieferte Farbe (getrennt für hell und dunkel abgestimmt) |
+| `accentColorAlt` | `#rrggbb` oder `null` | Zweite Farbe für Verläufe |
+| `theme` | `auto`, `light`, `dark` | `auto` folgt der Systemeinstellung |
+| `reduceMotion` | `true`/`false` | Animationen abschalten |
+| `livePreview` | `true`/`false` | Lichtvorschau auf den Gerätekarten (Vorgabe: an) |
+| `automationNotifications` | `true`/`false` | Meldungen aus Automationen und Lichteffekten einblenden (Vorgabe: an). Aus heißt nur „nicht einblenden": Der Verlauf bekommt sie weiterhin, und Fehler erscheinen unabhängig davon |
+
+Werte außerhalb der Grenzen und Farben, die keine sind, werden mit `400`
+abgewiesen – eine ungültige Farbe würde der Browser stillschweigend verwerfen
+und die Einstellung sähe aus, als täte sie nichts.
 
 ---
 
 ## Integrationen
 
-### `GET /integrations/discover?type=hue|shelly&scan=true`
+### `GET /integrations/discover?type=hue|shelly|homematic|fritzbox&scan=true`
 Sucht im Netzwerk. `scan=true` scannt zusätzlich das Subnetz (langsamer, findet
 aber schlafende Geräte). Antwort:
 
@@ -116,11 +344,35 @@ aber schlafende Geräte). Antwort:
 } ], "scanned": false }
 ```
 
+### `GET /integrations/discover/stream?type=…&scan=true`
+Dieselbe Suche als Server-Sent-Events-Strom, damit Treffer nicht erst am Ende
+erscheinen.
+
+| Ereignis | Nutzlast |
+| --- | --- |
+| `found` | `{ entry }` – ein gefundenes Gerät, sobald es da ist |
+| `progress` | `{ pending: [...], message }` – wer noch sucht |
+| `failed` | `{ adapter, message }` – ein Hersteller ist gescheitert; die übrigen suchen weiter |
+| `done` | `{ count }` – fertig |
+
+```js
+const stream = new EventSource('/api/integrations/discover/stream?scan=true');
+stream.addEventListener('found', (e) => console.log(JSON.parse(e.data).entry));
+stream.addEventListener('done', () => stream.close());
+```
+
+Beim gründlichen Suchen stellt der Hub zuerst per TCP-Verbindungsversuch fest,
+welche Adressen belegt sind, und teilt die Liste allen Herstellern – vorher
+klopfte jeder das Subnetz einzeln mit HTTP-Anfragen ab (gemessene 54 Sekunden,
+jetzt knapp 6).
+
 ### `POST /integrations`
 ```json
 { "type": "hue", "host": "192.168.1.42", "name": "Bridge", "importRooms": true }
 ```
-Für Shelly zusätzlich `password` (und bei Gen1 optional `username`).
+Für Shelly zusätzlich `password` (und bei Gen1 optional `username`). Für die
+FRITZ!Box genügt `password` – `username` ist optional und nur nötig, wenn die
+Box mehrere Benutzerkonten führt.
 
 Bei Hue **vorher den Knopf auf der Bridge drücken**, sonst `428
 link_button_required`. Antwort `201` mit Integration, übernommenen Geräten und
@@ -134,6 +386,33 @@ link_button_required`. Antwort `201` mit Integration, übernommenen Geräten und
 | `POST` | `/integrations/:id/sync` | Geräteliste neu einlesen |
 | `POST` | `/integrations/:id/test` | Verbindung prüfen |
 | `DELETE` | `/integrations/:id` | Integration und deren Geräte entfernen |
+
+### `POST /integrations/:id/relink`
+Erneut verbinden: `{ host?, username?, password? }` – alle Felder optional,
+weggelassene bleiben, wie sie sind. Bei Hue vorher wieder den Knopf drücken.
+
+Die Integration **behält ihre ID**. Geräte, Räume, Szenen und Automationen
+bleiben damit erhalten; ein Löschen-und-neu-Anlegen würde sie alle verlieren.
+Antwort: `{ integration, sync }`.
+
+### `GET /integrations/:id/diagnostics`
+Beantwortet „wo ist mein Rollladen?“ mit einer Liste statt mit Schweigen.
+
+```json
+{ "integrationId": "int_…", "name": "Homematic", "status": "linked",
+  "deviceCount": 5,
+  "devices": [ { "id": "dev_…", "name": "Rollladen Küche",
+                 "externalId": "ABC123:3", "capabilities": ["cover"],
+                 "capabilityOverride": null, "reachable": true,
+                 "hidden": false } ],
+  "skipped": [ { "address": "ABC123:0", "channelType": "MAINTENANCE",
+                 "reason": "Kanaltyp führt keine steuerbaren Werte" } ],
+  "supportsDiagnostics": true }
+```
+
+`skipped` sind Kanäle, die der Hub gesehen und mit Begründung übersprungen hat.
+Nicht jeder Adapter führt eine solche Liste – dann ist `supportsDiagnostics`
+`false` und `skipped` leer.
 
 ---
 
@@ -170,10 +449,29 @@ Filter: `roomId`, `unassigned=true`, `integrationId`, `capability`, `search`,
 | Methode | Pfad | Beschreibung |
 | --- | --- | --- |
 | `GET` | `/devices/:id` | Einzelnes Gerät |
-| `PATCH` | `/devices/:id` | `name`, `roomId`, `hidden` |
+| `PATCH` | `/devices/:id` | `name`, `roomId`, `hidden`, `capabilityOverride` |
 | `DELETE` | `/devices/:id` | Entfernen (kommt beim nächsten Sync wieder) |
 | `POST` | `/devices/:id/command` | Kommando ausführen |
 | `POST` | `/devices/command` | Kommando an mehrere Geräte |
+
+### Gerätetyp richtigstellen
+
+Manche Geräte melden nicht sauber, was sie sind – ein Rollladenaktor gibt sich
+als Schalter aus. `capabilityOverride` setzt die Angabe des Menschen über die
+des Geräts:
+
+```json
+PATCH /devices/dev_… { "capabilityOverride": ["cover", "sensor.power"] }
+```
+
+`null` nimmt die Korrektur zurück. Gespeichert bleiben beide: `capabilities` ist,
+was das Gerät meldet, `capabilityOverride`, was der Mensch sagt – ein
+Firmware-Update kann so neue Fähigkeiten mitbringen, ohne die Korrektur zu
+überschreiben.
+
+Nach außen gilt ausnahmslos die Korrektur: Sie greift am Übergang aus der
+Datenbank, wirkt also in der Geräteliste, in Automationen, in Szenen und bei der
+Prüfung, ob ein Kommando erlaubt ist.
 
 ### Kommandos
 
@@ -185,10 +483,25 @@ Filter: `roomId`, `unassigned=true`, `integrationId`, `capability`, `search`,
 | Farbtemperatur | `{"type":"setColorTemperature","kelvin":1500…10000}` | `color_temperature` |
 | Farbe | `{"type":"setColor","hue":0…360,"saturation":0…100}` | `color` |
 | Position | `{"type":"setPosition","position":0…100}` | `cover` |
+| Auffahren | `{"type":"openCover"}` | `cover` |
+| Zufahren | `{"type":"closeCover"}` | `cover` |
+| Anhalten | `{"type":"stopCover"}` | `cover` |
+| Lamellen | `{"type":"setTilt","tilt":0…100}` | `cover.tilt` |
+| Solltemperatur | `{"type":"setTargetTemperature","targetTemperatureC":4…35}` | `thermostat` |
 | Identifizieren | `{"type":"identify"}` | – |
+
+Bei Rollläden gilt **100 = ganz offen, 0 = ganz zu**. Der Zustand enthält
+zusätzlich `coverState` (`open`, `closed`, `opening`, `closing`, `stopped`) –
+darauf beruht die Bewegungsanzeige in der Oberfläche.
 
 `setBrightness` mit `0` schaltet aus; alle anderen Helligkeits-, Farb- und
 Farbtemperatur-Kommandos schalten das Gerät automatisch ein.
+
+Geräte mit `thermostat` melden im Zustand `targetTemperatureC` (Sollwert),
+`temperatureC` (gemessen, falls das Gerät misst) und `valvePosition` (0–100 %,
+falls es die Ventilstellung kennt). Alte Bauformen sind eingeschlossen: das
+Shelly TRV, Homematic-Heizkörperthermostate (BidCos wie HmIP) und
+Wandthermostate.
 
 ### Sammelkommando
 
@@ -221,6 +534,311 @@ Messgrößen: `temperatureC`, `humidity`, `illuminanceLux`, `powerW`, `energyWh`
 
 ---
 
+## Stromverbrauch
+
+Gemeinsame Parameter: `period` (`today`, `yesterday`, `week`, `month`, `year`,
+`custom`), bei `custom` zusätzlich `from` und `to` (ISO 8601).
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/energy/summary` | Vollständige Auswertung (siehe unten) |
+| `GET` | `/energy/devices` | Nur die Geräteliste – für Ranglisten |
+| `GET` | `/energy/rooms` | Verbrauch je Raum |
+
+```json
+{
+  "period": { "key": "today", "label": "Heute", "hours": 8.2, "from": "…", "to": "…" },
+  "currency": "EUR", "pricePerKwh": 0.42,
+  "totalKwh": 2.14, "energyCost": 0.9, "baseCost": 0.16, "totalCost": 1.06,
+  "currentPowerW": 142.5,
+  "coverage": 0.87,
+  "devices": [ { "deviceId": "dev_…", "name": "Waschmaschine", "roomName": "Bad",
+                 "energyKwh": 1.8, "cost": 0.76, "share": 84.1,
+                 "averagePowerW": 220.4, "currentPowerW": 0,
+                 "method": "counter", "coverage": 0.87 } ],
+  "rooms": [ { "roomId": "room_…", "roomName": "Bad", "energyKwh": 1.8, "share": 84.1 } ],
+  "projection": { "perDayKwh": 5.9, "perMonthKwh": 177, "perMonthCost": 88.9,
+                  "perYearKwh": 2153, "perYearCost": 1078 },
+  "standby": { "devices": [ … ], "totalPowerW": 12.4, "costPerYear": 45.6 },
+  "unmeteredDeviceCount": 3
+}
+```
+
+`method` sagt, woraus der Wert stammt: `counter` (Energiezähler des Geräts),
+`power` (integrierte Leistungskurve) oder `none` (keine Daten).
+
+`coverage` ist der Anteil des Zeitraums mit Messwerten. **`projection` ist
+`null`, solange die Abdeckung unter 20 % liegt** – dann wäre jede Hochrechnung
+geraten. Die Oberfläche zeigt in dem Fall einen Hinweis statt einer Zahl.
+
+---
+
+## Firmware-Updates
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/updates` | Übersicht inklusive Auto-Update-Einstellungen |
+| `POST` | `/updates/check` | Alle Integrationen sofort prüfen |
+| `POST` | `/updates/:integrationId/check` | Eine Integration prüfen |
+| `POST` | `/updates/:integrationId/install` | Installation starten (`202`) |
+
+```json
+{
+  "integrations": [ { "integrationId": "int_…", "name": "Hue Bridge", "type": "hue",
+                      "supported": true,
+                      "updateInfo": { "currentVersion": "1965111030",
+                                      "availableVersion": "bereit zur Installation",
+                                      "updateAvailable": true, "installable": true,
+                                      "checkedAt": "…" } } ],
+  "devices": [ { "deviceId": "dev_…", "name": "Stehlampe", "vendor": "hue",
+                 "model": "LCT001", "firmware": "5.50.1", "reachable": true,
+                 "integrationId": "int_…", "integrationName": "Hue Bridge",
+                 "updatedBy": "bridge", "updateAvailable": true,
+                 "supported": true } ],
+  "updatesAvailable": 1,
+  "autoUpdate": { "enabled": false, "from": "03:00", "to": "05:00", "timezone": "Europe/Berlin" },
+  "lastCheckedAt": "…"
+}
+```
+
+`devices` listet **jedes sichtbare Gerät** mit seinem Firmwarestand, alphabetisch.
+`updatedBy` sagt, wo die Aktualisierung tatsächlich passiert: `device` bei
+Shellys, die sich selbst aktualisieren, `bridge` bei Hue-Lampen und
+Homematic-Aktoren, deren Zentrale die Firmware verteilt. `supported` ist
+`false`, wenn der Adapter gar nicht nach Firmware sehen kann – die Oberfläche
+bietet dann keinen Knopf an, der ins Leere liefe (Homematic aktualisiert sich
+über die eigene Weboberfläche der CCU).
+
+Die automatische Installation wird über `PATCH /household` gesteuert
+(`autoUpdate`, `autoUpdateFrom`, `autoUpdateTo`). Sie greift nur innerhalb des
+Zeitfensters; das Gerät startet dabei neu.
+
+---
+
+## Szenen
+
+Eine Szene sichert den *aktuellen* Zustand der genannten Geräte. Der Hub liest
+ihn aus und leitet die Kommandos ab, die ihn wiederherstellen.
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/scenes` | Alle Szenen |
+| `GET` | `/scenes/:id` | Eine Szene inklusive ihrer Kommandos |
+| `POST` | `/scenes` | `{ name, emoji?, roomId?, deviceIds[] }` – sichert den jetzigen Zustand |
+| `PATCH` | `/scenes/:id` | `name`, `emoji`, `roomId` |
+| `POST` | `/scenes/:id/restamp` | Zustände neu aufnehmen („so wie es jetzt ist“) |
+| `POST` | `/scenes/:id/apply` | Szene herstellen |
+| `DELETE` | `/scenes/:id` | Szene löschen |
+| `POST` | `/scenes/preview` | `{ deviceIds[] }` → was gesichert würde, ohne zu speichern |
+
+```json
+{
+  "id": "scn_…", "name": "Fernsehabend", "emoji": "📺", "roomId": null,
+  "entries": [
+    { "deviceId": "dev_lampe",
+      "commands": [
+        { "type": "setColorTemperature", "kelvin": 2700 },
+        { "type": "setBrightness", "brightness": 25 },
+        { "type": "setPower", "on": true }
+      ] },
+    { "deviceId": "dev_rollladen", "commands": [{ "type": "setPosition", "position": 35 }] }
+  ],
+  "lastAppliedAt": "…"
+}
+```
+
+Die Reihenfolge ist Absicht: erst Farbe und Helligkeit, dann schalten – sonst
+sähe man beim Herstellen kurz die alte Farbe. Von einer ausgeschalteten Lampe
+wird nur `setPower: false` gesichert; ihre Helligkeit mitzuschreiben würde sie
+beim Abrufen aufblitzen lassen.
+
+`POST /scenes/:id/apply` antwortet mit Einzelergebnissen:
+
+```json
+{ "sceneId": "scn_…", "name": "Fernsehabend", "applied": 2, "failed": 1,
+  "results": [ { "deviceId": "dev_…", "ok": false, "error": "Gerät antwortet nicht" } ] }
+```
+
+Ein stummes Gerät hält die anderen nicht auf.
+
+---
+
+## Urlaubsmodus
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/presence` | Einstellungen und aktueller Zustand |
+| `PATCH` | `/presence` | `enabled`, `from`, `to`, `roomIds[]`, `averageIntervalMinutes` |
+
+```json
+{
+  "settings": { "enabled": true, "from": "17:30", "to": "22:45",
+                "roomIds": [], "averageIntervalMinutes": 25 },
+  "active": true, "devicesOn": 2, "candidates": 6
+}
+```
+
+`active` heißt: eingeschaltet **und** gerade im Zeitfenster. Die Abstände
+zwischen zwei Schaltvorgängen streuen zufällig zwischen der Hälfte und dem
+Anderthalbfachen des Mittelwerts – ein festes Muster wäre von außen schneller
+zu erkennen als gar kein Licht. Erlaubt sind 10 bis 120 Minuten. Beim
+Abschalten geht alles wieder aus, was die Simulation eingeschaltet hat.
+
+---
+
+## Musik: Sonos und Spotify
+
+Beides steht in der Oberfläche im Reiter „Dienste" – keine Geräte, deshalb
+nicht unter `/devices`.
+
+### Sonos
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/sonos` | Alle Lautsprecher mit Zustand und Gruppenlage |
+| `POST` | `/sonos/discover` | `{ scan?, host? }` – sucht im Netz; `host` trägt einen von Hand ein |
+
+Sonos taucht außerdem in der allgemeinen Suche auf (`GET /integrations/discover`
+und der zugehörige Stream): Treffer kommen dort mit `"type": "sonos"`. Sie
+werden **nicht** über `POST /integrations` übernommen – dafür gibt es
+`POST /sonos/discover` mit ihrer Adresse. Ein Lautsprecher ist keine
+Integration: kein Passwort, keine Geräteliste, kein Zustand zum Pollen.
+
+| `POST` | `/sonos/:id/command` | Wiedergabebefehl (siehe unten) |
+| `PATCH` | `/sonos/:id` | `{ roomId }` – einem Raum des Hubs zuordnen |
+| `DELETE` | `/sonos/:id` | Lautsprecher vergessen |
+
+```json
+{
+  "players": [{
+    "id": "snp_…", "host": "192.168.1.42", "uuid": "RINCON_…",
+    "roomName": "Küche", "model": "Sonos One", "softwareVersion": "15.9",
+    "state": {
+      "reachable": true, "transport": "playing", "volume": 25, "muted": false,
+      "title": "Roads", "artist": "Portishead", "album": "Dummy",
+      "artworkUrl": "http://192.168.1.42:1400/getaa?u=…",
+      "durationSeconds": 225, "positionSeconds": 62,
+      "coordinatorUuid": "RINCON_WOHN", "groupMembers": ["Wohnzimmer", "Küche"],
+      "error": null
+    }
+  }],
+  "groups": 1
+}
+```
+
+Gefunden wird per **SSDP** (`urn:schemas-upnp-org:device:ZonePlayer:1`).
+Bringt das nichts – in manchen Netzen wird Multicast nicht weitergereicht –,
+klopft der Hub Port 1400 im Subnetz ab. Ist erst *ein* Lautsprecher gefunden,
+kennt der bereits alle anderen: Die Gruppenauskunft nennt jeden Mitspieler samt
+Adresse. Wiedererkannt wird ein Lautsprecher an seiner `uuid`, nicht an der IP –
+sonst stünde nach jedem Neustart des Routers ein zweiter, toter Eintrag da.
+
+**Gruppen sind Pflicht, nicht Kür.** Sind zwei Lautsprecher zusammengefasst,
+nimmt nur der Koordinator Transportbefehle an; ein Mitglied antwortet mit
+UPnP-Fehler 701. `play`, `pause`, `next` und `previous` gehen deshalb immer an
+den Koordinator der Gruppe, `setVolume` und `setMute` an den angesprochenen
+Lautsprecher selbst.
+
+### Spotify
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/spotify` | Konto, aktuelle Wiedergabe, verfügbare Abspielgeräte |
+| `POST` | `/spotify/authorize` | `{ clientId, redirectUri }` → `{ authorizeUrl }` |
+| `GET` | `/spotify/callback` | Rückleitung von Spotify (liefert eine Seite, keine JSON-Antwort) |
+| `POST` | `/spotify/command` | Wiedergabebefehl |
+| `POST` | `/spotify/transfer` | `{ deviceId, play? }` – Wiedergabe umziehen |
+| `DELETE` | `/spotify` | Verbindung trennen, Token löschen |
+
+Angemeldet wird sich mit **Authorization Code + PKCE**: Der Hub schickt eine
+SHA-256-Prüfsumme eines Zufallswerts mit und weist sich beim Tausch mit dem
+Wert selbst aus. Ein Client-Geheimnis wird nicht gebraucht und deshalb auch
+nicht gespeichert – eines, das bei jedem Nutzer derselben Anwendung auf der
+Platte liegt, wäre keines. Angefragt werden nur drei Rechte:
+`user-read-playback-state`, `user-modify-playback-state`,
+`user-read-currently-playing`.
+
+Die Rückleitungsadresse (`redirectUri`) muss im Spotify-Dashboard zeichengenau
+eingetragen sein; die Oberfläche schlägt `<Adresse des Hubs>/api/spotify/callback`
+vor.
+
+Steuerbefehle setzen **Premium** voraus. Ein 403 von Spotify wird als
+„erlaubt das Steuern nur mit Premium" gemeldet, ein 404 als „spielt gerade auf
+keinem Gerät" – beides mit Hinweis, statt den Statuscode durchzureichen.
+
+### Wiedergabebefehle
+
+Für beide gleich:
+
+```json
+{ "type": "play" }
+{ "type": "pause" }
+{ "type": "next" }
+{ "type": "previous" }
+{ "type": "setVolume", "volume": 35 }
+{ "type": "setMute", "muted": true }
+```
+
+Spotify kennt keine Stummschaltung; `setMute` setzt dort die Lautstärke.
+
+---
+
+## Nextcloud
+
+Benachrichtigungen aus der eigenen Nextcloud. Keine Geräte – deshalb steht das
+hier und nicht unter `/integrations`.
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/nextcloud` | Konto (ohne Zugangsdaten) und die offenen Benachrichtigungen |
+| `POST` | `/nextcloud` | `{ baseUrl, username, appPassword, pollIntervalSeconds? }` – verbindet |
+| `PATCH` | `/nextcloud` | `enabled`, `pollIntervalSeconds` (10 – 3600) |
+| `DELETE` | `/nextcloud` | Verbindung trennen, App-Passwort löschen |
+| `POST` | `/nextcloud/refresh` | Sofort nachsehen |
+| `DELETE` | `/nextcloud/notifications` | Alle als gelesen markieren |
+| `DELETE` | `/nextcloud/notifications/:id` | Eine als gelesen markieren |
+
+```json
+{
+  "account": {
+    "id": "ncl_…", "baseUrl": "https://cloud.example.de", "username": "anna",
+    "displayName": "Anna Beispiel", "serverVersion": "29.0.4",
+    "enabled": true, "pollIntervalSeconds": 30, "hasSecrets": true,
+    "lastSeenAt": "…", "lastError": null, "lastNotificationId": 812
+  },
+  "notifications": [
+    { "id": 812, "app": "spreed", "subject": "Anna hat geschrieben",
+      "message": "Kommst du heute Abend?",
+      "link": "https://cloud.example.de/call/abc123",
+      "datetime": "2026-08-09T11:20:00+00:00" }
+  ],
+  "polling": true
+}
+```
+
+Angesprochen wird die OCS-Schnittstelle der App „Benachrichtigungen“
+(`/ocs/v2.php/apps/notifications/api/v2/notifications`) mit Basic-Auth. Als
+Passwort gehört dort ein **App-Passwort** hinein (Nextcloud: Einstellungen →
+Sicherheit); es lässt sich einzeln widerrufen und funktioniert auch mit
+Zwei-Faktor-Anmeldung. Gespeichert wird es nur verschlüsselt und geht über die
+API nie wieder hinaus – `hasSecrets` sagt lediglich, *dass* eines vorliegt.
+
+`baseUrl` darf großzügig eingegeben werden: `cloud.example.de` bekommt sein
+`https://`, ein abschließender Schrägstrich fällt weg, und eine mitkopierte
+App-Adresse (`…/index.php/apps/files?dir=/Fotos`) wird auf die Instanz
+zurückgeschnitten.
+
+Lehnt die Nextcloud die Anmeldung ab, antwortet der Hub mit **400**, nicht mit
+401: Ein 401 aus dieser API bedeutet „deine Hub-Sitzung ist abgelaufen“ und
+würde den Nutzer zur Anmeldemaske werfen – abgelehnt hat aber die Nextcloud.
+
+Neue Benachrichtigungen erscheinen zusätzlich als `notification`-Ereignis im
+Eventstream, aus dem die Oberfläche ihre Einblendungen baut. Beim ersten
+Verbinden geschieht das bewusst nicht: Der Hub merkt sich nur den Stand,
+statt alles Offene auf einmal zu melden.
+
+---
+
 ## Automationen
 
 | Methode | Pfad | Beschreibung |
@@ -231,6 +849,44 @@ Messgrößen: `temperatureC`, `humidity`, `illuminanceLux`, `powerW`, `energyWh`
 | `PATCH` | `/automations/:id` | Ändern (z. B. `{"enabled":false}`) |
 | `DELETE` | `/automations/:id` | Löschen |
 | `POST` | `/automations/:id/run` | Aktionen sofort ausführen (Test) |
+| `GET` | `/automations/templates` | Fertige Vorlagen inkl. Vorbelegung |
+| `POST` | `/automations/templates/:templateId` | Regel aus einer Vorlage anlegen |
+
+### Vorlagen
+
+`GET /automations/templates` liefert die Vorlagen bereits auf den vorhandenen
+Gerätebestand angepasst:
+
+```json
+{
+  "templates": [{
+    "id": "motion-light", "emoji": "🚶",
+    "name": "Licht an, wenn sich jemand bewegt",
+    "summary": "Wenn der Bewegungsmelder auslöst, geht das Licht an.",
+    "explanation": "Praktisch für Flur, Keller oder Bad. …",
+    "fields": [ { "key": "sensor", "label": "Bewegungsmelder", "type": "device",
+                  "capability": "sensor.motion", "help": "Das Gerät, das die Bewegung meldet." } ],
+    "applicable": true,
+    "missing": [],
+    "defaults": { "sensor": "dev_…", "lights": ["dev_…"], "cooldownMinutes": 5 },
+    "options": { "sensor": [ { "id": "dev_…", "label": "Melder Flur (Flur)" } ] }
+  }],
+  "applicable": 6
+}
+```
+
+Sensor und Aktor werden nach Möglichkeit aus demselben Raum gepaart. Ist
+`applicable` false, nennt `missing` in Alltagssprache, was fehlt.
+
+Zum Anlegen genügt ein leerer Body – dann greifen die Vorgaben:
+
+```bash
+curl -X POST localhost:8080/api/automations/templates/motion-light \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{}'
+```
+
+Eigene Werte überschreiben einzelne Felder:
+`{"values": {"cooldownMinutes": 10, "lights": ["dev_a","dev_b"]}, "name": "Flurlicht"}`
 
 ### Auslöser
 
@@ -241,9 +897,20 @@ Messgrößen: `temperatureC`, `humidity`, `illuminanceLux`, `powerW`, `energyWh`
 { "type": "deviceState", "deviceId": "dev_…", "property": "motion", "equals": true }
 
 { "type": "schedule", "at": "07:30", "days": [1,2,3,4,5] }
+
+{ "type": "interval", "everyMinutes": 120,
+  "from": "08:00", "to": "20:00", "days": [1,2,3,4,5] }
 ```
 `days`: 0 = Sonntag … 6 = Samstag, leer = täglich. Operatoren: `<`, `<=`, `>`,
 `>=`, `==`, `!=`.
+
+`interval` wiederholt sich im angegebenen Takt (`everyMinutes`, mindestens 5,
+höchstens 1440). `from`/`to` sind optional, müssen aber gemeinsam angegeben
+werden; ohne sie läuft die Regel rund um die Uhr. Gemessen wird der Abstand ab
+der letzten Ausführung, nicht an festen Uhrzeiten: Nach einem Neustart des Hubs
+läuft die Regel einmal sofort und danach im gewünschten Takt. Außerhalb des
+Zeitfensters passiert nichts, und beim nächsten Eintritt wird einmal ausgelöst
+statt alles Versäumte nachgeholt.
 
 ### Bedingungen (alle müssen zutreffen)
 
@@ -261,7 +928,72 @@ Messgrößen: `temperatureC`, `humidity`, `illuminanceLux`, `powerW`, `energyWh`
   "command": { "type": "setPower", "on": true } }
 { "type": "webhook", "url": "https://…", "method": "POST", "body": { } }
 { "type": "notify", "message": "Fenster im Bad noch offen" }
+{ "type": "effect", "effect": "gruselig",
+  "target": { "deviceIds": ["dev_…"] }, "minutes": 20 }
+{ "type": "stopEffect", "effect": "gruselig" }
 ```
 
 `cooldownSeconds` verhindert zu häufiges Auslösen. Sensorregeln sind
 flankengesteuert: sie feuern einmal pro erfüllter Episode.
+
+Bei `effect` sind `target` und `minutes` optional: ohne Ziel gilt der Effekt
+für alle Lampen, die ihn zeigen können, ohne Laufzeit die Vorgabe des Effekts.
+`stopEffect` ohne `effect` beendet alle.
+
+---
+
+## Lichteffekte
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/effects` | Alle Effekte, was gerade läuft, wie viele Lampen infrage kommen |
+| `POST` | `/effects/:effect/start` | Starten – Body optional |
+| `POST` | `/effects/:effect/stop` | Diesen Effekt beenden |
+| `POST` | `/effects/stop` | Alle beenden (der Panikknopf) |
+
+Effekte: `disco`, `farbwechsel`, `gruselig`, `kerze`, `gewitter`,
+`sonnenaufgang`, `einschlafen`.
+
+```bash
+# Disco auf zwei Lampen, zehn Minuten
+curl -X POST localhost:8080/api/effects/disco/start \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"deviceIds":["dev_a","dev_b"],"minutes":10}'
+```
+
+Body: `deviceIds`, `roomIds` und `minutes` (1–120) sind alle optional. Ohne
+Auswahl nimmt der Hub jede Lampe, die den Effekt zeigen kann – `disco` und
+`farbwechsel` verlangen `color`, die übrigen `dimmer`. Passt keine, antwortet
+der Hub mit 400 und einem Hinweis, welche Art Lampe fehlt.
+
+Die Antwort nennt den tatsächlichen Takt:
+
+```json
+{ "effect": "disco", "deviceIds": ["dev_a", "dev_b"],
+  "startedAt": "…", "endsAt": "…", "stepMs": 600 }
+```
+
+`stepMs` kann größer sein als gewünscht: Der Hub schickt höchstens zehn
+Befehle je Sekunde und Effekt – so viel nimmt eine Hue Bridge an. Die Disco
+kostet je Lampe drei Befehle, zwei Lampen also 600 ms statt 450.
+
+Beim Beenden – von Hand, durch Ablauf der Zeit oder beim Herunterfahren des
+Hubs – wird der Zustand von vor dem Start wiederhergestellt: erst Farbe, dann
+Helligkeit, zuletzt der Schalter. Solange ein Effekt läuft (und ein paar
+Sekunden danach), gelten die Zustandswechsel dieser Lampen weder als Auslöser
+für Automationen noch als Einträge im Verlauf.
+
+**Verläufe verhalten sich anders.** `sonnenaufgang` und `einschlafen` stellen
+nichts wieder her – bei ihnen *ist* das Ende das Ergebnis. Läuft die Zeit ab,
+bekommen sie ihren Schlussschritt (beim Einschlaflicht das Ausschalten). Wird
+vorher beendet, bleibt das Licht stehen, wo es gerade ist.
+
+**Eine Lampe, ein Effekt.** Ein Start auf Lampen, die bereits ein anderer
+Effekt bespielt, beendet diesen anderen zuerst – samt Wiederherstellung. Zwei
+Effekte auf verschiedenen Lampen laufen dagegen ungestört nebeneinander.
+
+**Übergänge** setzt der Hub selbst: Jeder Effekt bringt mit, wie viel seines
+Takts hinübergeblendet wird. Der Farbverlauf blendet durch, Disco und Gewitter
+springen. Umgerechnet wird je Hersteller – Hue in Millisekunden, Hue V1 in
+Zehntelsekunden, Shelly in Sekunden (max. 5), FRITZ!Box in Zehntelsekunden
+(max. 10). Ausgeschaltet wird nie mit Übergang.

@@ -123,6 +123,37 @@ export class TelemetryStore {
     return result;
   }
 
+  /**
+   * Löscht das gesamte Messwertarchiv.
+   *
+   * Nur für das Zurücksetzen des Haushalts. Der Puffer wird mit verworfen –
+   * sonst schriebe der nächste `flush()` Werte zurück, die zu einem Haushalt
+   * gehören, den es nicht mehr gibt.
+   */
+  async clear(): Promise<number> {
+    this.buffer = [];
+    let entries: string[];
+    try {
+      entries = await readdir(this.directory);
+    } catch {
+      return 0;
+    }
+    let removed = 0;
+    for (const entry of entries) {
+      if (!/^\d{4}-\d{2}-\d{2}\.jsonl$/.test(entry)) continue;
+      try {
+        await unlink(path.join(this.directory, entry));
+        removed++;
+      } catch (err) {
+        log.warn('Messwertdatei konnte nicht gelöscht werden', {
+          file: entry,
+          error: (err as Error).message,
+        });
+      }
+    }
+    return removed;
+  }
+
   /** Löscht Dateien, die älter als die Aufbewahrungsdauer sind. */
   async pruneOldFiles(now = new Date()): Promise<number> {
     const cutoff = new Date(now.getTime() - this.retentionDays * 24 * 60 * 60 * 1000);

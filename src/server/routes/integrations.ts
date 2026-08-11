@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { errorMessage } from '../../core/errors.js';
+import type { IntegrationType } from '../../core/types.js';
 import { IntegrationRepository } from '../../storage/repositories.js';
 import type { Container } from '../../container.js';
 import { asyncHandler, booleanQuery, parseBody, parseQuery } from '../http.js';
@@ -39,6 +41,58 @@ export function integrationRoutes(container: Container): Router {
         query.scan ?? false,
       );
       res.json({ found, scanned: query.scan ?? false });
+    }),
+  );
+
+  /**
+   * Dieselbe Suche, aber laufend berichtet.
+   *
+   * Die Wartezeit lässt sich nicht wegoptimieren – eine mDNS-Suche muss die
+   * volle Zeit lauschen, wenn auf einen Diensttyp niemand antwortet. Was sich
+   * ändern lässt, ist, wann der Mensch etwas davon sieht: Jeder Treffer geht
+   * sofort raus, und dazwischen steht, worauf noch gewartet wird.
+   */
+  router.get(
+    '/integrations/discover/stream',
+    asyncHandler(async (req, res) => {
+      const household = container.households.require();
+      const query = parseQuery(
+        z.object({ type: integrationTypeSchema.optional(), scan: booleanQuery }),
+        req,
+      );
+
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        // Ohne diesen Kopf puffert ein vorgeschalteter nginx den Strom –
+        // und dann kommt alles doch erst am Ende an.
+        'x-accel-buffering': 'no',
+      });
+
+      let open = true;
+      req.on('close', () => {
+        open = false;
+      });
+
+      const options: { type?: IntegrationType; allowScan: boolean } = {
+        allowScan: query.scan ?? false,
+      };
+      if (query.type) options.type = query.type;
+
+      try {
+        await container.integrations.discoverStream(household.id, options, (event) => {
+          if (!open) return;
+          res.write(`event: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`);
+        });
+      } catch (err) {
+        if (open) {
+          res.write(
+            `event: failed\ndata: ${JSON.stringify({ message: errorMessage(err) })}\n\n`,
+          );
+        }
+      }
+      res.end();
     }),
   );
 
@@ -98,6 +152,71 @@ export function integrationRoutes(container: Container): Router {
       res.json(result);
     }),
   );
+
+  /**
+   * Erneut verbinden: neue Zugangsdaten, oder bei Hue nach einem erneuten
+   * Knopfdruck. Geräte, Räume und Automationen bleiben erhalten – die
+   * Integration behält ihre ID.
+   */
+  router.post(
+    '/integrations/:id/relink',
+    asyncHandler(async (req, res) => {
+      const input = parseBody(
+        z.object({
+          host: z.string().min(3).max(255).optional(),
+          username: z.string().max(64).optional(),
+          password: z.string().max(128).optional(),
+        }),
+        req,
+      );
+      const result = await container.integrations.relink(req.params.id as string, input);
+      res.json({
+        integration: IntegrationRepository.toPublic(result.integration),
+        sync: result.sync,
+      });
+    }),
+  );
+
+  /**
+   * Was beim letzten Einlesen liegen blieb.
+   *
+   * Beantwortet die Frage „wo ist mein Rollladen?" mit einer Liste statt mit
+   * Schweigen: Welche Kanäle der Hub gesehen und warum er sie übersprungen
+   * hat. Nicht jeder Adapter kann das – dann bleibt die Liste leer.
+   */
+  router.get('/integrations/:id/diagnostics', (req, res) => {
+    const integration = container.integrations.get(req.params.id as string);
+    const adapter = container.registry.get(integration.type);
+    const devices = container.devices.list(integration.householdId, {
+      integrationId: integration.id,
+      includeHidden: true,
+    });
+
+    const skipped = adapter.diagnostics
+      ? adapter.diagnostics(container.integrations.contextFor(integration))
+      : [];
+
+    res.json({
+      integrationId: integration.id,
+      name: integration.name,
+      type: integration.type,
+      status: integration.status,
+      lastError: integration.lastError,
+      lastSeenAt: integration.lastSeenAt,
+      deviceCount: devices.length,
+      devices: devices.map((device) => ({
+        id: device.id,
+        name: device.name,
+        externalId: device.externalId,
+        capabilities: device.capabilities,
+        capabilityOverride: device.capabilityOverride,
+        reachable: device.reachable,
+        hidden: device.hidden,
+      })),
+      skipped,
+      supportsDiagnostics: typeof adapter.diagnostics === 'function',
+    });
+  });
 
   router.post(
     '/integrations/:id/test',

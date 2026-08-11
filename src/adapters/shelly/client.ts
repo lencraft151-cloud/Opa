@@ -217,16 +217,79 @@ export class ShellyClient {
     await this.sendJson(`/relay/${channel}`, { query: { turn: on ? 'on' : 'off' } });
   }
 
-  async setLight(channel: number, on: boolean, brightness?: number): Promise<void> {
+  /**
+   * Übergangszeit für Gen2: `transition_duration` zählt in **Sekunden**.
+   *
+   * Shelly nimmt bis zu fünf Sekunden an; alles darüber lehnt die Firmware
+   * ab, statt zu kürzen – deshalb wird hier gekürzt.
+   */
+  private fadeGen2(params: Record<string, unknown>, transitionMs = 0): Record<string, unknown> {
+    if (transitionMs <= 0 || params['on'] === false) return params;
+    return { ...params, transition_duration: Math.min(5, transitionMs / 1000) };
+  }
+
+  /** Dasselbe für Gen1 – dort in Millisekunden und ebenfalls bei 5 s gedeckelt. */
+  private fadeGen1(
+    query: Record<string, string | number>,
+    transitionMs = 0,
+  ): Record<string, string | number> {
+    if (transitionMs <= 0 || query['turn'] === 'off') return query;
+    return { ...query, transition: Math.round(Math.min(5000, transitionMs)) };
+  }
+
+  async setLight(
+    channel: number,
+    on: boolean,
+    brightness?: number,
+    transitionMs = 0,
+  ): Promise<void> {
     if (this.generation === 2) {
       const params: Record<string, unknown> = { id: channel, on };
       if (brightness !== undefined) params['brightness'] = Math.round(brightness);
-      await this.rpc('Light.Set', params);
+      await this.rpc('Light.Set', this.fadeGen2(params, transitionMs));
       return;
     }
     const query: Record<string, string | number> = { turn: on ? 'on' : 'off' };
     if (brightness !== undefined) query['brightness'] = Math.round(brightness);
-    await this.sendJson(`/light/${channel}`, { query });
+    await this.sendJson(`/light/${channel}`, { query: this.fadeGen1(query, transitionMs) });
+  }
+
+  /**
+   * Setzt die Farbe eines RGB-/RGBW-Kanals.
+   *
+   * Gen2 kennt je nach Kanaltyp `RGB.Set` oder `RGBW.Set`; Gen1-Bulbs und der
+   * RGBW2 nehmen die Kanäle direkt als Query-Parameter entgegen.
+   */
+  async setColor(
+    channel: number,
+    rgb: [number, number, number],
+    kind: 'rgb' | 'rgbw' | 'light',
+    transitionMs = 0,
+  ): Promise<void> {
+    const clamped = rgb.map((value) => Math.round(Math.min(255, Math.max(0, value)))) as [
+      number,
+      number,
+      number,
+    ];
+
+    if (this.generation === 2) {
+      const method = kind === 'rgbw' ? 'RGBW.Set' : 'RGB.Set';
+      await this.rpc(method, this.fadeGen2({ id: channel, on: true, rgb: clamped }, transitionMs));
+      return;
+    }
+
+    await this.sendJson(`/light/${channel}`, {
+      query: this.fadeGen1(
+        {
+          turn: 'on',
+          mode: 'color',
+          red: clamped[0],
+          green: clamped[1],
+          blue: clamped[2],
+        },
+        transitionMs,
+      ),
+    });
   }
 
   async setCoverPosition(channel: number, position: number): Promise<void> {
@@ -236,6 +299,145 @@ export class ShellyClient {
       return;
     }
     await this.sendJson(`/roller/${channel}`, { query: { go: 'to_pos', roller_pos: pos } });
+  }
+
+  /**
+   * Lamellenstellung einer Jalousie. Nur Gen2+ kennt `slat_pos`; Gen1-Roller
+   * haben keine Lamellensteuerung.
+   */
+  async setCoverTilt(channel: number, tilt: number): Promise<void> {
+    if (this.generation !== 2) {
+      throw upstreamError('Dieses Gerät unterstützt keine Lamellenverstellung');
+    }
+    const slatPos = Math.round(Math.min(100, Math.max(0, tilt)));
+    await this.rpc('Cover.GoToPosition', { id: channel, slat_pos: slatPos });
+  }
+
+  /**
+   * Solltemperatur einer Heizung. Der Gen1-TRV nimmt sie als Query-Parameter,
+   * Gen2-Thermostate über die RPC-Schnittstelle.
+   */
+  /**
+   * Solltemperatur setzen.
+   *
+   * @param kind Bauteilart – `blutrv` geht einen anderen Weg als `thermostat`.
+   */
+  async setThermostatTarget(channel: number, targetC: number, kind = 'thermostat'): Promise<void> {
+    const target = Math.round(targetC * 10) / 10;
+
+    /*
+     * Ein BLU TRV hängt per Bluetooth an einem Gen3-Shelly, der als Zugang
+     * dient. Befehle gehen deshalb nicht direkt an das Ventil, sondern
+     * eingepackt über `BluTrv.Call` an den Zugang, der sie weiterreicht.
+     */
+    if (kind === 'blutrv') {
+      await this.rpc('BluTrv.Call', {
+        id: channel,
+        method: 'Trv.SetTarget',
+        params: { id: 0, target_C: target },
+      });
+      return;
+    }
+
+    if (this.generation === 2) {
+      await this.rpc('Thermostat.SetConfig', {
+        id: channel,
+        config: { target_C: target },
+      });
+      return;
+    }
+    await this.sendJson(`/thermostat/${channel}`, {
+      query: { target_t_enabled: 1, target_t: target },
+    });
+  }
+
+  /**
+   * Weißton setzen.
+   *
+   * Gen2 kennt zwei Bauteilarten: `cct` für reine Weißton-Lampen und `light`
+   * für solche, die auch Farbe können. Beide nehmen `ct` in Kelvin. Gen1
+   * (Shelly Duo, RGBW2 im Weißmodus) will `temp` an `/light/N`.
+   */
+  async setColorTemperature(
+    channel: number,
+    kelvin: number,
+    kind = 'light',
+    transitionMs = 0,
+  ): Promise<void> {
+    const ct = Math.round(kelvin);
+    if (this.generation === 2) {
+      await this.rpc(
+        kind === 'cct' ? 'CCT.Set' : 'Light.Set',
+        this.fadeGen2({ id: channel, ct }, transitionMs),
+      );
+      return;
+    }
+    await this.sendJson(`/light/${channel}`, {
+      query: this.fadeGen1({ temp: ct, mode: 'white' }, transitionMs),
+    });
+  }
+
+  async openCover(channel: number): Promise<void> {
+    if (this.generation === 2) {
+      await this.rpc('Cover.Open', { id: channel });
+      return;
+    }
+    await this.sendJson(`/roller/${channel}`, { query: { go: 'open' } });
+  }
+
+  async closeCover(channel: number): Promise<void> {
+    if (this.generation === 2) {
+      await this.rpc('Cover.Close', { id: channel });
+      return;
+    }
+    await this.sendJson(`/roller/${channel}`, { query: { go: 'close' } });
+  }
+
+  async stopCover(channel: number): Promise<void> {
+    if (this.generation === 2) {
+      await this.rpc('Cover.Stop', { id: channel });
+      return;
+    }
+    await this.sendJson(`/roller/${channel}`, { query: { go: 'stop' } });
+  }
+
+  // -------------------------------------------------------------------------
+  // Firmware
+  // -------------------------------------------------------------------------
+
+  /**
+   * Fragt beim Gerät nach neuer Firmware.
+   *
+   * Gen2+ beantwortet `Shelly.CheckForUpdate` mit den verfügbaren Kanälen,
+   * Gen1 meldet den Stand in `/status` (`has_update`, `update.new_version`).
+   */
+  async checkForUpdate(): Promise<{ current: string | null; available: string | null }> {
+    if (this.generation === 2) {
+      const info = await this.rpc<{
+        stable?: { version?: string };
+        beta?: { version?: string };
+      }>('Shelly.CheckForUpdate');
+      const device = await this.rpc<{ ver?: string }>('Shelly.GetDeviceInfo');
+      return { current: device.ver ?? null, available: info?.stable?.version ?? null };
+    }
+
+    const status = await this.sendJson<{
+      update?: { has_update?: boolean; new_version?: string; old_version?: string };
+    }>('/status');
+    const update = status.update;
+    return {
+      current: update?.old_version ?? null,
+      available: update?.has_update ? (update.new_version ?? null) : null,
+    };
+  }
+
+  /** Stößt die Installation der stabilen Firmware an; das Gerät startet neu. */
+  async installUpdate(): Promise<void> {
+    if (this.generation === 2) {
+      await this.rpc('Shelly.Update', { stage: 'stable' });
+      return;
+    }
+    await this.sendJson('/ota', { query: { update: 'true' } });
   }
 
   /**

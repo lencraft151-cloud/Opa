@@ -1,12 +1,20 @@
 import { notFound } from '../core/errors.js';
 import type {
+  ActivityEntry,
   AccessToken,
   AutomationRule,
   Device,
   Household,
   Integration,
+  NextcloudAccount,
   PublicIntegration,
+  PublicNextcloudAccount,
   Room,
+  Scene,
+  Session,
+  SonosPlayer,
+  SpotifyAccount,
+  User,
 } from '../core/types.js';
 import { nowIso } from '../util/id.js';
 import type { Database, DatabaseShape } from './database.js';
@@ -132,27 +140,62 @@ export class IntegrationRepository extends BaseRepository<Integration> {
   }
 }
 
+/**
+ * Hat der Nutzer die Fähigkeiten eines Geräts richtiggestellt, gilt seine
+ * Angabe – überall. Deshalb geschieht das hier, am Übergang aus der
+ * Datenbank, und nicht in jedem Aufrufer einzeln.
+ *
+ * Gespeichert bleiben beide: `capabilities` ist, was das Gerät meldet,
+ * `capabilityOverride`, was der Mensch sagt. Ein Firmware-Update kann so
+ * neue Fähigkeiten mitbringen, ohne die Richtigstellung zu überschreiben.
+ */
+export function effectiveDevice(device: Device): Device {
+  if (!device.capabilityOverride || device.capabilityOverride.length === 0) return device;
+  return { ...device, capabilities: [...device.capabilityOverride] };
+}
+
 export class DeviceRepository extends BaseRepository<Device> {
   constructor(db: Database) {
     super(db, 'devices');
   }
 
+  override list(): Device[] {
+    return this.all().map(effectiveDevice);
+  }
+
+  override find(id: string): Device | undefined {
+    const device = this.all().find((entry) => entry.id === id);
+    return device ? effectiveDevice(device) : undefined;
+  }
+
+  /** Der ungeschönte Datensatz – für die Bearbeitung der Richtigstellung. */
+  raw(id: string): Device | undefined {
+    return this.all().find((entry) => entry.id === id);
+  }
+
   listByHousehold(householdId: string): Device[] {
-    return this.all().filter((device) => device.householdId === householdId);
+    return this.all()
+      .filter((device) => device.householdId === householdId)
+      .map(effectiveDevice);
   }
 
   listByIntegration(integrationId: string): Device[] {
-    return this.all().filter((device) => device.integrationId === integrationId);
+    return this.all()
+      .filter((device) => device.integrationId === integrationId)
+      .map(effectiveDevice);
   }
 
   listByRoom(roomId: string): Device[] {
-    return this.all().filter((device) => device.roomId === roomId);
+    return this.all()
+      .filter((device) => device.roomId === roomId)
+      .map(effectiveDevice);
   }
 
   findByExternalId(integrationId: string, externalId: string): Device | undefined {
-    return this.all().find(
-      (device) => device.integrationId === integrationId && device.externalId === externalId,
+    const device = this.all().find(
+      (entry) => entry.integrationId === integrationId && entry.externalId === externalId,
     );
+    return device ? effectiveDevice(device) : undefined;
   }
 
   /** Schreibt Zustandsänderungen gepuffert (hochfrequent durch Polling). */
@@ -164,7 +207,7 @@ export class DeviceRepository extends BaseRepository<Device> {
       device.reachable = reachable;
       device.lastSeenAt = reachable ? nowIso() : device.lastSeenAt;
       device.updatedAt = nowIso();
-      return device;
+      return effectiveDevice(device);
     });
   }
 
@@ -220,6 +263,166 @@ export class TokenRepository extends BaseRepository<AccessToken> {
   }
 }
 
+export class UserRepository extends BaseRepository<User> {
+  constructor(db: Database) {
+    super(db, 'users');
+  }
+
+  listByHousehold(householdId: string): User[] {
+    return this.all().filter((user) => user.householdId === householdId);
+  }
+
+  findByUsername(householdId: string, username: string): User | undefined {
+    return this.all().find(
+      (user) => user.householdId === householdId && user.username === username,
+    );
+  }
+}
+
+export class SessionRepository extends BaseRepository<Session> {
+  constructor(db: Database) {
+    super(db, 'sessions');
+  }
+
+  findByHash(hash: string): Session | undefined {
+    return this.all().find((session) => session.tokenHash === hash);
+  }
+
+  listByUser(userId: string): Session[] {
+    return this.all().filter((session) => session.userId === userId);
+  }
+
+  /** Verlängert eine Sitzung; läuft gepuffert, weil es oft passiert. */
+  async touch(id: string, expiresAt: string): Promise<void> {
+    await this.db.updateDeferred((data) => {
+      const session = data.sessions.find((item) => item.id === id);
+      if (!session) return;
+      session.lastUsedAt = nowIso();
+      session.expiresAt = expiresAt;
+    });
+  }
+
+  /** Beendet alle Sitzungen eines Benutzers, optional bis auf eine. */
+  async removeByUser(userId: string, keepId?: string): Promise<number> {
+    return this.db.update((data) => {
+      const before = data.sessions.length;
+      data.sessions = data.sessions.filter(
+        (session) => session.userId !== userId || session.id === keepId,
+      );
+      return before - data.sessions.length;
+    });
+  }
+
+  async removeExpired(now: string): Promise<number> {
+    return this.db.update((data) => {
+      const before = data.sessions.length;
+      data.sessions = data.sessions.filter((session) => session.expiresAt > now);
+      return before - data.sessions.length;
+    });
+  }
+}
+
+export class SceneRepository extends BaseRepository<Scene> {
+  constructor(db: Database) {
+    super(db, 'scenes');
+  }
+
+  listByHousehold(householdId: string): Scene[] {
+    return this.all()
+      .filter((scene) => scene.householdId === householdId)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'de'));
+  }
+
+  findByName(householdId: string, name: string): Scene | undefined {
+    const needle = name.trim().toLowerCase();
+    return this.all().find(
+      (scene) => scene.householdId === householdId && scene.name.toLowerCase() === needle,
+    );
+  }
+
+  /** Entfernt ein Gerät aus allen Szenen – etwa nach dem Löschen. */
+  async removeDevice(deviceId: string): Promise<void> {
+    await this.db.update((data) => {
+      for (const scene of data.scenes) {
+        scene.entries = scene.entries.filter((entry) => entry.deviceId !== deviceId);
+      }
+    });
+  }
+}
+
+/**
+ * Nextcloud-Konten. Aktuell höchstens eines je Haushalt – mehrere Instanzen
+ * gleichzeitig zu beobachten wäre eine Funktion ohne Fragesteller.
+ */
+export class NextcloudRepository extends BaseRepository<NextcloudAccount> {
+  constructor(db: Database) {
+    super(db, 'nextcloud');
+  }
+
+  findByHousehold(householdId: string): NextcloudAccount | undefined {
+    return this.all().find((account) => account.householdId === householdId);
+  }
+
+  /** Entfernt die verschlüsselten Zugangsdaten für die API-Ausgabe. */
+  static toPublic(account: NextcloudAccount): PublicNextcloudAccount {
+    const { secretsEnc, ...rest } = account;
+    return { ...rest, hasSecrets: secretsEnc !== null };
+  }
+}
+
+/** Sonos-Lautsprecher. Erkannt wird ein Gerät an seiner UUID, nicht an der IP. */
+export class SonosRepository extends BaseRepository<SonosPlayer> {
+  constructor(db: Database) {
+    super(db, 'sonos');
+  }
+
+  listByHousehold(householdId: string): SonosPlayer[] {
+    return this.all().filter((player) => player.householdId === householdId);
+  }
+
+  findByUuid(householdId: string, uuid: string): SonosPlayer | undefined {
+    return this.all().find(
+      (player) => player.householdId === householdId && player.uuid === uuid,
+    );
+  }
+}
+
+/** Spotify-Konto – höchstens eines je Haushalt. */
+export class SpotifyRepository extends BaseRepository<SpotifyAccount> {
+  constructor(db: Database) {
+    super(db, 'spotify');
+  }
+
+  findByHousehold(householdId: string): SpotifyAccount | undefined {
+    return this.all().find((account) => account.householdId === householdId);
+  }
+}
+
+/**
+ * Der Verlauf.
+ *
+ * Anders als die übrigen Ablagen wird hier nicht einzeln eingefügt, sondern
+ * die ganze Liste ersetzt: Der Dienst hält sie im Speicher, kürzt sie auf
+ * eine feste Länge und schreibt gebündelt weg. Ein Schreibvorgang je
+ * Lichtschalter wäre bei einem Haushalt mit dreißig Geräten zu viel.
+ */
+export class ActivityRepository extends BaseRepository<ActivityEntry> {
+  constructor(db: Database) {
+    super(db, 'activity');
+  }
+
+  listByHousehold(householdId: string): ActivityEntry[] {
+    return this.all().filter((entry) => entry.householdId === householdId);
+  }
+
+  /** Ersetzt den gesamten Verlauf – siehe Klassenkommentar. */
+  async replace(entries: ActivityEntry[]): Promise<void> {
+    await this.db.update((data) => {
+      data.activity = [...entries];
+    });
+  }
+}
+
 export interface Repositories {
   households: HouseholdRepository;
   rooms: RoomRepository;
@@ -227,6 +430,13 @@ export interface Repositories {
   devices: DeviceRepository;
   rules: RuleRepository;
   tokens: TokenRepository;
+  users: UserRepository;
+  sessions: SessionRepository;
+  scenes: SceneRepository;
+  nextcloud: NextcloudRepository;
+  sonos: SonosRepository;
+  spotify: SpotifyRepository;
+  activity: ActivityRepository;
 }
 
 export function createRepositories(db: Database): Repositories {
@@ -237,5 +447,12 @@ export function createRepositories(db: Database): Repositories {
     devices: new DeviceRepository(db),
     rules: new RuleRepository(db),
     tokens: new TokenRepository(db),
+    users: new UserRepository(db),
+    sessions: new SessionRepository(db),
+    scenes: new SceneRepository(db),
+    nextcloud: new NextcloudRepository(db),
+    sonos: new SonosRepository(db),
+    spotify: new SpotifyRepository(db),
+    activity: new ActivityRepository(db),
   };
 }

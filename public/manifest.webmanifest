@@ -1,0 +1,52 @@
+{
+  "name": "Smart-Home-Hub",
+  "short_name": "Zuhause",
+  "description": "Hue und Shelly an einem Ort: Licht, Rollläden, Temperatur und Stromverbrauch.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#10151d",
+  "theme_color": "#10151d",
+  "lang": "de",
+  "dir": "ltr",
+  "categories": ["utilities", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Räume",
+      "short_name": "Räume",
+      "url": "/?tab=rooms"
+    },
+    {
+      "name": "Stromverbrauch",
+      "short_name": "Energie",
+      "url": "/?tab=energy"
+    }
+  ]
+}

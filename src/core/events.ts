@@ -9,7 +9,28 @@ export interface HubEventMap {
   'room.updated': { room: Room };
   'telemetry.sample': { sample: TelemetrySample };
   'automation.triggered': { ruleId: string; ruleName: string; householdId: string };
-  'notification': { householdId: string; message: string; level: 'info' | 'warn' | 'error' };
+  'scene.applied': {
+    householdId: string;
+    sceneId: string;
+    name: string;
+    applied: number;
+    failed: number;
+  };
+  'notification': {
+    householdId: string;
+    message: string;
+    level: 'info' | 'warn' | 'error';
+    /** Zweite Zeile im Popup – bei Nextcloud der Text unter der Überschrift. */
+    hint?: string;
+    /** Anklickbares Ziel, etwa der Gesprächsverlauf in Nextcloud Talk. */
+    link?: string;
+    /**
+     * Woher die Meldung kommt; die Oberfläche zeigt danach ein Symbol – und
+     * blendet `automation` und `effect` aus, wenn das in den Einstellungen so
+     * gewünscht ist.
+     */
+    source?: 'hub' | 'nextcloud' | 'hub-update' | 'automation' | 'effect';
+  };
 }
 
 export type HubEventName = keyof HubEventMap;

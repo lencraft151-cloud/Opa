@@ -1,17 +1,29 @@
 import { AppError } from '../core/errors.js';
 import type {
   Capability,
+  CommandOptions,
   DeviceCommand,
   DeviceState,
   Integration,
   IntegrationConfig,
   IntegrationSecrets,
   IntegrationType,
+  UpdateInfo,
 } from '../core/types.js';
 
 /** Ein im Netzwerk gefundenes, noch nicht eingebundenes Gerät bzw. Bridge. */
+/**
+ * Was eine Netzwerksuche finden kann.
+ *
+ * Nicht alles davon ist eine Integration im Sinne des Adapters: Ein
+ * Sonos-Lautsprecher wird ohne Zugangsdaten übernommen und lebt in seinem
+ * eigenen Dienst. Gesucht wird er trotzdem gemeinsam mit den anderen – wer
+ * „Netzwerk durchsuchen" drückt, will alles finden, was da ist.
+ */
+export type DiscoveredKind = IntegrationType | 'sonos';
+
 export interface DiscoveredIntegration {
-  type: IntegrationType;
+  type: DiscoveredKind;
   host: string;
   /** Herstellerseitige ID (Hue Bridge-ID bzw. Shelly-Geräte-ID). */
   externalId: string;
@@ -71,6 +83,14 @@ export interface DiscoverOptions {
   allowCloud: boolean;
   /** Subnetz-Scan erlauben (langsamer, findet aber auch stumme Geräte). */
   allowScan: boolean;
+  /**
+   * Adressen, die für den Scan überhaupt in Frage kommen.
+   *
+   * Wird einmal für alle Hersteller ermittelt (siehe `reachableHosts`) und
+   * dann geteilt. Ohne diese Liste klopfte jeder Adapter das ganze Subnetz
+   * selbst ab – bei vier Herstellern viermal dasselbe.
+   */
+  scanHosts?: readonly string[];
 }
 
 export type StateUpdateHandler = (externalId: string, state: DeviceState) => void;
@@ -94,15 +114,51 @@ export interface IntegrationAdapter {
   /** Liest nur die Zustände (günstiger als `listDevices`). */
   readStates(ctx: IntegrationContext): Promise<Map<string, DeviceState>>;
 
-  /** Führt ein Kommando aus und liefert den daraus folgenden Zustand. */
+  /**
+   * Führt ein Kommando aus und liefert den daraus folgenden Zustand.
+   *
+   * `options` ist freiwillig – ein Adapter, dessen Geräte keine Übergänge
+   * kennen (Homematic etwa), lässt den Parameter einfach weg und schaltet
+   * wie bisher sofort.
+   */
   execute(
     ctx: IntegrationContext,
     externalId: string,
     command: DeviceCommand,
+    options?: CommandOptions,
   ): Promise<DeviceState>;
 
   /** Optionaler Push-Kanal (Hue Eventstream). Gibt eine Stop-Funktion zurück. */
   subscribe?(ctx: IntegrationContext, onUpdate: StateUpdateHandler): Promise<() => void>;
+
+  /** Prüft, ob für Bridge bzw. Gerät eine neue Firmware bereitsteht. */
+  checkForUpdate?(ctx: IntegrationContext): Promise<UpdateInfo>;
+
+  /**
+   * Stößt die Installation an. Das Gerät startet dabei neu und ist einige
+   * Minuten nicht erreichbar.
+   */
+  installUpdate?(ctx: IntegrationContext): Promise<void>;
+
+  /**
+   * Was beim letzten Einlesen liegen blieb.
+   *
+   * Beantwortet die Frage „wo ist mein Rollladen?" mit einer Liste statt mit
+   * Schweigen. Nur Adapter, die Geräte überhaupt verwerfen können, brauchen
+   * das – bei Hue etwa ist jede Ressource entweder ein Gerät oder gehört zu
+   * einem.
+   */
+  diagnostics?(ctx: IntegrationContext): SkippedEntry[];
+}
+
+/** Ein Kanal oder eine Komponente, aus der kein Gerät wurde. */
+export interface SkippedEntry {
+  /** Kennung beim Hersteller, z. B. die Kanaladresse. */
+  address: string;
+  /** Wie das Gerät sich selbst benennt. */
+  channelType: string;
+  /** In Alltagssprache, warum daraus kein Gerät wurde. */
+  reason: string;
 }
 
 /** Der Nutzer muss den Link-Button der Hue Bridge drücken. */

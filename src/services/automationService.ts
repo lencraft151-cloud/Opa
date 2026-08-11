@@ -6,6 +6,7 @@ import type {
   ComparisonOperator,
   Device,
   Metric,
+  DeviceCommand,
   RuleAction,
   RuleCondition,
   RuleTrigger,
@@ -13,13 +14,29 @@ import type {
 import { request } from '../util/http.js';
 import { createId, nowIso } from '../util/id.js';
 import type { Repositories } from '../storage/repositories.js';
+import {
+  resolveTemplates,
+  templateById,
+  type ResolvedTemplate,
+  type TemplateValues,
+} from './automationTemplates.js';
 import type { DeviceService } from './deviceService.js';
+import type { EffectService } from './effectService.js';
 import type { HouseholdService } from './householdService.js';
 
 const log = createLogger('automations');
 
 /** Taktrate für Zeitpläne und Haltedauern (`forSeconds`). */
-const TICK_MS = 30_000;
+/*
+ * Takt der Regelprüfung.
+ *
+ * Fünf Sekunden statt der früheren dreißig: Ein Intervall von zwanzig
+ * Sekunden lässt sich mit einem Dreißig-Sekunden-Takt schlicht nicht
+ * einhalten. Die Prüfung selbst ist billig – sie sieht auf die Uhr und
+ * vergleicht Zahlen; teuer wird nur das Ausführen, und das passiert
+ * ohnehin nur, wenn eine Regel greift.
+ */
+const TICK_MS = 5_000;
 
 interface RuleRuntimeState {
   /** Seit wann ist die Trigger-Bedingung ununterbrochen erfüllt? */
@@ -29,6 +46,8 @@ interface RuleRuntimeState {
   lastTriggeredMs: number;
   /** Letzter ausgelöster Zeitplan als `YYYY-MM-DDTHH:MM`. */
   lastScheduleSlot: string | null;
+  /** Letzte Ausführung eines wiederholenden Auslösers. */
+  lastIntervalMs: number;
 }
 
 export interface CreateRuleInput {
@@ -51,13 +70,28 @@ export class AutomationService {
   private readonly runtime = new Map<string, RuleRuntimeState>();
   private timer: NodeJS.Timeout | null = null;
   private unsubscribe: (() => void) | null = null;
+  /** Laufende Rücknahmen aus `forSeconds` – siehe `scheduleUndo`. */
+  private readonly pendingUndos = new Set<NodeJS.Timeout>();
   private householdId: string | null = null;
 
   constructor(
     private readonly repos: Repositories,
     private readonly devices: DeviceService,
     private readonly households: HouseholdService,
+    /**
+     * Die Lichteffekte.
+     *
+     * Nachgereicht statt im Konstruktor verlangt, weil der Effektdienst
+     * seinerseits Geräte braucht – und zwei Dienste, die sich gegenseitig im
+     * Konstruktor fordern, lassen sich nicht bauen.
+     */
+    private effects: EffectService | null = null,
   ) {}
+
+  /** Wird beim Zusammenbau nachgereicht – siehe Konstruktor. */
+  useEffects(effects: EffectService): void {
+    this.effects = effects;
+  }
 
   // -------------------------------------------------------------------------
   // CRUD
@@ -133,6 +167,37 @@ export class AutomationService {
   }
 
   // -------------------------------------------------------------------------
+  // Vorlagen
+  // -------------------------------------------------------------------------
+
+  /** Vorlagen inklusive Vorbelegung aus dem tatsächlichen Gerätebestand. */
+  templates(householdId: string): ResolvedTemplate[] {
+    return resolveTemplates(
+      this.repos.devices.listByHousehold(householdId),
+      this.repos.rooms.listByHousehold(householdId),
+    );
+  }
+
+  /** Legt aus einer Vorlage eine fertige Regel an. */
+  async createFromTemplate(
+    householdId: string,
+    templateId: string,
+    values: TemplateValues,
+    name?: string,
+  ): Promise<AutomationRule> {
+    const template = templateById(templateId);
+
+    // Fehlende Felder aus der Vorbelegung ergänzen, damit ein Klick auf
+    // „Übernehmen“ ohne weitere Eingaben genügt.
+    const resolved = this.templates(householdId).find((entry) => entry.id === templateId);
+    const merged: TemplateValues = { ...(resolved?.defaults ?? {}), ...values };
+
+    const input = template.build(merged);
+    if (name?.trim()) input.name = name.trim();
+    return this.create(householdId, input);
+  }
+
+  // -------------------------------------------------------------------------
   // Ausführung
   // -------------------------------------------------------------------------
 
@@ -161,6 +226,9 @@ export class AutomationService {
     this.timer = null;
     this.unsubscribe?.();
     this.unsubscribe = null;
+    // Sonst schaltete nach dem Herunterfahren noch eine Rücknahme.
+    for (const undo of this.pendingUndos) clearTimeout(undo);
+    this.pendingUndos.clear();
   }
 
   /** Führt eine Regel unabhängig vom Trigger aus (Test-Knopf in der UI). */
@@ -190,12 +258,30 @@ export class AutomationService {
         continue;
       }
 
+      if (rule.trigger.type === 'interval') {
+        if (this.shouldFireInterval(rule.id, rule.trigger, now, household.timezone, weekday)) {
+          this.stateFor(rule.id).lastIntervalMs = now.getTime();
+          await this.fire(rule);
+        }
+        continue;
+      }
+
       // Haltedauern (`forSeconds`) laufen auch ohne neuen Messwert weiter.
       if (rule.trigger.type === 'sensor' && rule.trigger.forSeconds) {
         const device = this.repos.devices.find(rule.trigger.deviceId);
         if (device) await this.evaluateRule(rule, device);
       }
     }
+  }
+
+  private shouldFireInterval(
+    ruleId: string,
+    trigger: Extract<RuleTrigger, { type: 'interval' }>,
+    now: Date,
+    timezone: string,
+    weekday: number,
+  ): boolean {
+    return isIntervalDue(trigger, this.stateFor(ruleId).lastIntervalMs, now, timezone, weekday);
   }
 
   private async evaluateForDevice(device: Device): Promise<void> {
@@ -214,6 +300,24 @@ export class AutomationService {
     const satisfied = this.isTriggerSatisfied(rule.trigger, device);
     const state = this.stateFor(rule.id);
     const now = Date.now();
+
+    /*
+     * Was ein Lichteffekt an dieser Lampe anstellt, ist keine Nachricht über
+     * die Wohnung. Der Zustand wird trotzdem mitgeführt – und zwar so, als
+     * hätte die Regel bereits ausgelöst. Sonst holte sie es nach, sobald die
+     * nächste Abfrage denselben Zustand meldet, und eine Regel „wenn das Licht
+     * ausgeht, starte den Gruselmodus" startete sich in Endlosschleife selbst.
+     */
+    if (this.effects?.controls(device.id)) {
+      if (satisfied) {
+        state.satisfiedSince ??= now;
+        state.firedForEpisode = true;
+      } else {
+        state.satisfiedSince = null;
+        state.firedForEpisode = false;
+      }
+      return;
+    }
 
     if (!satisfied) {
       // Flanke zurückgesetzt – die Regel darf erneut auslösen.
@@ -254,6 +358,40 @@ export class AutomationService {
     await this.executeActions(rule);
   }
 
+  /**
+   * Nimmt ein Kommando nach der eingestellten Zeit wieder zurück.
+   *
+   * Das Gegenteil wird aus dem Kommando selbst abgeleitet – nur dort, wo es
+   * eindeutig ist: Einschalten wird Ausschalten, Auffahren wird Zufahren.
+   * Für eine Helligkeit gibt es kein Gegenteil, ohne den vorherigen Wert zu
+   * kennen; solche Kommandos laufen ohne Rücknahme, und die Oberfläche bietet
+   * die Dauer dort gar nicht erst an.
+   *
+   * Die Zeitgeber liegen in einer Liste, damit `stop()` sie mitnimmt – sonst
+   * schaltete nach dem Herunterfahren noch etwas.
+   */
+  private scheduleUndo(
+    rule: AutomationRule,
+    action: Extract<RuleAction, { type: 'command' }>,
+  ): void {
+    const undo = undoCommand(action.command);
+    if (!undo) return;
+
+    const timer = setTimeout(
+      () => {
+        this.pendingUndos.delete(timer);
+        void this.devices
+          .executeMany(rule.householdId, action.target, undo)
+          .catch((err) =>
+            log.warn('Rücknahme fehlgeschlagen', { rule: rule.name, error: errorMessage(err) }),
+          );
+      },
+      (action.forSeconds ?? 0) * 1000,
+    );
+    timer.unref?.();
+    this.pendingUndos.add(timer);
+  }
+
   private async executeActions(rule: AutomationRule): Promise<number> {
     let executed = 0;
     for (const action of rule.actions) {
@@ -273,6 +411,7 @@ export class AutomationService {
                 failed: failed.map((f) => f.error),
               });
             }
+            if (action.forSeconds) this.scheduleUndo(rule, action);
             break;
           }
           case 'webhook': {
@@ -289,7 +428,27 @@ export class AutomationService {
               householdId: rule.householdId,
               message: action.message,
               level: 'info',
+              source: 'automation',
             });
+            executed++;
+            break;
+          }
+          case 'effect': {
+            /*
+             * Ein Effekt ist kein Zustand, sondern ein Vorgang: Er läuft
+             * weiter, bis die Zeit um ist. Deshalb keine Rücknahme über
+             * `forSeconds` – die Laufzeit steckt im Effekt selbst.
+             */
+            await this.effects?.start(rule.householdId, action.effect, {
+              ...(action.target?.deviceIds ? { deviceIds: action.target.deviceIds } : {}),
+              ...(action.target?.roomIds ? { roomIds: action.target.roomIds } : {}),
+              ...(action.minutes ? { minutes: action.minutes } : {}),
+            });
+            executed++;
+            break;
+          }
+          case 'stopEffect': {
+            await this.effects?.stop(action.effect);
             executed++;
             break;
           }
@@ -319,7 +478,8 @@ export class AutomationService {
         return typeof value === 'boolean' && value === trigger.equals;
       }
       case 'schedule':
-        return false; // wird im Takt ausgewertet
+      case 'interval':
+        return false; // beides wird im Takt ausgewertet
       default:
         return false;
     }
@@ -357,6 +517,7 @@ export class AutomationService {
         firedForEpisode: false,
         lastTriggeredMs: 0,
         lastScheduleSlot: null,
+        lastIntervalMs: 0,
       };
       this.runtime.set(ruleId, state);
     }
@@ -380,6 +541,25 @@ export class AutomationService {
     if (trigger.type === 'schedule' && !/^\d{2}:\d{2}$/.test(trigger.at)) {
       throw badRequest('Die Uhrzeit muss im Format HH:MM angegeben werden');
     }
+    if (trigger.type === 'interval') {
+      if (trigger.everySeconds === undefined && trigger.everyMinutes === undefined) {
+        throw badRequest('Für eine Wiederholung wird ein Abstand gebraucht.');
+      }
+      if (trigger.everySeconds !== undefined && trigger.everySeconds < 5) {
+        throw badRequest(
+          'Der Abstand muss mindestens fünf Sekunden betragen.',
+          undefined,
+          'Darunter käme der Hub mit dem Fragen und Schalten nicht hinterher.',
+        );
+      }
+      if ((trigger.from && !trigger.to) || (!trigger.from && trigger.to)) {
+        throw badRequest(
+          'Für ein Zeitfenster werden Start- und Endzeit gebraucht.',
+          undefined,
+          'Gib beide an – oder keine, dann gilt die Regel rund um die Uhr.',
+        );
+      }
+    }
 
     for (const condition of conditions) {
       if (condition.type === 'deviceState' || condition.type === 'sensor') {
@@ -388,9 +568,11 @@ export class AutomationService {
     }
 
     for (const action of actions) {
-      if (action.type !== 'command') continue;
-      for (const deviceId of action.target.deviceIds ?? []) assertDevice(deviceId);
-      for (const roomId of action.target.roomIds ?? []) {
+      // Ein Effekt darf ebenso wenig auf fremde Geräte zeigen wie ein Kommando.
+      const target = action.type === 'command' || action.type === 'effect' ? action.target : null;
+      if (!target) continue;
+      for (const deviceId of target.deviceIds ?? []) assertDevice(deviceId);
+      for (const roomId of target.roomIds ?? []) {
         const room = this.repos.rooms.find(roomId);
         if (!room || room.householdId !== householdId) {
           throw badRequest(`Raum ${roomId} gehört nicht zu diesem Haushalt`);
@@ -440,6 +622,33 @@ function localSlot(date: Date, timezone: string): { time: string; key: string } 
   return { time, key: `${day}T${time}` };
 }
 
+/**
+ * Ist eine wiederholende Regel wieder dran?
+ *
+ * Der Abstand wird ab der letzten Ausführung gemessen, nicht an festen
+ * Uhrzeiten. Nach einem Neustart läuft die Regel damit einmal sofort und
+ * danach im gewünschten Takt – das ist bei „alle zwei Stunden lüften
+ * erinnern" das erwartete Verhalten.
+ *
+ * Zeitfenster und Wochentage schränken zusätzlich ein: Außerhalb passiert
+ * nichts, und die verstrichene Zeit läuft trotzdem weiter. Nach dem Fenster
+ * wird also nicht alles Versäumte nachgeholt, sondern einmal ausgelöst.
+ */
+export function isIntervalDue(
+  trigger: Extract<RuleTrigger, { type: 'interval' }>,
+  lastRunMs: number,
+  now: Date,
+  timezone: string,
+  weekday: number,
+): boolean {
+  if (trigger.days && trigger.days.length > 0 && !trigger.days.includes(weekday)) return false;
+  if (trigger.from && trigger.to && !isWithinTimeRange(now, timezone, trigger.from, trigger.to)) {
+    return false;
+  }
+  const seconds = trigger.everySeconds ?? (trigger.everyMinutes ?? 0) * 60;
+  return (now.getTime() - lastRunMs) / 1000 >= seconds;
+}
+
 /** Wochentag 0 = Sonntag … 6 = Samstag, in der Zeitzone des Haushalts. */
 export function localWeekday(date: Date, timezone: string): number {
   const name = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short' }).format(
@@ -459,4 +668,24 @@ export function isWithinTimeRange(
   const now = localTime(date, timezone);
   if (from <= to) return now >= from && now <= to;
   return now >= from || now <= to;
+}
+
+/**
+ * Das Gegenteil eines Kommandos – oder nichts, wenn es keins gibt.
+ *
+ * Bewusst nur die eindeutigen Fälle. Für „Helligkeit 40 %" wäre das Gegenteil
+ * der vorherige Wert, und den müsste man raten; lieber gar keine Rücknahme
+ * als eine falsche.
+ */
+export function undoCommand(command: DeviceCommand): DeviceCommand | null {
+  switch (command.type) {
+    case 'setPower':
+      return { type: 'setPower', on: !command.on };
+    case 'openCover':
+      return { type: 'closeCover' };
+    case 'closeCover':
+      return { type: 'openCover' };
+    default:
+      return null;
+  }
 }

@@ -2,7 +2,12 @@ import http from 'node:http';
 import https from 'node:https';
 import { URL } from 'node:url';
 import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
-import { timeout as timeoutError, upstreamError } from '../core/errors.js';
+import {
+  AppError,
+  describeNetworkError,
+  timeout as timeoutError,
+  upstreamError,
+} from '../core/errors.js';
 
 export interface RequestOptions {
   method?: string;
@@ -95,9 +100,39 @@ export function openStream(rawUrl: string, options: RequestOptions = {}): Promis
       (res) => resolve(res),
     );
 
-    req.setTimeout(timeoutMs, () => {
-      req.destroy(timeoutError(`Zeitüberschreitung nach ${timeoutMs} ms bei ${url.host}`));
-    });
+    if (timeoutMs > 0) {
+      const giveUp = (): void => {
+        req.destroy(
+          timeoutError(
+            `${url.host} hat nicht innerhalb von ${timeoutMs} ms geantwortet.`,
+            'Batteriebetriebene Sensoren schlafen zwischen zwei Meldungen – das ist normal. ' +
+              'Bei dauerhaft nicht erreichbaren Geräten die IP-Adresse prüfen.',
+          ),
+        );
+      };
+
+      /*
+       * Zwei Uhren, und die zweite ist die wichtigere.
+       *
+       * `req.setTimeout` wirkt erst, wenn die Verbindung **steht** – so steht
+       * es in der Node-Dokumentation, und so verhält es sich auch. Eine
+       * Adresse, an der niemand ist und deren SYN-Pakete stillschweigend
+       * verworfen werden (jede unbenutzte IP im eigenen Subnetz, jedes
+       * abgeschaltete Gerät), hängt deshalb nicht im eingestellten Timeout,
+       * sondern in dem des Betriebssystems: gut zwei Minuten.
+       *
+       * Beim Abklopfen eines Subnetzes ist das der Unterschied zwischen
+       * „dauert kurz" und „hängt". Der harte Wecker unten läuft ab dem
+       * Absenden und kennt diesen Unterschied nicht.
+       */
+      req.setTimeout(timeoutMs, giveUp);
+      const hardTimer = setTimeout(giveUp, timeoutMs);
+      hardTimer.unref?.();
+      const clear = (): void => clearTimeout(hardTimer);
+      req.once('response', clear);
+      req.once('error', clear);
+      req.once('close', clear);
+    }
 
     req.on('error', (err: NodeJS.ErrnoException) => {
       reject(translateNetworkError(err, url.host));
@@ -126,10 +161,13 @@ export async function readBody(res: IncomingMessage, maxBytes = DEFAULT_MAX_BODY
 export async function requestJson<T>(rawUrl: string, options: RequestOptions = {}): Promise<T> {
   const res = await request(rawUrl, options);
   if (res.status >= 400) {
-    throw upstreamError(`HTTP ${res.status} von ${new URL(rawUrl).host}`, {
-      status: res.status,
-      body: res.body.slice(0, 500),
-    });
+    throw upstreamError(
+      `${new URL(rawUrl).host} hat mit HTTP ${res.status} geantwortet.`,
+      { status: res.status, body: res.body.slice(0, 500) },
+      res.status === 404
+        ? 'Der angefragte Pfad existiert auf diesem Gerät nicht – vermutlich ist es ein anderer Gerätetyp als angenommen.'
+        : undefined,
+    );
   }
   return parseJson<T>(res.body, rawUrl);
 }
@@ -138,24 +176,18 @@ export function parseJson<T>(body: string, source: string): T {
   try {
     return JSON.parse(body) as T;
   } catch {
-    throw upstreamError(`Ungültige JSON-Antwort von ${source}`, { body: body.slice(0, 200) });
+    throw upstreamError(
+      `${source} hat keine gültige JSON-Antwort geliefert.`,
+      { body: body.slice(0, 200) },
+      'Unter dieser Adresse antwortet vermutlich ein anderes Gerät (z. B. ein Router-Webinterface).',
+    );
   }
 }
 
 function translateNetworkError(err: NodeJS.ErrnoException, host: string): Error {
-  switch (err.code) {
-    case 'ECONNREFUSED':
-      return upstreamError(`Verbindung zu ${host} abgelehnt – ist das Gerät erreichbar?`);
-    case 'EHOSTUNREACH':
-    case 'ENETUNREACH':
-      return upstreamError(`${host} ist im Netzwerk nicht erreichbar`);
-    case 'ENOTFOUND':
-      return upstreamError(`Hostname ${host} konnte nicht aufgelöst werden`);
-    case 'ETIMEDOUT':
-      return timeoutError(`Zeitüberschreitung bei ${host}`);
-    default:
-      return err;
-  }
+  // Ein bereits übersetzter Fehler (z. B. aus dem Timeout-Handler) bleibt.
+  if (err instanceof AppError) return err;
+  return describeNetworkError(err.code, host);
 }
 
 export interface RetryOptions {

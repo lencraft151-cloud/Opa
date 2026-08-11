@@ -1,5 +1,5 @@
 import { rgbToHsv, round } from '../../core/color.js';
-import type { Capability, DeviceState } from '../../core/types.js';
+import type { Capability, CoverState, DeviceState } from '../../core/types.js';
 
 /**
  * Ein Shelly ist ein physisches Gerät mit mehreren Komponenten (Relais,
@@ -53,7 +53,11 @@ function label(naming: ShellyNaming, externalId: string, fallback: string): stri
 // Gen2 / Gen3 / Gen4 (JSON-RPC)
 // ---------------------------------------------------------------------------
 
-export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyComponent[] {
+export function parseGen2Status(
+  status: Json,
+  naming: ShellyNaming,
+  skipped: Array<{ id: string; reason: string }> = [],
+): ShellyComponent[] {
   const components: ShellyComponent[] = [];
 
   for (const [key, rawValue] of Object.entries(status)) {
@@ -89,6 +93,13 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
         break;
       }
 
+      /*
+       * `cct` ist eine reine Weißton-Lampe (Shelly Duo, DUO GU10), die
+       * anderen drei können Farbe – und viele davon zusätzlich Weißtöne.
+       * Bisher fiel `cct` ganz durch und der Weißton der übrigen unter den
+       * Tisch: Die Lampe war da, ließ sich aber nur dimmen.
+       */
+      case 'cct':
       case 'light':
       case 'rgbw':
       case 'rgb': {
@@ -98,6 +109,7 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
         if (on !== undefined) state.on = on;
         const brightness = num(value['brightness']);
         if (brightness !== undefined) state.brightness = round(brightness, 1);
+
         const rgb = arr(value['rgb']);
         if (rgb && rgb.length >= 3) {
           const hsv = rgbToHsv({
@@ -109,9 +121,17 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
           state.saturation = hsv.saturation;
           capabilities.push('color');
         }
+
+        // Der Weißton steht als Kelvin unter `ct` bzw. `temp`.
+        const kelvin = num(value['ct']) ?? num(value['temp']);
+        if (kelvin !== undefined) {
+          state.colorTemperatureK = round(kelvin, 0);
+          capabilities.push('color_temperature');
+        }
+
         components.push({
           externalId: key,
-          name: label(naming, key, `Licht ${channel + 1}`),
+          name: label(naming, key, kind === 'cct' ? `Licht ${channel + 1}` : `Licht ${channel + 1}`),
           capabilities,
           state,
         });
@@ -123,6 +143,15 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
         const capabilities: Capability[] = ['cover'];
         const position = num(value['current_pos']);
         if (position !== undefined) state.position = position;
+        state.coverState = normalizeCoverState(str(value['state']), position, 2);
+
+        // Jalousien melden zusätzlich die Lamellenstellung.
+        const tilt = num(value['slat_pos']) ?? num(obj(value['slat'])?.['pos']);
+        if (tilt !== undefined) {
+          state.tilt = tilt;
+          capabilities.push('cover.tilt');
+        }
+
         const power = num(value['apower']);
         if (power !== undefined) {
           state.powerW = round(power, 2);
@@ -138,25 +167,51 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
       }
 
       case 'temperature': {
-        const tC = num(value['tC']);
-        if (tC === undefined) break;
+        /*
+         * Der Wert steht je nach Gerät unter `tC`, `value` – oder nur in
+         * Fahrenheit, wenn die Box so eingestellt ist. Fehlt er ganz, ist der
+         * Fühler gerade ungültig (abgezogen, noch nicht gemessen); das ist
+         * kein Grund, das Gerät verschwinden zu lassen.
+         */
+        const fahrenheit = num(value['tF']);
+        const tC =
+          num(value['tC']) ??
+          num(value['value']) ??
+          (fahrenheit !== undefined ? ((fahrenheit - 32) * 5) / 9 : undefined);
         components.push({
           externalId: key,
           name: label(naming, key, `Temperatur ${channel + 1}`),
           capabilities: ['sensor.temperature'],
-          state: { temperatureC: round(tC, 2) },
+          state: tC === undefined ? {} : { temperatureC: round(tC, 2) },
         });
         break;
       }
 
       case 'humidity': {
-        const rh = num(value['rh']);
-        if (rh === undefined) break;
+        const rh = num(value['rh']) ?? num(value['value']);
         components.push({
           externalId: key,
           name: label(naming, key, `Luftfeuchte ${channel + 1}`),
           capabilities: ['sensor.humidity'],
-          state: { humidity: round(rh, 1) },
+          state: rh === undefined ? {} : { humidity: round(rh, 1) },
+        });
+        break;
+      }
+
+      /*
+       * `thermostat` ist der Wall-Display-Regler, `blutrv` das
+       * Bluetooth-Heizkörperventil, das über einen Gen3-Shelly als Zugang
+       * hereinkommt. Beide melden Soll- und Istwert getrennt, nur unter
+       * verschiedenen Namen – deshalb hier zusammen.
+       */
+      case 'thermostat':
+      case 'blutrv': {
+        const component = thermostatComponent(value);
+        if (!component) break;
+        components.push({
+          externalId: key,
+          name: label(naming, key, `Heizung ${channel + 1}`),
+          ...component,
         });
         break;
       }
@@ -196,12 +251,179 @@ export function parseGen2Status(status: Json, naming: ShellyNaming): ShellyCompo
         break;
       }
 
-      default:
+      case 'illuminance': {
+        const lux = num(value['lux']) ?? num(value['illumination']);
+        if (lux === undefined) break;
+        components.push({
+          externalId: key,
+          name: label(naming, key, `Helligkeit ${channel + 1}`),
+          capabilities: ['sensor.illuminance'],
+          state: { illuminanceLux: round(lux, 1) },
+        });
         break;
+      }
+
+      /*
+       * BLU-Geräte (H&T, Motion, Tür/Fenster) hängen per Bluetooth an einem
+       * Gen3-Shelly, der sie als `bthomesensor` weiterreicht. Ein solcher
+       * Sensor führt genau einen Wert – welchen, sagt er selbst.
+       */
+      case 'bthomesensor': {
+        const component = bthomeSensor(value);
+        if (!component) break;
+        components.push({
+          externalId: key,
+          name: label(naming, key, str(value['name']) || `Sensor ${channel + 1}`),
+          ...component,
+        });
+        break;
+      }
+
+      /*
+       * Ein unbekannter Bauteiltyp verschwand bisher wortlos – dieselbe Falle
+       * wie früher bei Homematic. Shelly bringt laufend neue heraus, und ein
+       * Heizkörperventil, das der Hub nicht kennt, ist für den Bewohner
+       * schlicht nicht da. Also wird geraten: nicht nach dem Namen, sondern
+       * nach den Werten, die das Bauteil führt.
+       */
+      default: {
+        const component = inferComponent(value);
+        if (!component) {
+          skipped.push({ id: key, reason: `Bauteiltyp "${kind}" führt keine bekannten Werte` });
+          break;
+        }
+        components.push({
+          externalId: key,
+          name: label(naming, key, str(value['name']) || `${kind} ${channel + 1}`),
+          ...component,
+        });
+        break;
+      }
     }
   }
 
   return components;
+}
+
+/**
+ * Soll- und Isttemperatur eines Reglers, egal wie er sie nennt.
+ *
+ * Wall Display schreibt `target_C`, das BLU TRV `target_t.value`, ältere
+ * Firmware `targetTemp`. Alle meinen dasselbe.
+ */
+function thermostatComponent(
+  value: Json,
+): Pick<ShellyComponent, 'capabilities' | 'state'> | undefined {
+  const target =
+    num(value['target_C']) ??
+    num(obj(value['target_t'])?.['value']) ??
+    num(value['targetTemp']) ??
+    num(value['target_t']);
+  const current =
+    num(value['current_C']) ??
+    num(obj(value['current_t'])?.['value']) ??
+    num(value['tC']) ??
+    num(value['currentTemp']);
+  if (target === undefined && current === undefined) return undefined;
+
+  const state: DeviceState = {};
+  if (target !== undefined) state.targetTemperatureC = round(target, 1);
+  if (current !== undefined) state.temperatureC = round(current, 2);
+
+  // Das Ventil sagt, wie weit es offen steht – nützlich, um zu sehen, ob
+  // wirklich geheizt wird.
+  const valve = num(value['pos']) ?? num(value['valve_pos']) ?? num(value['current_pos']);
+  if (valve !== undefined) state.valvePosition = round(valve, 0);
+
+  const capabilities: Capability[] = ['thermostat'];
+  if (current !== undefined) capabilities.push('sensor.temperature');
+  return { capabilities, state };
+}
+
+/** Ein einzelner Messwert eines BLU-Geräts. */
+function bthomeSensor(value: Json): Pick<ShellyComponent, 'capabilities' | 'state'> | undefined {
+  const reading = num(value['value']);
+  if (reading === undefined) return undefined;
+
+  switch (str(value['obj_id']) ?? str(value['sensor_type'])) {
+    case 'temperature':
+      return { capabilities: ['sensor.temperature'], state: { temperatureC: round(reading, 2) } };
+    case 'humidity':
+      return { capabilities: ['sensor.humidity'], state: { humidity: round(reading, 1) } };
+    case 'illuminance':
+      return { capabilities: ['sensor.illuminance'], state: { illuminanceLux: round(reading, 1) } };
+    case 'battery':
+      return { capabilities: ['sensor.battery'], state: { batteryPercent: round(reading, 0) } };
+    case 'motion':
+      return { capabilities: ['sensor.motion'], state: { motion: reading > 0 } };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Was ein unbekanntes Bauteil ist – geraten aus dem, was es kann.
+ *
+ * Dieselbe Überlegung wie bei Homematic: Die Namensliste deckt ab, was wir
+ * kennen, aber nicht, was noch kommt. Ein Bauteil mit Soll- und
+ * Isttemperatur ist eine Heizung, egal wie es heißt; eines mit Position und
+ * Fahrzustand ein Rollladen.
+ */
+export function inferComponent(
+  value: Json,
+): Pick<ShellyComponent, 'capabilities' | 'state'> | undefined {
+  // Solltemperatur ist eindeutig.
+  const asThermostat = thermostatComponent(value);
+  if (asThermostat && asThermostat.state.targetTemperatureC !== undefined) return asThermostat;
+
+  // Position plus Fahrzustand – ein Antrieb, kein Dimmer.
+  const position = num(value['current_pos']);
+  if (position !== undefined && value['state'] !== undefined) {
+    const state: DeviceState = {
+      position,
+      coverState: normalizeCoverState(str(value['state']), position, 2),
+    };
+    const capabilities: Capability[] = ['cover'];
+    const tilt = num(value['slat_pos']) ?? num(obj(value['slat'])?.['pos']);
+    if (tilt !== undefined) {
+      state.tilt = tilt;
+      capabilities.push('cover.tilt');
+    }
+    return { capabilities, state };
+  }
+
+  // Ein schaltbarer Ausgang.
+  const on = bool(value['output']) ?? bool(value['ison']);
+  if (on !== undefined) {
+    const state: DeviceState = { on };
+    const capabilities: Capability[] = ['switch'];
+    const brightness = num(value['brightness']);
+    if (brightness !== undefined) {
+      state.brightness = round(brightness, 1);
+      capabilities.push('dimmer');
+    }
+    return { capabilities, state };
+  }
+
+  // Reine Messwerte.
+  const temperature = num(value['tC']) ?? num(obj(value['tC'])?.['value']);
+  const humidity = num(value['rh']);
+  const lux = num(value['lux']);
+  const state: DeviceState = {};
+  const capabilities: Capability[] = [];
+  if (temperature !== undefined) {
+    state.temperatureC = round(temperature, 2);
+    capabilities.push('sensor.temperature');
+  }
+  if (humidity !== undefined) {
+    state.humidity = round(humidity, 1);
+    capabilities.push('sensor.humidity');
+  }
+  if (lux !== undefined) {
+    state.illuminanceLux = round(lux, 1);
+    capabilities.push('sensor.illuminance');
+  }
+  return capabilities.length > 0 ? { capabilities, state } : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +435,16 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
   const meters = arr(status['meters']) ?? arr(status['emeters']) ?? [];
   const isEmeter = arr(status['meters']) === undefined && arr(status['emeters']) !== undefined;
 
-  const relays = arr(status['relays']) ?? [];
+  const rollers = arr(status['rollers']) ?? [];
+
+  /*
+   * Im Rollladenmodus meldet ein Shelly 2/2.5 zusätzlich seine beiden Relais –
+   * das sind die Motorrichtungen „auf" und „zu". Sie als Schalter anzubieten
+   * wäre nicht nur verwirrend, sondern gefährlich: Beide gleichzeitig
+   * eingeschaltet legt Spannung auf beide Wicklungen. In diesem Modus zählt
+   * deshalb allein der Rollladen.
+   */
+  const relays = rollers.length > 0 ? [] : (arr(status['relays']) ?? []);
   relays.forEach((rawRelay, index) => {
     const relay = obj(rawRelay);
     if (!relay) return;
@@ -266,6 +497,17 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
       state.saturation = hsv.saturation;
       capabilities.push('color');
     }
+
+    /*
+     * Die Shelly Duo ist eine reine Weißton-Lampe, die RGBW2 kann beides und
+     * meldet im Weißmodus ebenfalls `temp`. Ohne diesen Zweig ließ sich eine
+     * Duo nur dimmen – warm und kalt blieben unerreichbar.
+     */
+    const temp = num(light['temp']);
+    if (temp !== undefined) {
+      state.colorTemperatureK = round(temp, 0);
+      capabilities.push('color_temperature');
+    }
     components.push({
       externalId,
       name: label(naming, externalId, `Licht ${index + 1}`),
@@ -274,7 +516,6 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
     });
   });
 
-  const rollers = arr(status['rollers']) ?? [];
   rollers.forEach((rawRoller, index) => {
     const roller = obj(rawRoller);
     if (!roller) return;
@@ -282,10 +523,17 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
     const state: DeviceState = {};
     const position = num(roller['current_pos']);
     if (position !== undefined) state.position = position;
+    state.coverState = normalizeCoverState(str(roller['state']), position, 1);
+    const power = num(roller['power']);
+    const capabilities: Capability[] = ['cover'];
+    if (power !== undefined) {
+      state.powerW = round(power, 2);
+      capabilities.push('sensor.power');
+    }
     components.push({
       externalId,
       name: label(naming, externalId, `Rollladen ${index + 1}`),
-      capabilities: ['cover'],
+      capabilities,
       state,
     });
   });
@@ -313,6 +561,37 @@ export function parseGen1Status(status: Json, naming: ShellyNaming): ShellyCompo
       });
     });
   }
+
+  /*
+   * Shelly TRV (SHTRV-01): das Heizkörperventil meldet Soll- und Isttemperatur
+   * sowie die Ventilstellung in einem eigenen Abschnitt. Es ist Gen1 und
+   * bekommt keine neue Firmware mehr – ohne diesen Zweig bliebe es unerkannt.
+   */
+  const thermostats = arr(status['thermostats']) ?? [];
+  thermostats.forEach((rawThermostat, index) => {
+    const thermostat = obj(rawThermostat);
+    if (!thermostat) return;
+    const externalId = `thermostat:${index}`;
+    const state: DeviceState = {};
+    const capabilities: Capability[] = ['thermostat'];
+
+    const target = num(obj(thermostat['target_t'])?.['value']);
+    if (target !== undefined) state.targetTemperatureC = round(target, 1);
+    const current = num(obj(thermostat['tmp'])?.['value']);
+    if (current !== undefined) {
+      state.temperatureC = round(current, 2);
+      capabilities.push('sensor.temperature');
+    }
+    const valve = num(thermostat['pos']);
+    if (valve !== undefined) state.valvePosition = round(valve, 0);
+
+    components.push({
+      externalId,
+      name: label(naming, externalId, `Heizung ${index + 1}`),
+      capabilities,
+      state,
+    });
+  });
 
   // Shelly H&T / Flood / Door-Window
   const tmp = obj(status['tmp']);
@@ -425,6 +704,53 @@ export function namingFromConfig(
   }
 
   return { deviceName, channelNames };
+}
+
+/**
+ * Vereinheitlicht den Fahrzustand eines Rollladens.
+ *
+ * Die beiden Generationen benennen dasselbe unterschiedlich: Gen2 meldet mit
+ * `open` den Endzustand „ganz offen“, Gen1 dagegen die Fahrt nach oben. Ohne
+ * diese Unterscheidung würde die UI einen stehenden Rollladen als fahrend
+ * anzeigen.
+ */
+export function normalizeCoverState(
+  raw: string | undefined,
+  position: number | undefined,
+  generation: 1 | 2,
+): CoverState {
+  const fromPosition = (): CoverState => {
+    if (position === undefined) return 'stopped';
+    if (position <= 0) return 'closed';
+    if (position >= 100) return 'open';
+    return 'stopped';
+  };
+
+  if (!raw) return fromPosition();
+
+  if (generation === 1) {
+    switch (raw) {
+      case 'open':
+        return 'opening';
+      case 'close':
+        return 'closing';
+      default:
+        return fromPosition();
+    }
+  }
+
+  switch (raw) {
+    case 'opening':
+      return 'opening';
+    case 'closing':
+      return 'closing';
+    case 'open':
+      return 'open';
+    case 'closed':
+      return 'closed';
+    default:
+      return fromPosition();
+  }
 }
 
 /** Zerlegt `switch:2` in Typ und Kanalnummer. */

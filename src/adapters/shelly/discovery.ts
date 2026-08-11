@@ -33,9 +33,13 @@ export async function discoverShellyDevices(
     if (address) hosts.add(address);
   }
 
-  // Gen1-Geräte melden sich nur als generischer HTTP-Dienst.
+  /*
+   * Gen1-Geräte melden sich nur als generischer HTTP-Dienst. Bisher wurden
+   * dabei nur Einträge mit "shelly" im Namen betrachtet – umbenannte Geräte
+   * ("kueche", "stehlampe") fielen damit durchs Raster. Jetzt wird jeder
+   * HTTP-Dienst kurz auf /shelly geprüft; das Gerät selbst entscheidet.
+   */
   for (const service of httpServices) {
-    if (!/shelly/i.test(service.name) && !/shelly/i.test(service.host ?? '')) continue;
     const address = service.addresses.find(isIPv4);
     if (address) hosts.add(address);
   }
@@ -46,7 +50,7 @@ export async function discoverShellyDevices(
   }
 
   if (options.allowScan) {
-    const remaining = scannableHosts().filter((host) => !found.has(host));
+    const remaining = (options.scanHosts ?? scannableHosts()).filter((host) => !found.has(host));
     log.info('Starte Subnetz-Scan nach Shelly-Geräten', { hosts: remaining.length });
     for (const entry of await probeHosts(remaining, Math.min(options.timeoutMs, 1200), 'scan', 32)) {
       found.set(entry.host, entry);

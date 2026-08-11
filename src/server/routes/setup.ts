@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Container } from '../../container.js';
+import { SESSION_TTL_MS } from '../../services/userService.js';
+import { setSessionCookie } from '../auth.js';
 import { asyncHandler, parseBody } from '../http.js';
-import { householdSchema, setupStepSchema } from '../validation.js';
+import { firstUserSchema, householdSchema, setupStepSchema } from '../validation.js';
 
 /**
  * Der Einrichtungsassistent. Die Reihenfolge ist:
@@ -26,19 +28,21 @@ export function setupRoutes(container: Container): Router {
   router.post(
     '/setup/household',
     asyncHandler(async (req, res) => {
-      const input = parseBody(householdSchema, req);
+      const input = parseBody(householdSchema.merge(firstUserSchema), req);
       const result = await container.setup.createHousehold(input);
 
       // Ab jetzt laufen Polling und Automationen.
       await container.startBackgroundServices();
 
+      // Direkt angemeldet weitermachen – ein zweites Formular wäre nur eine
+      // Hürde zwischen „angelegt" und „benutzbar".
+      setSessionCookie(req, res, result.sessionToken, SESSION_TTL_MS);
+
       res.status(201).json({
         household: result.household,
         state: result.state,
-        accessToken: result.token,
-        hint:
-          'Dieses Token wird nur einmal angezeigt. Für alle weiteren Aufrufe als ' +
-          '"Authorization: Bearer <token>" mitsenden.',
+        user: result.user,
+        hint: `Angemeldet als „${result.user.username}". Mit diesem Namen und deinem Passwort kommst du von jedem Gerät hinein.`,
       });
     }),
   );

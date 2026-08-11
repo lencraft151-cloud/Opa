@@ -9,6 +9,7 @@ import { TelemetryStore, daysBetween, downsample } from '../src/storage/telemetr
 import { enumerateHosts, isIPv4, isPrivateIPv4 } from '../src/util/net.ts';
 import { nowIso } from '../src/util/id.ts';
 import type { Household } from '../src/core/types.ts';
+import { DEFAULT_APPEARANCE, DEFAULT_PRESENCE } from '../src/core/types.ts';
 
 let dir: string;
 
@@ -27,6 +28,16 @@ const household = (id: string): Household => ({
   locale: 'de-DE',
   setupStep: 'integrations',
   setupCompletedAt: null,
+  pollIntervalSeconds: 15,
+  fritzboxUrl: '',
+  pricePerKwh: 0.35,
+  currency: 'EUR',
+  basePricePerMonth: 0,
+  autoUpdate: false,
+  autoUpdateFrom: '03:00',
+  autoUpdateTo: '05:00',
+  appearance: { ...DEFAULT_APPEARANCE },
+  presence: { ...DEFAULT_PRESENCE },
   createdAt: nowIso(),
   updatedAt: nowIso(),
 });

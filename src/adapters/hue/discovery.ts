@@ -56,9 +56,20 @@ export async function discoverHueBridges(
 
   await Promise.all(tasks);
 
-  if (found.size === 0 && options.allowScan) {
-    log.info('Keine Bridge über mDNS/Cloud gefunden – starte Subnetz-Scan');
-    for (const entry of await discoverViaScan(options.timeoutMs)) add(entry);
+  /*
+   * Der Scan lief bisher nur, wenn gar nichts gefunden wurde. Wer zwei
+   * Bridges hat und von denen eine per mDNS meldet, bekam die zweite nie zu
+   * sehen. Wenn der Nutzer "gründlich suchen" wählt, wird jetzt immer
+   * gescannt – bereits gefundene Hosts werden dabei übersprungen.
+   */
+  if (options.allowScan) {
+    const known = new Set([...found.values()].map((entry) => entry.host));
+    const hosts = (options.scanHosts ?? scannableHosts()).filter((host) => !known.has(host));
+    log.info('Starte Subnetz-Scan nach Hue Bridges', {
+      bereitsGefunden: known.size,
+      hosts: hosts.length,
+    });
+    for (const entry of await discoverViaScan(hosts, options.timeoutMs)) add(entry);
   }
 
   return [...found.values()];
@@ -95,10 +106,12 @@ async function discoverViaCloud(timeoutMs: number): Promise<DiscoveredIntegratio
     }));
 }
 
-async function discoverViaScan(timeoutMs: number): Promise<DiscoveredIntegration[]> {
-  const hosts = scannableHosts();
+async function discoverViaScan(
+  hosts: readonly string[],
+  timeoutMs: number,
+): Promise<DiscoveredIntegration[]> {
   // Kurzes Timeout pro Host, sonst dauert ein /24-Scan Minuten.
-  return probeHosts(hosts, Math.min(timeoutMs, 1200), 'scan', 32);
+  return probeHosts([...hosts], Math.min(timeoutMs, 1200), 'scan', 32);
 }
 
 async function probeHosts(

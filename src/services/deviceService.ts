@@ -3,14 +3,16 @@ import { events } from '../core/events.js';
 import { createLogger } from '../core/logger.js';
 import type {
   Capability,
+  CommandOptions,
   Device,
   DeviceCommand,
   DeviceState,
   RuleTarget,
 } from '../core/types.js';
+import { CAPABILITIES } from '../core/types.js';
 import { nowIso } from '../util/id.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
-import type { Repositories } from '../storage/repositories.js';
+import { effectiveDevice, type Repositories } from '../storage/repositories.js';
 import type { IntegrationService } from './integrationService.js';
 import type { TelemetryService } from './telemetryService.js';
 
@@ -28,6 +30,12 @@ export interface DeviceUpdate {
   name?: string;
   roomId?: string | null;
   hidden?: boolean;
+  favorite?: boolean;
+  /**
+   * Richtiggestellte Fähigkeiten. `null` nimmt die Korrektur zurück und
+   * glaubt wieder dem Gerät.
+   */
+  capabilityOverride?: Capability[] | null;
 }
 
 export interface CommandResult {
@@ -94,8 +102,19 @@ export class DeviceService {
       }
     }
     if (changes.hidden !== undefined) patch.hidden = changes.hidden;
+    if (changes.favorite !== undefined) patch.favorite = changes.favorite;
 
-    const updated = await this.repos.devices.patch(id, patch, 'Gerät');
+    if (changes.capabilityOverride !== undefined) {
+      patch.capabilityOverride = normalizeOverride(changes.capabilityOverride, device);
+    }
+
+    /*
+     * `patch` liefert den gespeicherten Datensatz zurück, in dem `capabilities`
+     * noch das ist, was das Gerät meldet. Nach außen zählt aber die
+     * Richtigstellung – sonst zeigte die Antwort auf genau die Änderung, die
+     * eben vorgenommen wurde, noch den alten Stand.
+     */
+    const updated = effectiveDevice(await this.repos.devices.patch(id, patch, 'Gerät'));
     events.emit('device.updated', { device: updated, changed: Object.keys(patch) });
     return updated;
   }
@@ -111,13 +130,17 @@ export class DeviceService {
   // Steuerung
   // -------------------------------------------------------------------------
 
-  async execute(deviceId: string, command: DeviceCommand): Promise<Device> {
+  async execute(
+    deviceId: string,
+    command: DeviceCommand,
+    options?: CommandOptions,
+  ): Promise<Device> {
     const device = this.get(deviceId);
     assertSupported(device, command);
 
     const adapter = this.registry.get(device.vendor);
     const ctx = this.integrations.contextForDevice(device);
-    const state = await adapter.execute(ctx, device.externalId, command);
+    const state = await adapter.execute(ctx, device.externalId, command, options);
 
     log.debug('Kommando ausgeführt', { device: device.name, command: command.type });
     return this.applyState(device.id, state, true);
@@ -184,8 +207,18 @@ export class DeviceService {
 
     this.telemetry.record(device, device.state);
 
-    if (changed.length > 0 || before.reachable !== reachable) {
-      events.emit('device.updated', { device, changed });
+    /*
+     * Der Wechsel der Erreichbarkeit gehört in die Liste der Änderungen.
+     * Bisher löste er zwar das Ereignis aus, stand aber nicht darin – wer
+     * mithört, konnte „ist weg" nicht von „hat einen neuen Messwert"
+     * unterscheiden.
+     */
+    const reachabilityChanged = before.reachable !== reachable;
+    if (changed.length > 0 || reachabilityChanged) {
+      events.emit('device.updated', {
+        device,
+        changed: reachabilityChanged ? [...changed, 'reachable'] : changed,
+      });
     }
     return device;
   }
@@ -249,8 +282,59 @@ const REQUIRED_CAPABILITY: Record<DeviceCommand['type'], Capability | null> = {
   setColorTemperature: 'color_temperature',
   setColor: 'color',
   setPosition: 'cover',
+  openCover: 'cover',
+  closeCover: 'cover',
+  stopCover: 'cover',
+  setTilt: 'cover.tilt',
+  setTargetTemperature: 'thermostat',
   identify: null,
 };
+
+/** Verständliche Bezeichnungen für Fehlermeldungen. */
+const CAPABILITY_LABEL: Record<Capability, string> = {
+  switch: 'schaltbar',
+  dimmer: 'dimmbar',
+  color: 'farbfähig',
+  color_temperature: 'Farbtemperatur einstellbar',
+  cover: 'Rollladen',
+  'cover.tilt': 'Jalousie mit Lamellen',
+  thermostat: 'Heizung mit Solltemperatur',
+  'sensor.temperature': 'Temperatursensor',
+  'sensor.humidity': 'Feuchtesensor',
+  'sensor.motion': 'Bewegungsmelder',
+  'sensor.illuminance': 'Helligkeitssensor',
+  'sensor.power': 'Leistungsmessung',
+  'sensor.energy': 'Energiezähler',
+  'sensor.battery': 'Batterieanzeige',
+  button: 'Taster',
+};
+
+/**
+ * Prüft eine Richtigstellung.
+ *
+ * Der Hub hindert niemanden daran, einem Gerät eine Fähigkeit zuzusprechen,
+ * die es womöglich nicht hat – bei einem Rollladen, der sich als Dimmer
+ * meldet, ist genau das der Sinn der Sache. Eine leere Liste ist aber keine
+ * Angabe, sondern ein Versehen: Sie würde das Gerät unbedienbar machen.
+ */
+export function normalizeOverride(
+  override: Capability[] | null,
+  device: Device,
+): Capability[] | null {
+  if (override === null) return null;
+
+  const unique = [...new Set(override)].filter((capability) =>
+    CAPABILITIES.includes(capability),
+  );
+  if (unique.length === 0) {
+    throw badRequest(
+      'Ohne eine einzige Fähigkeit ließe sich das Gerät nicht mehr bedienen.',
+      undefined,
+      `Wähle mindestens eine aus – oder setze auf "wie gemeldet" zurück (${device.capabilities.join(', ') || 'keine'}).`,
+    );
+  }
+  return unique;
+}
 
 export function supports(device: Device, command: DeviceCommand): boolean {
   const required = REQUIRED_CAPABILITY[command.type];
@@ -259,10 +343,16 @@ export function supports(device: Device, command: DeviceCommand): boolean {
 
 function assertSupported(device: Device, command: DeviceCommand): void {
   if (supports(device, command)) return;
-  const required = REQUIRED_CAPABILITY[command.type];
+  const required = REQUIRED_CAPABILITY[command.type] as Capability;
+  const own =
+    device.capabilities.map((capability) => CAPABILITY_LABEL[capability]).join(', ') || 'keine';
+
   throw badRequest(
-    `"${device.name}" unterstützt "${command.type}" nicht (benötigt: ${required}). ` +
-      `Vorhanden: ${device.capabilities.join(', ') || 'keine'}`,
+    `"${device.name}" kann das nicht: dafür wäre "${CAPABILITY_LABEL[required]}" nötig.`,
+    { required, capabilities: device.capabilities },
+    required === 'cover.tilt'
+      ? 'Nur Jalousien mit verstellbaren Lamellen unterstützen das; ein normaler Rollladen kennt nur die Position.'
+      : `Dieses Gerät ist: ${own}.`,
   );
 }
 

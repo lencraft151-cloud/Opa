@@ -40,7 +40,14 @@ function encodeName(name: string): Buffer {
   return Buffer.concat(buffers);
 }
 
-function buildQuery(serviceName: string, unicastResponse: boolean): Buffer {
+/**
+ * Baut eine PTR-Anfrage.
+ *
+ * `unicastResponse` setzt das QU-Bit: das Gerät soll direkt an uns antworten
+ * statt an die Multicast-Gruppe. Nötig nur, wenn wir nicht auf Port 5353
+ * lauschen. Exportiert, damit dieses Verhalten prüfbar ist.
+ */
+export function buildQuery(serviceName: string, unicastResponse: boolean): Buffer {
   const header = Buffer.alloc(12);
   header.writeUInt16BE(0, 0); // ID = 0 (mDNS)
   header.writeUInt16BE(0, 2); // Flags: Standard-Query
@@ -159,6 +166,11 @@ export interface MdnsBrowseOptions {
   timeoutMs?: number;
   /** Wie oft die Anfrage wiederholt wird (Pakete können verloren gehen). */
   queryCount?: number;
+  /**
+   * Ruhezeit nach der letzten neuen Antwort, nach der die Suche endet.
+   * Gilt erst, wenn überhaupt etwas geantwortet hat – siehe `browse`.
+   */
+  quietMs?: number;
 }
 
 /**
@@ -174,20 +186,14 @@ export async function browse(
 ): Promise<MdnsService[]> {
   const timeoutMs = options.timeoutMs ?? 4000;
   const queryCount = options.queryCount ?? 2;
-  const services = new Map<string, MdnsService>();
-  const hostAddresses = new Map<string, string[]>();
+  const collector = new ServiceCollector(serviceName);
 
-  const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-
-  const finish = (): MdnsService[] => {
-    for (const service of services.values()) {
-      if (service.host) {
-        const addrs = hostAddresses.get(service.host.toLowerCase());
-        if (addrs) service.addresses = [...new Set([...service.addresses, ...addrs])];
-      }
-    }
-    return [...services.values()];
-  };
+  const bound = await bindListener();
+  if (!bound) {
+    log.warn('mDNS-Socket konnte nicht geöffnet werden – Suche übersprungen');
+    return [];
+  }
+  const { socket, multicastCapable } = bound;
 
   return await new Promise<MdnsService[]>((resolve) => {
     let settled = false;
@@ -195,15 +201,37 @@ export async function browse(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (quiet) clearTimeout(quiet);
       try {
         socket.close();
       } catch {
         /* bereits geschlossen */
       }
-      resolve(finish());
+      resolve(collector.result());
     };
 
     const timer = setTimeout(done, timeoutMs);
+
+    /*
+     * Früher fertig, wenn die Antwortwelle abgeebbt ist.
+     *
+     * mDNS-Antworten kommen im lokalen Netz als Schwall innerhalb weniger
+     * hundert Millisekunden. Trotzdem wurde bisher immer die volle Zeit
+     * abgewartet – fünf Sekunden Stillstand in der Oberfläche, obwohl nach
+     * einer halben Sekunde schon alles da war.
+     *
+     * Bleibt es dagegen von Anfang an still, wird weiter voll gewartet: Ein
+     * schlafender Batteriesensor darf sich auch spät noch melden. Verkürzt
+     * wird also nur der Fall, in dem tatsächlich jemand geantwortet hat.
+     */
+    const quietMs = options.quietMs ?? 700;
+    let quiet: NodeJS.Timeout | undefined;
+    const heard = (): void => {
+      if (settled) return;
+      if (quiet) clearTimeout(quiet);
+      quiet = setTimeout(done, quietMs);
+      quiet.unref?.();
+    };
 
     socket.on('error', (err) => {
       log.debug('mDNS-Socket-Fehler', { error: err.message });
@@ -211,48 +239,167 @@ export async function browse(
     });
 
     socket.on('message', (msg, rinfo) => {
-      let decoded: DnsMessage;
-      try {
-        decoded = decodeMessage(msg);
-      } catch {
-        return;
-      }
-      for (const record of decoded.answers) {
-        try {
-          handleRecord(record, msg, rinfo.address, serviceName, services, hostAddresses);
-        } catch {
-          /* fehlerhafte Records ignorieren */
-        }
-      }
+      const before = collector.size;
+      collector.add(msg, rinfo.address);
+      // Nur echte Neuigkeiten verlängern das Fenster – im Netz plappert
+      // ständig irgendein Gerät, das uns nicht betrifft.
+      if (collector.size > before) heard();
     });
 
-    socket.bind(() => {
-      try {
-        socket.setBroadcast(true);
-        socket.setMulticastTTL(255);
-        // Membership erlaubt zusätzlich den Empfang echter Multicast-Antworten,
-        // ist aber je nach Plattform/Rechten nicht immer möglich.
-        try {
-          socket.addMembership(MDNS_ADDRESS);
-        } catch {
-          /* ohne Membership funktionieren zumindest Unicast-Antworten */
-        }
-      } catch {
-        /* ignorieren – Senden klappt meist trotzdem */
-      }
-
-      const query = buildQuery(serviceName, true);
-      let sent = 0;
-      const send = () => {
-        socket.send(query, 0, query.length, MDNS_PORT, MDNS_ADDRESS, (err) => {
-          if (err) log.debug('mDNS-Anfrage konnte nicht gesendet werden', { error: err.message });
-        });
-        sent += 1;
-        if (sent < queryCount) setTimeout(send, Math.min(500, timeoutMs / queryCount));
-      };
-      send();
-    });
+    /*
+     * Die Unicast-Antwort wird nur angefordert, wenn wir NICHT auf dem
+     * Standardport lauschen. Auf 5353 empfangen wir die regulären
+     * Multicast-Antworten – und die beantworten deutlich mehr Geräte.
+     */
+    const query = buildQuery(serviceName, !multicastCapable);
+    let sent = 0;
+    const send = (): void => {
+      if (settled) return;
+      socket.send(query, 0, query.length, MDNS_PORT, MDNS_ADDRESS, (err) => {
+        if (err) log.debug('mDNS-Anfrage konnte nicht gesendet werden', { error: err.message });
+      });
+      sent += 1;
+      if (sent < queryCount) setTimeout(send, Math.min(500, timeoutMs / queryCount));
+    };
+    send();
   });
+}
+
+/**
+ * Öffnet den Empfangssocket.
+ *
+ * Entscheidend ist der Port: Antworten auf eine mDNS-Anfrage gehen per
+ * Multicast an 224.0.0.251:**5353**. Ein Socket auf einem zufälligen Port
+ * bekommt davon nichts zu sehen – er hört nur die Geräte, die das
+ * "unicast response"-Bit beachten, und das tun längst nicht alle (Shellys
+ * zum Beispiel nicht). Deshalb zuerst 5353 mit `reuseAddr`, damit wir uns
+ * den Port mit einem laufenden Avahi/Bonjour teilen können.
+ */
+async function bindListener(): Promise<{
+  socket: dgram.Socket;
+  multicastCapable: boolean;
+} | null> {
+  const attempt = (port: number): Promise<dgram.Socket | null> =>
+    new Promise((resolve) => {
+      const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+      const onBindError = (err: Error): void => {
+        log.debug('mDNS-Bind fehlgeschlagen', { port, error: err.message });
+        try {
+          socket.close();
+        } catch {
+          /* bereits zu */
+        }
+        resolve(null);
+      };
+      socket.once('error', onBindError);
+      socket.bind(port, () => {
+        socket.off('error', onBindError);
+        resolve(socket);
+      });
+    });
+
+  const primary = await attempt(MDNS_PORT);
+  if (primary) {
+    const joined = prepare(primary, true);
+    if (joined) return { socket: primary, multicastCapable: true };
+    // Ohne Gruppenmitgliedschaft bringt der Standardport nichts.
+    try {
+      primary.close();
+    } catch {
+      /* egal */
+    }
+  }
+
+  const fallback = await attempt(0);
+  if (!fallback) return null;
+  prepare(fallback, false);
+  log.debug('mDNS läuft im Unicast-Modus – manche Geräte antworten so nicht');
+  return { socket: fallback, multicastCapable: false };
+}
+
+/** Setzt Socket-Optionen; gibt zurück, ob die Multicast-Gruppe erreicht wurde. */
+function prepare(socket: dgram.Socket, joinGroup: boolean): boolean {
+  try {
+    socket.setBroadcast(true);
+    socket.setMulticastTTL(255);
+  } catch {
+    /* nicht überall erlaubt – Senden klappt meist trotzdem */
+  }
+  if (!joinGroup) return false;
+  try {
+    socket.addMembership(MDNS_ADDRESS);
+    return true;
+  } catch (err) {
+    log.debug('Multicast-Gruppe konnte nicht betreten werden', {
+      error: (err as Error).message,
+    });
+    return false;
+  }
+}
+
+/**
+ * Sammelt die Antworten mehrerer Pakete zu einer Diensteliste.
+ *
+ * Ein Gerät verteilt seine Angaben oft über PTR-, SRV-, TXT- und A-Records,
+ * teils in getrennten Paketen – deshalb wird über alle Antworten hinweg
+ * zusammengeführt.
+ */
+class ServiceCollector {
+  private readonly services = new Map<string, MdnsService>();
+  private readonly hostAddresses = new Map<string, string[]>();
+
+  constructor(private readonly serviceName: string) {}
+
+  /** Wie viele Dienste bisher zusammengekommen sind. */
+  get size(): number {
+    return this.services.size;
+  }
+
+  add(message: Buffer, responderAddress: string): void {
+    let decoded: DnsMessage;
+    try {
+      decoded = decodeMessage(message);
+    } catch {
+      return; // unvollständiges oder fremdes Paket
+    }
+    for (const record of decoded.answers) {
+      try {
+        handleRecord(
+          record,
+          message,
+          responderAddress,
+          this.serviceName,
+          this.services,
+          this.hostAddresses,
+        );
+      } catch {
+        /* fehlerhafte Records ignorieren */
+      }
+    }
+  }
+
+  result(): MdnsService[] {
+    for (const service of this.services.values()) {
+      if (!service.host) continue;
+      const addresses = this.hostAddresses.get(service.host.toLowerCase());
+      if (addresses) service.addresses = [...new Set([...service.addresses, ...addresses])];
+    }
+    return [...this.services.values()];
+  }
+}
+
+/**
+ * Wertet eine einzelne mDNS-Antwort aus. Exportiert, damit sich der Parser
+ * ohne echtes Netzwerk prüfen lässt.
+ */
+export function parseResponse(
+  message: Buffer,
+  serviceName: string,
+  responderAddress = '0.0.0.0',
+): MdnsService[] {
+  const collector = new ServiceCollector(serviceName);
+  collector.add(message, responderAddress);
+  return collector.result();
 }
 
 function handleRecord(
@@ -265,7 +412,10 @@ function handleRecord(
 ): void {
   const suffix = serviceName.replace(/\.$/, '').toLowerCase();
 
-  const ensure = (name: string): MdnsService => {
+  // Ein Record ohne verwertbaren Namen würde sonst einen leeren Geisterdienst
+  // in der Liste erzeugen.
+  const ensure = (name: string): MdnsService | null => {
+    if (!name) return null;
     let service = services.get(name);
     if (!service) {
       service = { name, addresses: [], txt: {} };
@@ -279,12 +429,14 @@ function handleRecord(
       if (!record.name.toLowerCase().endsWith(suffix)) return;
       const target = decodeName(message, record.dataOffset).name;
       const service = ensure(target);
+      if (!service) return;
       if (!service.addresses.includes(responderAddress)) service.addresses.push(responderAddress);
       break;
     }
     case TYPE_SRV: {
       if (!record.name.toLowerCase().endsWith(suffix)) return;
       const service = ensure(record.name);
+      if (!service) return;
       service.port = record.data.readUInt16BE(4);
       service.host = decodeName(message, record.dataOffset + 6).name;
       if (!service.addresses.includes(responderAddress)) service.addresses.push(responderAddress);
@@ -293,6 +445,7 @@ function handleRecord(
     case TYPE_TXT: {
       if (!record.name.toLowerCase().endsWith(suffix)) return;
       const service = ensure(record.name);
+      if (!service) return;
       service.txt = { ...service.txt, ...decodeTxt(record.data) };
       break;
     }
@@ -314,4 +467,6 @@ export const MDNS_SERVICES = {
   hue: '_hue._tcp.local',
   shelly: '_shelly._tcp.local',
   http: '_http._tcp.local',
+  /** AVM-Boxen melden sich unter diesem Dienst. */
+  fritzbox: '_fritzbox._tcp.local',
 } as const;

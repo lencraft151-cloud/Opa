@@ -1,11 +1,13 @@
 import { badRequest, upstreamError } from '../../core/errors.js';
-import { clamp } from '../../core/color.js';
+import { clamp, hsvToRgb } from '../../core/color.js';
 import { createLogger } from '../../core/logger.js';
 import type {
+  CommandOptions,
   DeviceCommand,
   DeviceState,
   ShellyIntegrationConfig,
   ShellyIntegrationSecrets,
+  UpdateInfo,
 } from '../../core/types.js';
 import { ShellyClient, type ShellyCredentials } from './client.js';
 import { discoverShellyDevices } from './discovery.js';
@@ -25,6 +27,7 @@ import type {
   IntegrationContext,
   LinkRequest,
   LinkResult,
+  SkippedEntry,
 } from '../types.js';
 
 const log = createLogger('shelly:adapter');
@@ -68,6 +71,24 @@ export class ShellyAdapter implements IntegrationAdapter {
     const client = this.clientFor({ config, secrets } as ShellyContext);
     await client.getStatus();
 
+    /*
+     * Der selbst vergebene Name steht bei Gen1 nur in `/settings`, nicht in
+     * `/shelly`. Ohne diesen Schritt hieße ein Gerät, das in der Shelly-App
+     * „Heizung Bad" heißt, im Hub „SHTRV-01" – und alle seine Kanäle gleich
+     * mit.
+     */
+    let configuredName: string | undefined;
+    try {
+      const deviceConfig = await client.getConfig();
+      const naming = namingFromConfig(deviceConfig, probe.generation, '');
+      if (naming.deviceName) configuredName = naming.deviceName;
+    } catch (err) {
+      log.debug('Gerätename konnte nicht gelesen werden', {
+        host: req.host,
+        error: (err as Error).message,
+      });
+    }
+
     log.info('Shelly verbunden', {
       host: req.host,
       generation: probe.generation,
@@ -75,7 +96,7 @@ export class ShellyAdapter implements IntegrationAdapter {
     });
 
     return {
-      name: req.name?.trim() || probe.name || probe.app || probe.model,
+      name: req.name?.trim() || configuredName || probe.name || probe.app || probe.model,
       externalId: probe.deviceId,
       config,
       secrets,
@@ -120,10 +141,13 @@ export class ShellyAdapter implements IntegrationAdapter {
     ctx: IntegrationContext,
     externalId: string,
     command: DeviceCommand,
+    options?: CommandOptions,
   ): Promise<DeviceState> {
     const shellyCtx = ctx as ShellyContext;
     const client = this.clientFor(shellyCtx);
     const { kind, channel } = parseComponentId(externalId);
+    // Rollläden fahren ohnehin in ihrer eigenen Zeit; Übergänge gelten fürs Licht.
+    const fade = options?.transitionMs ?? 0;
 
     if (command.type === 'identify') {
       await client.identify(channel);
@@ -135,44 +159,151 @@ export class ShellyAdapter implements IntegrationAdapter {
       case 'toggle': {
         const isLight = kind === 'light' || kind === 'rgbw' || kind === 'rgb';
         if (!isLight && kind !== 'switch') {
-          throw badRequest(`Komponente ${externalId} lässt sich nicht schalten`);
+          throw badRequest(
+            `Die Komponente "${externalId}" lässt sich nicht schalten.`,
+            undefined,
+            kind === 'cover'
+              ? 'Rollläden werden über Auf/Zu/Stop oder eine Position gesteuert, nicht über Ein/Aus.'
+              : 'Sensoren liefern nur Messwerte und lassen sich nicht schalten.',
+          );
         }
         // Nur zum Umschalten muss der aktuelle Zustand bekannt sein.
         const on =
           command.type === 'setPower'
             ? command.on
             : !((await this.readComponentState(shellyCtx, externalId)).on ?? false);
-        if (isLight) await client.setLight(channel, on);
+        if (isLight) await client.setLight(channel, on, undefined, fade);
         else await client.setSwitch(channel, on);
         return { on };
       }
 
       case 'setBrightness': {
         if (kind !== 'light' && kind !== 'rgbw' && kind !== 'rgb') {
-          throw badRequest(`Komponente ${externalId} ist nicht dimmbar`);
+          throw badRequest(
+            `Die Komponente "${externalId}" ist nicht dimmbar.`,
+            undefined,
+            'Nur Dimmer- und Lichtkanäle unterstützen Helligkeit; ein Relais kennt nur Ein und Aus.',
+          );
         }
         const brightness = clamp(command.brightness, 0, 100);
         const on = brightness > 0;
-        await client.setLight(channel, on, on ? brightness : undefined);
+        await client.setLight(channel, on, on ? brightness : undefined, fade);
         return { on, brightness };
       }
 
       case 'setPosition': {
-        if (kind !== 'cover') throw badRequest(`Komponente ${externalId} ist kein Rollladen`);
+        ShellyAdapter.assertCoverComponent(kind, externalId);
         const position = clamp(command.position, 0, 100);
         await client.setCoverPosition(channel, position);
-        return { position };
+        return { position, coverState: position >= 50 ? 'opening' : 'closing' };
       }
 
-      case 'setColorTemperature':
-        throw badRequest('Farbtemperatur wird von diesem Shelly-Kanal nicht unterstützt');
+      case 'openCover': {
+        ShellyAdapter.assertCoverComponent(kind, externalId);
+        await client.openCover(channel);
+        return { coverState: 'opening' };
+      }
 
-      case 'setColor':
-        throw badRequest('Farbsteuerung wird von diesem Shelly-Kanal nicht unterstützt');
+      case 'closeCover': {
+        ShellyAdapter.assertCoverComponent(kind, externalId);
+        await client.closeCover(channel);
+        return { coverState: 'closing' };
+      }
+
+      case 'stopCover': {
+        ShellyAdapter.assertCoverComponent(kind, externalId);
+        await client.stopCover(channel);
+        // Die Endposition kennt erst das Gerät – der nächste Poll liefert sie.
+        return { coverState: 'stopped' };
+      }
+
+      case 'setTilt': {
+        ShellyAdapter.assertCoverComponent(kind, externalId);
+        const tilt = clamp(command.tilt, 0, 100);
+        await client.setCoverTilt(channel, tilt);
+        return { tilt };
+      }
+
+      case 'setTargetTemperature': {
+        // `thermostat` ist der Regler im Gerät, `blutrv` das Ventil am
+        // Bluetooth-Zugang – beide nehmen eine Solltemperatur an.
+        if (kind !== 'thermostat' && kind !== 'blutrv') {
+          throw badRequest(
+            `Die Komponente "${externalId}" ist keine Heizung.`,
+            undefined,
+            'Solltemperaturen nehmen nur Thermostate an – etwa der Shelly TRV oder ein BLU TRV.',
+          );
+        }
+        const target = clamp(command.targetTemperatureC, 4, 35);
+        await client.setThermostatTarget(channel, target, kind);
+        return { targetTemperatureC: target };
+      }
+
+      case 'setColorTemperature': {
+        // Weißton können `cct`-Lampen (Duo) und farbfähige Lampen, die
+        // zusätzlich einen Weißkanal führen (RGBW2, Bulb).
+        if (kind !== 'cct' && kind !== 'light' && kind !== 'rgbw') {
+          throw badRequest(
+            `Die Komponente "${externalId}" kann keine Weißtöne.`,
+            undefined,
+            'Weißtöne beherrschen Shelly Duo und RGBW-Lampen im Weißmodus – ein Relais nicht.',
+          );
+        }
+        const kelvin = clamp(command.kelvin, 2700, 6500);
+        await client.setColorTemperature(channel, kelvin, kind, fade);
+        return { colorTemperatureK: kelvin };
+      }
+
+      case 'setColor': {
+        if (kind !== 'rgb' && kind !== 'rgbw' && kind !== 'light') {
+          throw badRequest(
+            `Die Komponente "${externalId}" kann keine Farben.`,
+            undefined,
+            'Farben beherrschen nur RGB- und RGBW-Kanäle.',
+          );
+        }
+        const hue = ((command.hue % 360) + 360) % 360;
+        const saturation = clamp(command.saturation, 0, 100);
+        const rgb = hsvToRgb(hue, saturation, 100);
+        await client.setColor(channel, [rgb.r, rgb.g, rgb.b], kind, fade);
+        return { on: true, hue, saturation };
+      }
 
       default:
         throw badRequest(`Unbekanntes Kommando: ${(command as { type: string }).type}`);
     }
+  }
+
+  /** Wirft, wenn die Komponente kein Rollladen ist. */
+  private static assertCoverComponent(kind: string, externalId: string): void {
+    if (kind === 'cover') return;
+    throw badRequest(
+      `Die Komponente "${externalId}" ist kein Rollladen.`,
+      undefined,
+      'Rollladen-Kommandos funktionieren nur mit Geräten, die die Fähigkeit "cover" haben.',
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Firmware
+  // -------------------------------------------------------------------------
+
+  async checkForUpdate(ctx: IntegrationContext): Promise<UpdateInfo> {
+    const shellyCtx = ctx as ShellyContext;
+    const { current, available } = await this.clientFor(shellyCtx).checkForUpdate();
+    return {
+      currentVersion: current ?? shellyCtx.config.firmware ?? null,
+      availableVersion: available,
+      updateAvailable: available !== null && available !== current,
+      installable: true,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  async installUpdate(ctx: IntegrationContext): Promise<void> {
+    const shellyCtx = ctx as ShellyContext;
+    await this.clientFor(shellyCtx).installUpdate();
+    log.info('Firmware-Update angestoßen', { host: shellyCtx.config.host });
   }
 
   // -------------------------------------------------------------------------
@@ -191,9 +322,25 @@ export class ShellyAdapter implements IntegrationAdapter {
     naming: ShellyNaming,
   ): Promise<ShellyComponent[]> {
     const status = await this.clientFor(ctx).getStatus();
-    return ctx.config.generation === 2
-      ? parseGen2Status(status, naming)
-      : parseGen1Status(status, naming);
+    if (ctx.config.generation !== 2) return parseGen1Status(status, naming);
+
+    // Was der Hub nicht deuten konnte, wird gemerkt statt verschwiegen –
+    // die Diagnose beantwortet damit „wo ist mein Gerät?" auch für Shelly.
+    const skipped: Array<{ id: string; reason: string }> = [];
+    const components = parseGen2Status(status, naming, skipped);
+    this.skipped.set(ctx.integration.id, skipped);
+    return components;
+  }
+
+  /** Übersprungene Bauteile der letzten Abfrage, je Integration. */
+  private readonly skipped = new Map<string, Array<{ id: string; reason: string }>>();
+
+  diagnostics(ctx: ShellyContext): SkippedEntry[] {
+    return (this.skipped.get(ctx.integration.id) ?? []).map((entry) => ({
+      address: entry.id,
+      channelType: entry.id.split(':')[0] ?? entry.id,
+      reason: entry.reason,
+    }));
   }
 
   private async readComponentState(ctx: ShellyContext, externalId: string): Promise<DeviceState> {
