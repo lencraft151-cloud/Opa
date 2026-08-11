@@ -710,6 +710,108 @@ export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
   },
 
   {
+    id: 'wake-light',
+    emoji: '🌅',
+    name: 'Mit Licht geweckt werden',
+    summary: 'Zur eingestellten Uhrzeit geht das Licht langsam an – tiefrot bis warmweiß.',
+    explanation:
+      'Der Sonnenaufgang beginnt fast dunkel und wird über die eingestellte Zeit hell. Trage ' +
+      'die Uhrzeit ein, zu der es *losgehen* soll, nicht die, zu der du aufstehen willst: Bei ' +
+      '20 Minuten und Aufstehen um 7 Uhr gehört hier 06:40 hin. Am Ende bleibt das Licht an.',
+    fields: [
+      { key: 'at', label: 'Beginnt um', type: 'time', help: 'Wann das Licht anfängt, heller zu werden.' },
+      {
+        key: 'lights',
+        label: 'Diese Lampen',
+        type: 'devices',
+        capability: 'dimmer',
+        help: 'Am besten die Lampe, die du vom Bett aus siehst.',
+      },
+      {
+        key: 'minutes',
+        label: 'Dauer bis ganz hell',
+        type: 'number',
+        unit: 'Minuten',
+        min: 1,
+        max: 120,
+        step: 5,
+        help: 'Zwanzig Minuten sind ein guter Wert – kürzer wirkt wie ein Lichtschalter.',
+      },
+      {
+        key: 'weekdaysOnly',
+        label: 'Nur an Werktagen',
+        type: 'number',
+        min: 0,
+        max: 1,
+        step: 1,
+        help: '1 = Montag bis Freitag, 0 = jeden Tag.',
+      },
+    ],
+    build: (values) => ({
+      name: 'Wecklicht',
+      trigger: {
+        type: 'schedule',
+        at: time(values, 'at'),
+        days: num(values, 'weekdaysOnly') === 1 ? [1, 2, 3, 4, 5] : [],
+      },
+      actions: [
+        {
+          type: 'effect',
+          effect: 'sonnenaufgang',
+          target: { deviceIds: list(values, 'lights') },
+          minutes: num(values, 'minutes'),
+        },
+      ],
+      cooldownSeconds: 0,
+    }),
+  },
+
+  {
+    id: 'sleep-light',
+    emoji: '🌙',
+    name: 'Einschlaflicht',
+    summary: 'Zur eingestellten Uhrzeit wird das Licht immer wärmer und dunkler und geht dann aus.',
+    explanation:
+      'Das Gegenstück zum Wecklicht. Es fängt gedämpft an, wird über die eingestellte Zeit ' +
+      'immer dunkler und wärmer – zum Schluss ohne Blauanteil – und schaltet dann ab. Wer ' +
+      'vorher noch wach ist, drückt in der Ansicht „Automationen" auf Beenden; dann bleibt ' +
+      'das Licht stehen, wo es gerade ist.',
+    fields: [
+      { key: 'at', label: 'Beginnt um', type: 'time', help: 'Wann das Herunterdimmen anfängt.' },
+      {
+        key: 'lights',
+        label: 'Diese Lampen',
+        type: 'devices',
+        capability: 'dimmer',
+        help: 'Die Lampen im Schlafzimmer.',
+      },
+      {
+        key: 'minutes',
+        label: 'Dauer bis aus',
+        type: 'number',
+        unit: 'Minuten',
+        min: 1,
+        max: 120,
+        step: 5,
+        help: 'Eine halbe Stunde reicht den meisten zum Einschlafen.',
+      },
+    ],
+    build: (values) => ({
+      name: 'Einschlaflicht',
+      trigger: { type: 'schedule', at: time(values, 'at'), days: [] },
+      actions: [
+        {
+          type: 'effect',
+          effect: 'einschlafen',
+          target: { deviceIds: list(values, 'lights') },
+          minutes: num(values, 'minutes'),
+        },
+      ],
+      cooldownSeconds: 0,
+    }),
+  },
+
+  {
     id: 'effect-stop-when-on',
     emoji: '🛑',
     name: 'Effekte beenden, wenn das Licht angeht',
@@ -775,6 +877,9 @@ const FIELD_DEFAULTS: Record<string, Record<string, string | number>> = {
   'effect-when-off': { effect: 'gruselig', minutes: 20 },
   'effect-when-on': { effect: 'disco', minutes: 10 },
   'effect-at-time': { at: '20:00', effect: 'kerze', minutes: 60 },
+  // Der Beginn, nicht die Aufstehzeit: 06:40 plus 20 Minuten sind 7 Uhr.
+  'wake-light': { at: '06:40', minutes: 20, weekdaysOnly: 1 },
+  'sleep-light': { at: '22:30', minutes: 30 },
 };
 
 /** Zeitfelder, die nicht die Standardvorgabe bekommen sollen. */

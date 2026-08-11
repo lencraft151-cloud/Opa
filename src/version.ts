@@ -10,4 +10,4 @@
  * einmal ist genau das hier vergessen worden, und der Hub hielt daraufhin
  * seine eigene Fassung für ein verfügbares Update.
  */
-export const VERSION = '1.14.0';
+export const VERSION = '1.15.0';

@@ -90,6 +90,14 @@ export interface HueLightUpdate {
   color?: { xy: { x: number; y: number } };
   alert?: { action: 'breathe' };
   identify?: { action: 'identify' };
+  /**
+   * Übergangszeit in Millisekunden.
+   *
+   * Die Bridge blendet dann selbst hinüber, statt zu springen – das ist
+   * deutlich schöner *und* sparsamer als viele kleine Schritte vom Hub aus,
+   * denn ein `dynamics`-Befehl ersetzt zwanzig einzelne.
+   */
+  dynamics?: { duration: number };
 }
 
 const APP_NAME = 'smarthome-hub';

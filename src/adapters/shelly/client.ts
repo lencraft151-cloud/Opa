@@ -217,16 +217,41 @@ export class ShellyClient {
     await this.sendJson(`/relay/${channel}`, { query: { turn: on ? 'on' : 'off' } });
   }
 
-  async setLight(channel: number, on: boolean, brightness?: number): Promise<void> {
+  /**
+   * Übergangszeit für Gen2: `transition_duration` zählt in **Sekunden**.
+   *
+   * Shelly nimmt bis zu fünf Sekunden an; alles darüber lehnt die Firmware
+   * ab, statt zu kürzen – deshalb wird hier gekürzt.
+   */
+  private fadeGen2(params: Record<string, unknown>, transitionMs = 0): Record<string, unknown> {
+    if (transitionMs <= 0 || params['on'] === false) return params;
+    return { ...params, transition_duration: Math.min(5, transitionMs / 1000) };
+  }
+
+  /** Dasselbe für Gen1 – dort in Millisekunden und ebenfalls bei 5 s gedeckelt. */
+  private fadeGen1(
+    query: Record<string, string | number>,
+    transitionMs = 0,
+  ): Record<string, string | number> {
+    if (transitionMs <= 0 || query['turn'] === 'off') return query;
+    return { ...query, transition: Math.round(Math.min(5000, transitionMs)) };
+  }
+
+  async setLight(
+    channel: number,
+    on: boolean,
+    brightness?: number,
+    transitionMs = 0,
+  ): Promise<void> {
     if (this.generation === 2) {
       const params: Record<string, unknown> = { id: channel, on };
       if (brightness !== undefined) params['brightness'] = Math.round(brightness);
-      await this.rpc('Light.Set', params);
+      await this.rpc('Light.Set', this.fadeGen2(params, transitionMs));
       return;
     }
     const query: Record<string, string | number> = { turn: on ? 'on' : 'off' };
     if (brightness !== undefined) query['brightness'] = Math.round(brightness);
-    await this.sendJson(`/light/${channel}`, { query });
+    await this.sendJson(`/light/${channel}`, { query: this.fadeGen1(query, transitionMs) });
   }
 
   /**
@@ -239,6 +264,7 @@ export class ShellyClient {
     channel: number,
     rgb: [number, number, number],
     kind: 'rgb' | 'rgbw' | 'light',
+    transitionMs = 0,
   ): Promise<void> {
     const clamped = rgb.map((value) => Math.round(Math.min(255, Math.max(0, value)))) as [
       number,
@@ -248,18 +274,21 @@ export class ShellyClient {
 
     if (this.generation === 2) {
       const method = kind === 'rgbw' ? 'RGBW.Set' : 'RGB.Set';
-      await this.rpc(method, { id: channel, on: true, rgb: clamped });
+      await this.rpc(method, this.fadeGen2({ id: channel, on: true, rgb: clamped }, transitionMs));
       return;
     }
 
     await this.sendJson(`/light/${channel}`, {
-      query: {
-        turn: 'on',
-        mode: 'color',
-        red: clamped[0],
-        green: clamped[1],
-        blue: clamped[2],
-      },
+      query: this.fadeGen1(
+        {
+          turn: 'on',
+          mode: 'color',
+          red: clamped[0],
+          green: clamped[1],
+          blue: clamped[2],
+        },
+        transitionMs,
+      ),
     });
   }
 
@@ -329,13 +358,23 @@ export class ShellyClient {
    * für solche, die auch Farbe können. Beide nehmen `ct` in Kelvin. Gen1
    * (Shelly Duo, RGBW2 im Weißmodus) will `temp` an `/light/N`.
    */
-  async setColorTemperature(channel: number, kelvin: number, kind = 'light'): Promise<void> {
+  async setColorTemperature(
+    channel: number,
+    kelvin: number,
+    kind = 'light',
+    transitionMs = 0,
+  ): Promise<void> {
     const ct = Math.round(kelvin);
     if (this.generation === 2) {
-      await this.rpc(kind === 'cct' ? 'CCT.Set' : 'Light.Set', { id: channel, ct });
+      await this.rpc(
+        kind === 'cct' ? 'CCT.Set' : 'Light.Set',
+        this.fadeGen2({ id: channel, ct }, transitionMs),
+      );
       return;
     }
-    await this.sendJson(`/light/${channel}`, { query: { temp: ct, mode: 'white' } });
+    await this.sendJson(`/light/${channel}`, {
+      query: this.fadeGen1({ temp: ct, mode: 'white' }, transitionMs),
+    });
   }
 
   async openCover(channel: number): Promise<void> {

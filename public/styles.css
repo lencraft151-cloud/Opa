@@ -255,14 +255,43 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/*
+ * Der Hauptknopf trägt beide Akzentfarben.
+ *
+ * Bis hierher gab es die zweite Farbe zwar in den Einstellungen („Zweite
+ * Farbe (Verläufe)"), sie wirkte aber an genau drei Stellen im ganzen
+ * Programm – wer sie umstellte, sah nichts und hielt die Einstellung für
+ * kaputt. Jetzt schlägt sie dort durch, wo man hinsieht: Knöpfe, Reiter,
+ * Kopfzeile, Balken.
+ */
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  /*
+   * Die zweite Farbe wird eingemischt, nicht danebengesetzt: `--accent-text`
+   * ist auf Lesbarkeit gegen `--accent` gerechnet. Bei einem Verlauf bis zur
+   * vollen zweiten Farbe könnte die Schrift auf deren Hälfte verschwinden –
+   * wer Dunkelblau mit Hellgelb kombiniert, bekäme weiße Schrift auf Gelb.
+   */
+  --primary-fill: linear-gradient(
+    135deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent-2) 55%, var(--accent))
+  );
+  background: var(--primary-fill);
+  border-color: transparent;
   color: var(--accent-text);
   font-weight: 650;
 }
+/*
+ * Die Füllung muss beim Überfahren ausdrücklich wiederholt werden.
+ *
+ * `button:hover:not(:disabled)` ist spezifischer als `button.primary` und
+ * setzt sonst die graue Grundfarbe – zusammen mit der weißen Schrift des
+ * Hauptknopfes ergab das einen leeren weißen Kasten. Genau so ist es beim
+ * Nachsehen im Browser aufgefallen: Der Knopf „Neu starten" war unsichtbar,
+ * solange der Zeiger darauf stand.
+ */
 button.primary:hover:not(:disabled) {
-  background: var(--accent);
+  background: var(--primary-fill);
   filter: brightness(1.08);
 }
 button.ghost {
@@ -729,6 +758,40 @@ legend {
   border-color: var(--accent);
   animation: effect-pulse 1.8s ease-in-out infinite;
 }
+
+/*
+ * Wie weit ein Verlauf ist. „Noch 12 Minuten" beantwortet beim Wecklicht die
+ * falsche Frage – wissen will man, wie hell es schon ist.
+ */
+.effect-progress {
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+  margin: 0.1rem 0 0.4rem;
+}
+.effect-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 1s linear;
+}
+
+/*
+ * Ein Verlauf trägt seinen Namen auch in der Karte: ein Streifen an der
+ * Kante, der von der einen Akzentfarbe in die andere übergeht. Bewusst kein
+ * Verlaufstext – Emoji werden von `background-clip: text` je nach Browser
+ * verschluckt, und dann fehlte das Symbol.
+ */
+.effect-card.is-ramp::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+}
 @keyframes effect-pulse {
   0%,
   100% {
@@ -772,6 +835,27 @@ legend {
 .accent-preset.active {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/*
+ * Vorschau der beiden Akzentfarben.
+ *
+ * Die zweite Farbe zeigt sich über die ganze Oberfläche verteilt, nirgends
+ * gesammelt – wer sie verstellte, sah deshalb nicht, was er tut. Hier steht
+ * beides nebeneinander und ändert sich sofort mit.
+ */
+.accent-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0 0.2rem;
+  flex-wrap: wrap;
+}
+.accent-preview-bar {
+  flex: 1 1 8rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
 }
 .accent-dot {
   width: 1.3em;
@@ -1183,7 +1267,12 @@ details.card summary {
   color: var(--muted);
 }
 .tab.active {
-  background: var(--accent-soft);
+  /* Ein Hauch der zweiten Farbe – sonst bliebe der Reiter einfarbig. */
+  background: linear-gradient(
+    120deg,
+    var(--accent-soft),
+    color-mix(in srgb, var(--accent-2) 16%, transparent)
+  );
   border-color: transparent;
   color: var(--accent);
   font-weight: 650;

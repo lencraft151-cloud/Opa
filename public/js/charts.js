@@ -117,11 +117,30 @@ export function gauge({ value, min = 0, max = 40, label, unit = '°C' }) {
   const display =
     typeof value === 'number' && Number.isFinite(value) ? value.toFixed(1).replace('.', ',') : '–';
 
+  /*
+   * Der Bogen läuft von der einen Akzentfarbe in die andere. Ein SVG-Strich
+   * kann keinen CSS-Verlauf tragen, deshalb der Umweg über `linearGradient` –
+   * `currentColor` und `var(...)` funktionieren darin aber, sodass die
+   * eingestellten Farben durchschlagen.
+   *
+   * Die Kennung ist je Diagramm eindeutig: Zwei Messuhren auf einer Seite mit
+   * derselben `id` würden sich denselben Verlauf teilen, und ein Neuzeichnen
+   * ließe den zweiten ins Leere zeigen.
+   */
+  const gradientId = `gauge-${Math.random().toString(36).slice(2, 9)}`;
+
   return `<svg class="gauge" viewBox="0 0 128 128" role="img" aria-label="${esc(label ?? '')}">
+    <defs>
+      <linearGradient id="${gradientId}" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="var(--accent)" />
+        <stop offset="100%" stop-color="var(--accent-2)" />
+      </linearGradient>
+    </defs>
     <g transform="rotate(135 64 64)">
       <circle class="track" cx="64" cy="64" r="${radius}"
               stroke-dasharray="${arc.toFixed(1)} ${circumference.toFixed(1)}" />
       <circle class="value-arc" cx="64" cy="64" r="${radius}"
+              stroke="url(#${gradientId})"
               stroke-dasharray="${arc.toFixed(1)} ${circumference.toFixed(1)}"
               stroke-dashoffset="${offset.toFixed(1)}" />
     </g>

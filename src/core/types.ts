@@ -413,6 +413,28 @@ export type DeviceCommand =
   | { type: 'setTargetTemperature'; targetTemperatureC: number }
   | { type: 'identify' };
 
+/**
+ * Wie ein Kommando ausgeführt werden soll – nicht *was* es tut.
+ *
+ * Bisher sprang jede Farbe und jede Helligkeit hart auf den neuen Wert: Alle
+ * Hersteller können Übergänge, gefragt hat der Hub bloß nie danach. Bei einem
+ * Regler, an dem jemand zieht, ist das auch richtig – dort wäre eine
+ * Verzögerung ein Fehler. Bei allem, was von selbst geschieht, ist es das
+ * Gegenteil: Ein Farbwechsel, der in drei Sekunden hinüberblendet, ist ein
+ * Verlauf; einer, der springt, ist ein Blinken.
+ */
+export interface CommandOptions {
+  /**
+   * Übergangszeit in Millisekunden. Fehlt sie oder ist sie 0, schaltet das
+   * Gerät sofort. Nicht jeder Hersteller kann beliebig lange Übergänge –
+   * jeder Adapter kürzt auf das, was sein Gerät versteht.
+   */
+  transitionMs?: number;
+}
+
+/** Obergrenze für Übergänge: eine Minute reicht selbst fürs Wecklicht. */
+export const MAX_TRANSITION_MS = 60_000;
+
 // ---------------------------------------------------------------------------
 // Automationen
 // ---------------------------------------------------------------------------
@@ -729,7 +751,15 @@ export interface ActivityEntry {
  * Die Lichteffekte. Steht hier und nicht nur im Dienst, weil auch
  * Automationsregeln sie benennen – und die liegen in der Datenbank.
  */
-export const LIGHT_EFFECT_IDS = ['disco', 'farbwechsel', 'gruselig', 'kerze', 'gewitter'] as const;
+export const LIGHT_EFFECT_IDS = [
+  'disco',
+  'farbwechsel',
+  'gruselig',
+  'kerze',
+  'gewitter',
+  'sonnenaufgang',
+  'einschlafen',
+] as const;
 export type LightEffect = (typeof LIGHT_EFFECT_IDS)[number];
 
 export const TRANSPORT_STATES = ['playing', 'paused', 'stopped', 'transitioning'] as const;

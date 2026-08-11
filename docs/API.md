@@ -951,7 +951,8 @@ für alle Lampen, die ihn zeigen können, ohne Laufzeit die Vorgabe des Effekts.
 | `POST` | `/effects/:effect/stop` | Diesen Effekt beenden |
 | `POST` | `/effects/stop` | Alle beenden (der Panikknopf) |
 
-Effekte: `disco`, `farbwechsel`, `gruselig`, `kerze`, `gewitter`.
+Effekte: `disco`, `farbwechsel`, `gruselig`, `kerze`, `gewitter`,
+`sonnenaufgang`, `einschlafen`.
 
 ```bash
 # Disco auf zwei Lampen, zehn Minuten
@@ -981,3 +982,18 @@ Hubs – wird der Zustand von vor dem Start wiederhergestellt: erst Farbe, dann
 Helligkeit, zuletzt der Schalter. Solange ein Effekt läuft (und ein paar
 Sekunden danach), gelten die Zustandswechsel dieser Lampen weder als Auslöser
 für Automationen noch als Einträge im Verlauf.
+
+**Verläufe verhalten sich anders.** `sonnenaufgang` und `einschlafen` stellen
+nichts wieder her – bei ihnen *ist* das Ende das Ergebnis. Läuft die Zeit ab,
+bekommen sie ihren Schlussschritt (beim Einschlaflicht das Ausschalten). Wird
+vorher beendet, bleibt das Licht stehen, wo es gerade ist.
+
+**Eine Lampe, ein Effekt.** Ein Start auf Lampen, die bereits ein anderer
+Effekt bespielt, beendet diesen anderen zuerst – samt Wiederherstellung. Zwei
+Effekte auf verschiedenen Lampen laufen dagegen ungestört nebeneinander.
+
+**Übergänge** setzt der Hub selbst: Jeder Effekt bringt mit, wie viel seines
+Takts hinübergeblendet wird. Der Farbverlauf blendet durch, Disco und Gewitter
+springen. Umgerechnet wird je Hersteller – Hue in Millisekunden, Hue V1 in
+Zehntelsekunden, Shelly in Sekunden (max. 5), FRITZ!Box in Zehntelsekunden
+(max. 10). Ausgeschaltet wird nie mit Übergang.

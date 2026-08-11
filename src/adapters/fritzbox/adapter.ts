@@ -4,6 +4,7 @@ import { badRequest, errorMessage, notFound } from '../../core/errors.js';
 import { clamp } from '../../core/color.js';
 import { createLogger } from '../../core/logger.js';
 import type {
+  CommandOptions,
   DeviceCommand,
   DeviceState,
   FritzboxIntegrationConfig,
@@ -264,9 +265,11 @@ export class FritzboxAdapter implements IntegrationAdapter {
     ctx: IntegrationContext,
     externalId: string,
     command: DeviceCommand,
+    options?: CommandOptions,
   ): Promise<DeviceState> {
     const client = this.clientFor(ctx as FritzboxContext);
     const ain = { ain: externalId };
+    const duration = avmDuration(options?.transitionMs);
 
     switch (command.type) {
       case 'setPower':
@@ -292,7 +295,7 @@ export class FritzboxAdapter implements IntegrationAdapter {
         await client.command('setcolortemperature', {
           ...ain,
           temperature: String(kelvin),
-          duration: '0',
+          duration,
         });
         return { colorTemperatureK: kelvin, on: true };
       }
@@ -302,7 +305,7 @@ export class FritzboxAdapter implements IntegrationAdapter {
           ...ain,
           hue: String(Math.round(clamp(command.hue, 0, 359))),
           saturation: String(Math.round((clamp(command.saturation, 0, 100) / 100) * 255)),
-          duration: '0',
+          duration,
         });
         return { hue: command.hue, saturation: command.saturation, on: true };
       }
@@ -415,4 +418,17 @@ export class FritzboxAdapter implements IntegrationAdapter {
     this.clients.set(key, { client, fingerprint });
     return client;
   }
+}
+
+/**
+ * Übergangszeit, wie AVM sie versteht: **Zehntelsekunden**, höchstens zehn.
+ *
+ * Bis hierher stand an beiden Stellen fest `duration: '0'` – die Box kann
+ * blenden, sie wurde nur nie danach gefragt. Länger als eine Sekunde nimmt
+ * sie nicht an; ein größerer Wert wird nicht etwa gekürzt, sondern die ganze
+ * Anfrage abgewiesen.
+ */
+export function avmDuration(transitionMs = 0): string {
+  if (!Number.isFinite(transitionMs) || transitionMs <= 0) return '0';
+  return String(Math.min(10, Math.max(1, Math.round(transitionMs / 100))));
 }

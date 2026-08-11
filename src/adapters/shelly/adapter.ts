@@ -2,6 +2,7 @@ import { badRequest, upstreamError } from '../../core/errors.js';
 import { clamp, hsvToRgb } from '../../core/color.js';
 import { createLogger } from '../../core/logger.js';
 import type {
+  CommandOptions,
   DeviceCommand,
   DeviceState,
   ShellyIntegrationConfig,
@@ -140,10 +141,13 @@ export class ShellyAdapter implements IntegrationAdapter {
     ctx: IntegrationContext,
     externalId: string,
     command: DeviceCommand,
+    options?: CommandOptions,
   ): Promise<DeviceState> {
     const shellyCtx = ctx as ShellyContext;
     const client = this.clientFor(shellyCtx);
     const { kind, channel } = parseComponentId(externalId);
+    // Rollläden fahren ohnehin in ihrer eigenen Zeit; Übergänge gelten fürs Licht.
+    const fade = options?.transitionMs ?? 0;
 
     if (command.type === 'identify') {
       await client.identify(channel);
@@ -168,7 +172,7 @@ export class ShellyAdapter implements IntegrationAdapter {
           command.type === 'setPower'
             ? command.on
             : !((await this.readComponentState(shellyCtx, externalId)).on ?? false);
-        if (isLight) await client.setLight(channel, on);
+        if (isLight) await client.setLight(channel, on, undefined, fade);
         else await client.setSwitch(channel, on);
         return { on };
       }
@@ -183,7 +187,7 @@ export class ShellyAdapter implements IntegrationAdapter {
         }
         const brightness = clamp(command.brightness, 0, 100);
         const on = brightness > 0;
-        await client.setLight(channel, on, on ? brightness : undefined);
+        await client.setLight(channel, on, on ? brightness : undefined, fade);
         return { on, brightness };
       }
 
@@ -246,7 +250,7 @@ export class ShellyAdapter implements IntegrationAdapter {
           );
         }
         const kelvin = clamp(command.kelvin, 2700, 6500);
-        await client.setColorTemperature(channel, kelvin, kind);
+        await client.setColorTemperature(channel, kelvin, kind, fade);
         return { colorTemperatureK: kelvin };
       }
 
@@ -261,7 +265,7 @@ export class ShellyAdapter implements IntegrationAdapter {
         const hue = ((command.hue % 360) + 360) % 360;
         const saturation = clamp(command.saturation, 0, 100);
         const rgb = hsvToRgb(hue, saturation, 100);
-        await client.setColor(channel, [rgb.r, rgb.g, rgb.b], kind);
+        await client.setColor(channel, [rgb.r, rgb.g, rgb.b], kind, fade);
         return { on: true, hue, saturation };
       }
 

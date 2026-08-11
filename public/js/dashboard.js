@@ -2322,7 +2322,7 @@ function effectsSection() {
 
   return `
     <div class="section-head"><h2>Lichteffekte ${help(
-      'Ein Effekt verstellt die Lampen im Takt – Farbe, Helligkeit, beides. Er läuft die eingestellte Zeit und stellt danach her, wie das Licht vorher war.',
+      'Ein Effekt verstellt die Lampen im Takt – Farbe, Helligkeit, beides. Die meisten stellen am Ende her, wie das Licht vorher war; Sonnenaufgang und Einschlaflicht sind Verläufe und enden dort, wo sie hinwollten.',
     )}</h2>
       <span class="muted small">${
         lamps.length
@@ -2359,7 +2359,10 @@ function effectsSection() {
       running.size
         ? `<div class="row tight" style="margin-top:.6rem">
              <button class="danger" data-effect-stop-all>Alle Effekte beenden</button>
-             <span class="muted small">Stellt das Licht wieder her, wie es vorher war.</span>
+             <span class="muted small">
+               Stellt das Licht wieder her, wie es vorher war. Wecklicht und
+               Einschlaflicht bleiben stehen, wo sie gerade sind.
+             </span>
            </div>`
         : ''
     }`;
@@ -2380,8 +2383,11 @@ function effectLampCheck(device) {
 
 function effectCard(definition, running, lampCount) {
   const active = Boolean(running);
-  return `<article class="device-card effect-card ${active ? 'is-running' : ''}"
-                   data-effect="${esc(definition.id)}">
+  // Ein Verlauf ist kein Schauspiel: Er endet dort, wo er hinwollte.
+  const verlauf = definition.restores === false;
+
+  return `<article class="device-card effect-card ${active ? 'is-running' : ''}
+                   ${verlauf ? 'is-ramp' : ''}" data-effect="${esc(definition.id)}">
     <header>
       <div>
         <div class="name">${definition.icon} ${esc(definition.label)}</div>
@@ -2396,10 +2402,16 @@ function effectCard(definition, running, lampCount) {
              Noch ${esc(remainingLabel(running.endsAt))} ·
              ${plural(running.deviceIds.length, 'Lampe', 'Lampen')} ·
              alle ${(running.stepMs / 1000).toFixed(1).replace('.', ',')} s ein Schritt
-           </p>`
+           </p>
+           <div class="effect-progress" role="progressbar"
+                aria-valuenow="${Math.round(effectProgress(running) * 100)}"
+                aria-valuemin="0" aria-valuemax="100"
+                aria-label="Fortschritt von ${esc(definition.label)}">
+             <span style="width:${(effectProgress(running) * 100).toFixed(1)}%"></span>
+           </div>`
         : `<p class="muted small">Vorschlag: ${definition.defaultMinutes} Minuten, ${
             definition.needs === 'color' ? 'braucht Farbe' : 'braucht Helligkeit'
-          }</p>`
+          }${verlauf ? ' · endet in seinem Zielzustand' : ''}</p>`
     }
 
     <div class="row tight">
@@ -2420,6 +2432,19 @@ function remainingLabel(endsAt) {
   const seconds = Math.max(0, (new Date(endsAt).getTime() - Date.now()) / 1000);
   if (seconds < 90) return `${Math.round(seconds)} Sekunden`;
   return `${Math.round(seconds / 60)} Minuten`;
+}
+
+/**
+ * Wie weit ein laufender Effekt ist, zwischen 0 und 1.
+ *
+ * Beim Wecklicht ist das die eigentliche Auskunft: „Noch 12 Minuten" sagt
+ * nichts darüber, wie hell es schon ist – der Balken schon.
+ */
+function effectProgress(running) {
+  const start = new Date(running.startedAt).getTime();
+  const end = new Date(running.endsAt).getTime();
+  if (!(end > start)) return 1;
+  return Math.min(1, Math.max(0, (Date.now() - start) / (end - start)));
 }
 
 function wireEffects(root) {
@@ -3635,6 +3660,20 @@ function appearanceCard() {
           )}" />
         </label>
       </div>
+      <!--
+        Eine Vorschau, weil die zweite Farbe sonst wie eine Einstellung ohne
+        Wirkung aussieht: Sie zeigt sich in Verläufen, und die sind über die
+        Oberfläche verteilt statt an einer Stelle versammelt.
+      -->
+      <div class="accent-preview" aria-hidden="true">
+        <span class="accent-preview-bar"></span>
+        <button type="button" class="primary small" tabindex="-1">Knopf</button>
+        <span class="badge ok">aktiv</span>
+      </div>
+      <p class="field-help">
+        Die zweite Farbe wirkt in Verläufen: Hauptknöpfe, Balken, Messuhren,
+        der offene Reiter – und die Streifen an Sonnenaufgang und Einschlaflicht.
+      </p>
     </div>
 
     <div class="setting-block">
@@ -5314,9 +5353,21 @@ function wireAppearance(panel) {
   // Zwischenfarbe des Schiebers zum Hub geschickt.
   const custom = panel.querySelector('#accent-custom');
   const customAlt = panel.querySelector('#accent-custom-alt');
-  custom.addEventListener('input', () => {
-    applyAppearance({ ...store.household?.appearance, accentColor: custom.value });
-  });
+  /*
+   * Beide Farben schon beim Ziehen anwenden, und beide zusammen: Sonst
+   * sprang die zweite Farbe beim Verstellen der ersten kurz auf die
+   * gespeicherte zurück – und die Vorschau zeigte etwas anderes als das
+   * Ergebnis.
+   */
+  const previewAccents = () =>
+    applyAppearance({
+      ...store.household?.appearance,
+      accentColor: custom.value,
+      accentColorAlt: customAlt.value,
+    });
+
+  custom.addEventListener('input', previewAccents);
+  customAlt.addEventListener('input', previewAccents);
   custom.addEventListener('change', () =>
     void change({ accentColor: custom.value, accentColorAlt: customAlt.value }),
   );

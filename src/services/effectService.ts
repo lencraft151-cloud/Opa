@@ -4,6 +4,7 @@ import { createLogger } from '../core/logger.js';
 import { LIGHT_EFFECT_IDS } from '../core/types.js';
 import type {
   Capability,
+  CommandOptions,
   Device,
   DeviceCommand,
   DeviceState,
@@ -47,6 +48,25 @@ export interface EffectDefinition {
   needs: Capability;
   /** Vorgeschlagene Laufzeit in Minuten. */
   defaultMinutes: number;
+  /**
+   * Wie viel des Takts hinübergeblendet wird – 0 springt, 1 blendet durch.
+   *
+   * Hier liegt der Unterschied zwischen einem Farb*wechsel* und einem
+   * Farb*verlauf*: Dieselben Befehle, einmal hart gesetzt und einmal mit
+   * Übergangszeit an die Lampe gegeben, ergeben einmal ein Blinken und einmal
+   * ein Wandern. Beim Blitz und bei der Disco ist der Sprung genau richtig,
+   * beim Regenbogen wäre er ein Fehler.
+   */
+  fade: number;
+  /**
+   * Stellt der Effekt am Ende den vorherigen Zustand wieder her?
+   *
+   * Ein Schauspiel schon – nach der Disco will man sein Wohnzimmerlicht
+   * zurück. Ein *Verlauf* nicht: Wer mit dem Wecklicht aufwacht, möchte nicht,
+   * dass es zum Schluss wieder ausgeht, und wer eingeschlafen ist, nicht, dass
+   * das Licht wieder angeht.
+   */
+  restores: boolean;
 }
 
 export const EFFECTS: Record<LightEffect, EffectDefinition> = {
@@ -58,15 +78,23 @@ export const EFFECTS: Record<LightEffect, EffectDefinition> = {
     stepMs: 450,
     needs: 'color',
     defaultMinutes: 10,
+    // Hart auf den Punkt: Eine Disco, die hinüberblendet, ist ein Sonnenaufgang.
+    fade: 0,
+    restores: true,
   },
   farbwechsel: {
     id: 'farbwechsel',
-    label: 'Farbwechsel',
+    label: 'Farbverlauf',
     icon: '🌈',
-    description: 'Die Farbe wandert langsam durch den Regenbogen. Ruhig, nicht hektisch.',
+    description:
+      'Die Farbe wandert durch den Regenbogen – fließend, ohne Sprünge, über alle Lampen verteilt.',
     stepMs: 3000,
     needs: 'color',
     defaultMinutes: 60,
+    // Durchgehend blenden: Dann ist der Wechsel gar nicht mehr zu sehen,
+    // sondern nur noch die Wanderung.
+    fade: 1,
+    restores: true,
   },
   gruselig: {
     id: 'gruselig',
@@ -76,6 +104,9 @@ export const EFFECTS: Record<LightEffect, EffectDefinition> = {
     stepMs: 700,
     needs: 'dimmer',
     defaultMinutes: 20,
+    // Ein sanftes Zucken wäre keins.
+    fade: 0,
+    restores: true,
   },
   kerze: {
     id: 'kerze',
@@ -85,6 +116,9 @@ export const EFFECTS: Record<LightEffect, EffectDefinition> = {
     stepMs: 1200,
     needs: 'dimmer',
     defaultMinutes: 60,
+    // Eine Flamme springt nicht, sie wandert – aber schneller, als sie schwankt.
+    fade: 0.7,
+    restores: true,
   },
   gewitter: {
     id: 'gewitter',
@@ -94,6 +128,35 @@ export const EFFECTS: Record<LightEffect, EffectDefinition> = {
     stepMs: 900,
     needs: 'dimmer',
     defaultMinutes: 15,
+    fade: 0,
+    restores: true,
+  },
+  sonnenaufgang: {
+    id: 'sonnenaufgang',
+    label: 'Sonnenaufgang',
+    icon: '🌅',
+    description:
+      'Wecklicht: fängt tiefrot und fast dunkel an und wird über die volle Zeit hell und warmweiß.',
+    // Zwanzig Sekunden je Schritt reichen: Bei zwanzig Minuten Laufzeit sind
+    // das sechzig Schritte, und dazwischen blendet die Lampe selbst.
+    stepMs: 20_000,
+    needs: 'dimmer',
+    defaultMinutes: 20,
+    fade: 1,
+    // Am Ende ist es hell – und das soll es bleiben.
+    restores: false,
+  },
+  einschlafen: {
+    id: 'einschlafen',
+    label: 'Einschlafen',
+    icon: '🌙',
+    description: 'Das Gegenstück: Das Licht wird immer wärmer und dunkler und geht am Ende aus.',
+    stepMs: 20_000,
+    needs: 'dimmer',
+    defaultMinutes: 30,
+    fade: 1,
+    // Wer eingeschlafen ist, will nicht vom wiederhergestellten Licht geweckt werden.
+    restores: false,
   },
 };
 
@@ -226,7 +289,7 @@ export class EffectService {
     const definition = EFFECTS[effect];
     await this.stop(effect);
 
-    const chosen = this.pickDevices(householdId, definition, options);
+    let chosen = this.pickDevices(householdId, definition, options);
     if (chosen.length === 0) {
       /*
        * Bewusst ein 400 und kein 500: Nicht der Hub ist kaputt, sondern die
@@ -241,6 +304,22 @@ export class EffectService {
           ? 'Farbwechsel und Disco brauchen eine Farblampe – eine dimmbare weiße Lampe reicht dafür nicht.'
           : 'Gebraucht wird eine dimmbare Lampe; an einer Steckdose gäbe es nichts zu sehen.',
       );
+    }
+
+    /*
+     * Eine Lampe, ein Effekt.
+     *
+     * Beim Nachmessen an einem echten Gerät liefen versehentlich Gruselmodus
+     * und Sonnenaufgang zugleich auf derselben Lampe – heraus kam ein Zucken
+     * zwischen grün und orange, das zu keinem von beiden gehörte. Wer einen
+     * neuen Effekt startet, meint ihn; die alten geben diese Lampen frei.
+     *
+     * Danach wird die Auswahl neu gelesen: Der abgelöste Effekt hat beim
+     * Aufräumen den ursprünglichen Zustand wiederhergestellt, und genau der
+     * gehört gemerkt – nicht das, was mitten im Flackern zu sehen war.
+     */
+    if (await this.releaseDevices(new Set(chosen.map((device) => device.id)), effect)) {
+      chosen = this.pickDevices(householdId, definition, options);
     }
 
     /*
@@ -271,7 +350,8 @@ export class EffectService {
       stepMs,
       step: 0,
       timer: setInterval(() => void this.tick(effect), stepMs),
-      stopAt: setTimeout(() => void this.stop(effect), minutes * 60_000),
+      // Ausgelaufen, nicht abgebrochen – ein Verlauf bekommt hier seinen Schluss.
+      stopAt: setTimeout(() => void this.stopSessions([effect], true), minutes * 60_000),
     };
     session.timer.unref?.();
     session.stopAt.unref?.();
@@ -310,7 +390,19 @@ export class EffectService {
    * Ohne Angabe: alle. Das ist der Panikknopf – „Licht wieder normal".
    */
   async stop(effect?: LightEffect): Promise<number> {
-    const targets = effect ? [effect] : [...this.sessions.keys()];
+    return this.stopSessions(effect ? [effect] : [...this.sessions.keys()], false);
+  }
+
+  /**
+   * `expired` unterscheidet „die Zeit ist um" von „jemand hat abgebrochen".
+   *
+   * Für die Schauspiel-Effekte macht es keinen Unterschied – die stellen so
+   * oder so den vorherigen Zustand her. Für einen Verlauf schon: Ein
+   * Sonnenaufgang, den jemand nach zwei Minuten abbricht, darf nicht auf volle
+   * Helligkeit springen, nur weil das sein Ziel gewesen wäre. Abgebrochen
+   * heißt: Das Licht bleibt stehen, wo es gerade ist.
+   */
+  private async stopSessions(targets: LightEffect[], expired: boolean): Promise<number> {
     let stopped = 0;
 
     for (const id of targets) {
@@ -321,8 +413,8 @@ export class EffectService {
       this.sessions.delete(id);
       stopped++;
 
-      await this.restore(session);
-      log.info('Effekt beendet', { effekt: id });
+      await this.restore(session, expired);
+      log.info('Effekt beendet', { effekt: id, ausgelaufen: expired });
     }
     return stopped;
   }
@@ -330,6 +422,30 @@ export class EffectService {
   /** Beim Herunterfahren: Timer weg, Licht zurück. */
   async shutdown(): Promise<void> {
     await this.stop();
+  }
+
+  /**
+   * Beendet alle Effekte, die eine dieser Lampen bespielen.
+   *
+   * Beendet wird der ganze Effekt, nicht nur die überschneidenden Lampen: Ein
+   * Farbverlauf, dem man die Hälfte seiner Lampen wegnimmt, wäre keiner mehr –
+   * und ein halb weitergeführter Effekt ist schwerer zu erklären als ein
+   * beendeter. Zurück bleibt überall der Zustand von vorher.
+   *
+   * @returns Wie viele Effekte dafür beendet wurden.
+   */
+  private async releaseDevices(deviceIds: Set<string>, except: LightEffect): Promise<number> {
+    const betroffen = [...this.sessions.values()]
+      .filter(
+        (session) =>
+          session.effect !== except &&
+          session.devices.some((device) => deviceIds.has(device.id)),
+      )
+      .map((session) => session.effect);
+
+    if (betroffen.length === 0) return 0;
+    log.info('Effekt abgelöst', { abgelöst: betroffen, für: except });
+    return this.stopSessions(betroffen, false);
   }
 
   // -------------------------------------------------------------------------
@@ -369,10 +485,30 @@ export class EffectService {
     if (!session) return;
     const step = session.step++;
 
+    /*
+     * Der Fortschritt wird an der Uhr abgelesen, nicht an der Schrittzahl:
+     * Ein Takt, der wegen vieler Lampen gestreckt wurde, soll das Wecklicht
+     * nicht in der Hälfte der Zeit stehen lassen. Bei 1 ist Schluss.
+     */
+    const total = new Date(session.endsAt).getTime() - new Date(session.startedAt).getTime();
+    const context: StepContext = {
+      progress:
+        total > 0
+          ? Math.min(1, (Date.now() - new Date(session.startedAt).getTime()) / total)
+          : 1,
+      count: session.devices.length,
+    };
+
+    // Die Lampe blendet selbst hinüber – das ist schöner als viele
+    // Zwischenschritte vom Hub aus und kostet einen Befehl statt zwanzig.
+    const options: CommandOptions = {
+      transitionMs: Math.round(session.stepMs * EFFECTS[effect].fade),
+    };
+
     for (const [index, device] of session.devices.entries()) {
-      for (const command of commandsFor(effect, step, index)) {
+      for (const command of commandsFor(effect, step, index, context)) {
         try {
-          await this.devices.execute(device.id, command);
+          await this.devices.execute(device.id, command, options);
         } catch (err) {
           // Eine Lampe, die klemmt, darf den Effekt nicht abbrechen.
           log.debug('Effektschritt fehlgeschlagen', {
@@ -390,8 +526,13 @@ export class EffectService {
    *
    * In dieser Reihenfolge: erst Farbe und Helligkeit, dann der Schalter. Wer
    * zuerst einschaltet, sieht für einen Moment noch die Discofarbe.
+   *
+   * Verläufe (Wecklicht, Einschlaflicht) übergeht das: Dort *ist* das Ende das
+   * Ergebnis. Sie bekommen stattdessen ihren Schlussschritt – beim
+   * Einschlaflicht also das Ausschalten, das sonst beim vorzeitigen Beenden
+   * ausbliebe.
    */
-  private async restore(session: Session): Promise<void> {
+  private async restore(session: Session, expired: boolean): Promise<void> {
     /*
      * Die Frist gilt ab jetzt für alle beteiligten Lampen – nicht erst nach
      * dem Wiederherstellen. Sonst käme das Schaltereignis der ersten Lampe
@@ -399,6 +540,12 @@ export class EffectService {
      */
     for (const device of session.devices) {
       this.settling.set(device.id, Date.now() + RESTORE_GRACE_MS);
+    }
+
+    if (!EFFECTS[session.effect].restores) {
+      // Abgebrochen: stehen lassen, wo es ist. Ausgelaufen: sauber zu Ende.
+      if (expired) await this.finish(session);
+      return;
     }
 
     for (const device of session.devices) {
@@ -430,6 +577,47 @@ export class EffectService {
       this.settling.set(device.id, Date.now() + RESTORE_GRACE_MS);
     }
   }
+
+  /**
+   * Der Schlussschritt eines Verlaufs.
+   *
+   * Beim Einschlaflicht ist das der wichtigste überhaupt: Ohne ihn bliebe die
+   * Lampe auf einem Prozent stehen – nachts hell genug, um zu ärgern. Wer
+   * vorzeitig beendet, bekommt denselben Schluss, nur früher.
+   */
+  private async finish(session: Session): Promise<void> {
+    for (const [index, device] of session.devices.entries()) {
+      for (const command of commandsFor(session.effect, session.step, index, {
+        progress: 1,
+        count: session.devices.length,
+      })) {
+        try {
+          await this.devices.execute(device.id, command, { transitionMs: 2000 });
+        } catch (err) {
+          log.debug('Schlussschritt fehlgeschlagen', {
+            gerät: device.name,
+            error: errorMessage(err),
+          });
+        }
+      }
+      this.settling.set(device.id, Date.now() + RESTORE_GRACE_MS);
+    }
+  }
+}
+
+/**
+ * Woran sich ein Schritt außer an sich selbst noch orientieren kann.
+ *
+ * Zwei Arten von Verlauf brauchen mehr als die Schrittnummer: einer über die
+ * **Zeit** (das Wecklicht muss wissen, wie weit es ist) und einer über den
+ * **Raum** (der Regenbogen soll sich auf die vorhandenen Lampen verteilen,
+ * nicht auf eine gedachte Zahl).
+ */
+export interface StepContext {
+  /** Zwischen 0 (gerade begonnen) und 1 (gleich vorbei). */
+  progress: number;
+  /** Wie viele Lampen mitmachen. Mindestens 1. */
+  count: number;
 }
 
 /**
@@ -439,7 +627,12 @@ export class EffectService {
  * Lampe im Raum zu haben. `index` ist die Nummer der Lampe – daran hängt, dass
  * bei der Disco nicht alle dieselbe Farbe zeigen.
  */
-export function commandsFor(effect: LightEffect, step: number, index: number): DeviceCommand[] {
+export function commandsFor(
+  effect: LightEffect,
+  step: number,
+  index: number,
+  context: StepContext = { progress: 0, count: 1 },
+): DeviceCommand[] {
   switch (effect) {
     case 'disco': {
       /*
@@ -457,7 +650,14 @@ export function commandsFor(effect: LightEffect, step: number, index: number): D
     }
 
     case 'farbwechsel': {
-      const hue = Math.round((step * 12 + index * 40) % 360);
+      /*
+       * Ein Verlauf über den Raum: Die Lampen teilen sich den Farbkreis
+       * gleichmäßig auf und wandern gemeinsam weiter. Bei drei Lampen liegen
+       * 120° dazwischen, bei sechs 60° – zusammen ergeben sie einen
+       * Regenbogen, nicht sechs zufällige Farben.
+       */
+      const spread = 360 / Math.max(1, context.count);
+      const hue = Math.round((step * 12 + index * spread) % 360);
       return [
         { type: 'setPower', on: true },
         { type: 'setColor', hue, saturation: 85 },
@@ -509,6 +709,52 @@ export function commandsFor(effect: LightEffect, step: number, index: number): D
       return [
         { type: 'setPower', on: true },
         { type: 'setBrightness', brightness: 3 },
+      ];
+    }
+
+    case 'sonnenaufgang': {
+      /*
+       * Ein Sonnenaufgang ist kein Dimmer, der gleichmäßig aufdreht. Zwei
+       * Dinge geschehen zugleich: Die Helligkeit steigt **beschleunigt** (das
+       * Auge nimmt Helligkeit logarithmisch wahr – linear hochgedreht wäre es
+       * gefühlt nach einer Minute hell und danach passierte nichts mehr), und
+       * die Farbe wandert von tiefrot über orange nach warmweiß.
+       */
+      const eased = context.progress * context.progress;
+      const brightness = Math.max(1, Math.round(eased * 100));
+
+      // Die erste Viertelstunde der Strecke bleibt farbig, danach Weißtöne.
+      if (context.progress < 0.25) {
+        const hue = Math.round(5 + (context.progress / 0.25) * 25); // 5° rot → 30° orange
+        return [
+          { type: 'setPower', on: true },
+          { type: 'setColor', hue, saturation: 100 },
+          { type: 'setBrightness', brightness },
+        ];
+      }
+      const kelvin = Math.round(2000 + ((context.progress - 0.25) / 0.75) * 2000);
+      return [
+        { type: 'setPower', on: true },
+        { type: 'setColorTemperature', kelvin },
+        { type: 'setBrightness', brightness },
+      ];
+    }
+
+    case 'einschlafen': {
+      /*
+       * Rückwärts, und mit derselben Beugung: Am Anfang geht es fast unmerklich
+       * abwärts, zum Schluss zügig. Am Ende wird wirklich ausgeschaltet – eine
+       * Lampe, die auf 1 % stehen bleibt, ist nachts hell genug zum Ärgern.
+       */
+      if (context.progress >= 1) return [{ type: 'setPower', on: false }];
+
+      const rest = 1 - context.progress;
+      const brightness = Math.max(1, Math.round(rest * rest * 60));
+      return [
+        { type: 'setPower', on: true },
+        // Immer wärmer: 2700 K herunter bis 1800 K, wo kein Blau mehr stört.
+        { type: 'setColorTemperature', kelvin: Math.round(2700 - context.progress * 900) },
+        { type: 'setBrightness', brightness },
       ];
     }
 

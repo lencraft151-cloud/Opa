@@ -2,12 +2,14 @@ import { badRequest, notFound, upstreamError } from '../../core/errors.js';
 import { clamp, clampMirek, hsvToXy, kelvinToMired } from '../../core/color.js';
 import { createLogger } from '../../core/logger.js';
 import type {
+  CommandOptions,
   DeviceCommand,
   DeviceState,
   HueIntegrationConfig,
   HueIntegrationSecrets,
   UpdateInfo,
 } from '../../core/types.js';
+import { MAX_TRANSITION_MS } from '../../core/types.js';
 import { sleep } from '../../util/http.js';
 import { HueClient, parseEventStreamChunk, type HueLightUpdate } from './client.js';
 import { discoverHueBridges } from './discovery.js';
@@ -161,11 +163,12 @@ export class HueAdapter implements IntegrationAdapter {
     ctx: IntegrationContext,
     externalId: string,
     command: DeviceCommand,
+    options?: CommandOptions,
   ): Promise<DeviceState> {
     const hueCtx = ctx as HueContext;
     const client = this.clientFor(hueCtx);
 
-    if (usesV1(hueCtx)) return this.executeV1(hueCtx, externalId, command);
+    if (usesV1(hueCtx)) return this.executeV1(hueCtx, externalId, command, options);
 
     if (command.type === 'identify') {
       await client.identifyDevice(externalId);
@@ -184,7 +187,7 @@ export class HueAdapter implements IntegrationAdapter {
     }
 
     const current = stateFor(externalId, index);
-    const { update, optimistic } = buildLightUpdate(command, current);
+    const { update, optimistic } = buildLightUpdate(command, current, options?.transitionMs ?? 0);
     await client.updateLight(lightId, update);
 
     // Bridge übernimmt Änderungen asynchron; der optimistische Zustand wird
@@ -209,6 +212,7 @@ export class HueAdapter implements IntegrationAdapter {
     ctx: HueContext,
     externalId: string,
     command: DeviceCommand,
+    options?: CommandOptions,
   ): Promise<DeviceState> {
     const parsed = parseV1ExternalId(externalId);
     if (!parsed || parsed.kind !== 'light') {
@@ -225,7 +229,7 @@ export class HueAdapter implements IntegrationAdapter {
       return {};
     }
 
-    const { body, optimistic } = buildV1LightUpdate(command);
+    const { body, optimistic } = buildV1LightUpdate(command, options?.transitionMs ?? 0);
     await client.setV1LightState(parsed.id, body);
     return optimistic;
   }
@@ -373,13 +377,27 @@ function usesV1(ctx: HueContext): boolean {
  * Übersetzt ein Hub-Kommando in einen V1-Lichtzustand.
  * Die V1 rechnet in eigenen Einheiten: Helligkeit 0..254, Farbton 0..65535.
  */
-export function buildV1LightUpdate(command: DeviceCommand): {
+export function buildV1LightUpdate(
+  command: DeviceCommand,
+  transitionMs = 0,
+): {
   body: Record<string, unknown>;
   optimistic: DeviceState;
 } {
+  /*
+   * Die alte API rechnet Übergänge in Zehntelsekunden – und rundet nicht
+   * selbst: Aus 450 ms würde ohne diese Zeile `transitiontime: 45`, also
+   * viereinhalb Sekunden. Beim Ausschalten bleibt es beim Sprung, sonst
+   * meldete der Hub „aus", während die Lampe noch leuchtet.
+   */
+  const fade = (body: Record<string, unknown>): Record<string, unknown> =>
+    transitionMs > 0 && body['on'] !== false
+      ? { ...body, transitiontime: Math.round(Math.min(transitionMs, MAX_TRANSITION_MS) / 100) }
+      : body;
+
   switch (command.type) {
     case 'setPower':
-      return { body: { on: command.on }, optimistic: { on: command.on } };
+      return { body: fade({ on: command.on }), optimistic: { on: command.on } };
 
     case 'toggle':
       // Die V1 kennt kein Umschalten; der Aufrufer kennt den Zustand.
@@ -393,7 +411,7 @@ export function buildV1LightUpdate(command: DeviceCommand): {
       const brightness = clamp(command.brightness, 0, 100);
       if (brightness === 0) return { body: { on: false }, optimistic: { on: false, brightness: 0 } };
       return {
-        body: { on: true, bri: percentToBri(brightness) },
+        body: fade({ on: true, bri: percentToBri(brightness) }),
         optimistic: { on: true, brightness },
       };
     }
@@ -401,7 +419,7 @@ export function buildV1LightUpdate(command: DeviceCommand): {
     case 'setColorTemperature': {
       const kelvin = clamp(command.kelvin, 2000, 6500);
       return {
-        body: { on: true, ct: clampMirek(kelvinToMired(kelvin)) },
+        body: fade({ on: true, ct: clampMirek(kelvinToMired(kelvin)) }),
         optimistic: { on: true, colorTemperatureK: Math.round(kelvin) },
       };
     }
@@ -410,7 +428,7 @@ export function buildV1LightUpdate(command: DeviceCommand): {
       const hue = ((command.hue % 360) + 360) % 360;
       const saturation = clamp(command.saturation, 0, 100);
       return {
-        body: { on: true, hue: degreesToHue(hue), sat: percentToSat(saturation) },
+        body: fade({ on: true, hue: degreesToHue(hue), sat: percentToSat(saturation) }),
         optimistic: { on: true, hue, saturation },
       };
     }
@@ -424,18 +442,31 @@ export function buildV1LightUpdate(command: DeviceCommand): {
   }
 }
 
-/** Übersetzt ein Hub-Kommando in ein Hue-Light-Update. */
+/**
+ * Übersetzt ein Hub-Kommando in ein Hue-Light-Update.
+ *
+ * `transitionMs` gibt die Bridge als `dynamics.duration` an die Leuchte
+ * weiter. Beim Ausschalten bleibt es außen vor: Eine Lampe, die über drei
+ * Sekunden „aus" geht, ist für den Hub bereits aus, während sie noch leuchtet
+ * – und der nächste Abgleich meldete dann einen Zustand, den niemand sieht.
+ */
 export function buildLightUpdate(
   command: DeviceCommand,
   current: DeviceState,
+  transitionMs = 0,
 ): { update: HueLightUpdate; optimistic: DeviceState } {
+  const fade = (update: HueLightUpdate): HueLightUpdate =>
+    transitionMs > 0 && update.on?.on !== false
+      ? { ...update, dynamics: { duration: Math.min(transitionMs, MAX_TRANSITION_MS) } }
+      : update;
+
   switch (command.type) {
     case 'setPower':
-      return { update: { on: { on: command.on } }, optimistic: { on: command.on } };
+      return { update: fade({ on: { on: command.on } }), optimistic: { on: command.on } };
 
     case 'toggle': {
       const next = !(current.on ?? false);
-      return { update: { on: { on: next } }, optimistic: { on: next } };
+      return { update: fade({ on: { on: next } }), optimistic: { on: next } };
     }
 
     case 'setBrightness': {
@@ -444,7 +475,7 @@ export function buildLightUpdate(
         return { update: { on: { on: false } }, optimistic: { on: false, brightness: 0 } };
       }
       return {
-        update: { on: { on: true }, dimming: { brightness } },
+        update: fade({ on: { on: true }, dimming: { brightness } }),
         optimistic: { on: true, brightness },
       };
     }
@@ -452,7 +483,10 @@ export function buildLightUpdate(
     case 'setColorTemperature': {
       const kelvin = clamp(command.kelvin, 2000, 6500);
       return {
-        update: { on: { on: true }, color_temperature: { mirek: clampMirek(kelvinToMired(kelvin)) } },
+        update: fade({
+          on: { on: true },
+          color_temperature: { mirek: clampMirek(kelvinToMired(kelvin)) },
+        }),
         optimistic: { on: true, colorTemperatureK: Math.round(kelvin) },
       };
     }
@@ -461,7 +495,7 @@ export function buildLightUpdate(
       const hue = ((command.hue % 360) + 360) % 360;
       const saturation = clamp(command.saturation, 0, 100);
       return {
-        update: { on: { on: true }, color: { xy: hsvToXy(hue, saturation) } },
+        update: fade({ on: { on: true }, color: { xy: hsvToXy(hue, saturation) } }),
         optimistic: { on: true, hue, saturation },
       };
     }

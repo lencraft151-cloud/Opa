@@ -8,6 +8,78 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.15.0 – 2026-08-11
+
+**Farben wandern jetzt, statt zu springen.** Jede Bridge und jedes Gerät kann
+Übergänge – der Hub hatte nur nie danach gefragt. Bis hierher sprang jede
+Farbe und jede Helligkeit hart auf den neuen Wert; die FRITZ!Box bekam sogar
+fest `duration: '0'` mitgeschickt.
+
+Jetzt gilt: Wo etwas **von selbst** geschieht, wird geblendet – der
+Farbverlauf über den ganzen Takt, die Kerze über den größten Teil, Wecken und
+Einschlafen ohnehin. Wo jemand **selbst am Regler zieht**, bleibt es beim
+sofortigen Schalten; dort wäre eine Verzögerung ein Fehler. Disco,
+Gruselmodus und Gewitter springen weiter mit Absicht: Ein Blitz, der
+hinüberblendet, ist keiner.
+
+Umgerechnet wird je Hersteller, und genau dort lauern die Fehler, die niemand
+bemerkt: Hue nimmt Millisekunden (`dynamics.duration`), die alte runde Bridge
+Zehntelsekunden, Shelly Sekunden (höchstens fünf, sonst lehnt die Firmware
+ab), AVM wieder Zehntelsekunden (höchstens zehn). Ohne Umrechnung würden aus
+450 ms bei der alten Bridge 45 Sekunden, und die Lampe schiene zu hängen.
+**Ausgeschaltet wird nie mit Übergang** – sonst meldete der Hub „aus", während
+die Lampe noch leuchtet.
+
+**Zwei neue Effekte, die keine Schauspiele sind, sondern Verläufe:**
+
+- **🌅 Sonnenaufgang** – Wecklicht. Beginnt tiefrot und fast dunkel und wird
+  über die eingestellte Zeit hell und warmweiß. Die Helligkeit steigt
+  beschleunigt, weil das Auge Helligkeit nicht linear wahrnimmt: gleichmäßig
+  hochgedreht wäre es gefühlt nach einer Minute hell und danach passierte
+  nichts mehr. Gemessen an einem Gerät: 1 → 3 → 11 → 25 → 44 → 69 → 100 %.
+- **🌙 Einschlaflicht** – das Gegenstück. Immer dunkler, immer wärmer, und am
+  Ende geht es wirklich aus. Eine Lampe, die auf einem Prozent stehen bleibt,
+  ist nachts hell genug zum Ärgern.
+
+Beide stellen am Ende **nicht** den vorherigen Zustand her – dort *ist* das
+Ende das Ergebnis. Wer sie vorzeitig beendet, bekommt aber auch nicht ihr
+Ziel: Das Licht bleibt stehen, wo es gerade ist. Ein Sonnenaufgang, den man
+nach zwei Minuten abbricht, soll nicht auf volle Helligkeit springen.
+
+Dazu zwei Vorlagen mit Uhrzeit: **„Mit Licht geweckt werden"** und
+**„Einschlaflicht"**. Beim Wecklicht ist die Uhrzeit der *Beginn* – bei 20
+Minuten Dauer und Aufstehen um 7 Uhr gehört dort 06:40 hin.
+
+**Der Farbwechsel heißt jetzt Farbverlauf und ist einer.** Die Lampen teilen
+sich den Farbkreis gleichmäßig auf und wandern gemeinsam weiter: Bei drei
+Lampen liegen 120° dazwischen, bei sechs 60°. Zusammen ergibt das einen
+Regenbogen über den Raum statt sechs zufälliger Farben – und weil über den
+vollen Takt geblendet wird, ist der Wechsel gar nicht mehr zu sehen, nur noch
+die Wanderung.
+
+**Eine Lampe, ein Effekt.** Beim Nachmessen liefen versehentlich Gruselmodus
+und Sonnenaufgang zugleich auf derselben Lampe; heraus kam ein Zucken
+zwischen grün und orange, das zu keinem von beiden gehörte. Wer einen neuen
+Effekt startet, meint ihn – die alten geben diese Lampen frei und stellen
+dabei her, wie es vorher war.
+
+**Die zweite Akzentfarbe wirkt endlich.** Es gab sie in den Einstellungen als
+„Zweite Farbe (Verläufe)", und sie schlug an genau drei Stellen im ganzen
+Programm durch – wer sie umstellte, sah nichts und hielt die Einstellung für
+kaputt. Jetzt trägt sie Hauptknöpfe, den offenen Reiter, Balken und die
+Messuhren, dazu die Streifen an Wecklicht und Einschlaflicht. In den
+Einstellungen steht eine Vorschau daneben, die sich beim Ziehen sofort
+mitfärbt.
+
+Beim Nachsehen im Browser fiel dabei ein eigener Fehler auf: Der Knopf „Neu
+starten" war unsichtbar, solange der Zeiger darauf stand – `button:hover` ist
+spezifischer als `button.primary` und setzte die graue Grundfarbe unter die
+weiße Schrift.
+
+**Und ein Fortschrittsbalken** auf jeder laufenden Effektkarte. „Noch 12
+Minuten" beantwortet beim Wecklicht die falsche Frage; wissen will man, wie
+hell es schon ist.
+
 ## 1.14.0 – 2026-08-10
 
 **Lichteffekte.** Fünf Stück, oben in der Ansicht „Automationen":

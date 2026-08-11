@@ -257,7 +257,7 @@ export const ARTICLES = [
     title: 'Automationen',
     icon: '⚙️',
     summary:
-      'Wenn-dann-Regeln, die der Hub selbst ausführt – samt Lichteffekten. Dreizehn fertige Vorlagen gibt es dazu.',
+      'Wenn-dann-Regeln, die der Hub selbst ausführt – samt Lichteffekten, Wecklicht und Einschlaflicht. Fünfzehn fertige Vorlagen gibt es dazu.',
     sections: [
       {
         heading: 'Was auslösen kann',
@@ -285,11 +285,31 @@ export const ARTICLES = [
       {
         heading: 'Lichteffekte',
         body: [
-          'Oben in der Ansicht stehen fünf Effekte: **Disco** (schnelle Farbwechsel, jede Lampe eine andere), **Farbwechsel** (langsam durch den Regenbogen), **Gruselig** (düster, unregelmäßiges Flackern, kalter Grünstich), **Kerze** (warmes Schwanken) und **Gewitter** (dunkel, dann ein Doppelblitz).',
-          'Ohne Auswahl gilt ein Effekt für alle Lampen, die ihn zeigen können – Disco und Farbwechsel brauchen Farbe, die übrigen kommen mit Helligkeit aus.',
+          'Oben in der Ansicht stehen fünf Effekte: **Disco** (schnelle Farbwechsel, jede Lampe eine andere), **Farbverlauf** (fließend durch den Regenbogen), **Gruselig** (düster, unregelmäßiges Flackern, kalter Grünstich), **Kerze** (warmes Schwanken) und **Gewitter** (dunkel, dann ein Doppelblitz).',
+          'Ohne Auswahl gilt ein Effekt für alle Lampen, die ihn zeigen können – Disco und Farbverlauf brauchen Farbe, die übrigen kommen mit Helligkeit aus.',
           'Jeder Effekt läuft nur die eingestellte Zeit, höchstens zwei Stunden, und stellt danach her, wie das Licht vorher war: erst Farbe, dann Helligkeit, zuletzt der Schalter. „Alle Effekte beenden" tut dasselbe sofort.',
-          'Der Takt richtet sich nach der Zahl der Lampen: Eine Hue Bridge nimmt rund zehn Befehle je Sekunde an, darüber verwirft sie. Bei vielen Lampen wird der Effekt deshalb langsamer, statt unterwegs verloren zu gehen.',
+          'Der Takt richtet sich danach, wie viele Befehle ein Schritt kostet – nicht danach, wie viele Lampen mitmachen. Eine Hue Bridge nimmt rund zehn Befehle je Sekunde an, und die Disco schickt je Lampe drei. Bei vielen Lampen wird der Effekt deshalb langsamer, statt unterwegs verworfen zu werden.',
           'Per Vorlage lässt sich ein Effekt an einen Lichtschalter hängen – „wenn das Licht ausgeht" oder umgekehrt „wenn es angeht" – oder an eine Uhrzeit.',
+        ],
+      },
+      {
+        heading: 'Verläufe: Wecken und Einschlafen',
+        body: [
+          '**Sonnenaufgang** und **Einschlaflicht** sind keine Schauspiele, sondern Verläufe – sie enden dort, wo sie hinwollten, statt den vorherigen Zustand wiederherzustellen.',
+          'Der **Sonnenaufgang** beginnt tiefrot und fast dunkel und wird über die eingestellte Zeit hell und warmweiß. Die Helligkeit steigt dabei beschleunigt: Das Auge nimmt Helligkeit nicht linear wahr, gleichmäßig hochgedreht wäre es gefühlt nach einer Minute hell. Am Ende bleibt das Licht an.',
+          'Das **Einschlaflicht** macht es umgekehrt: immer dunkler, immer wärmer, und dann schaltet es wirklich aus. Eine Lampe, die auf einem Prozent stehen bleibt, ist nachts hell genug zum Ärgern.',
+          'Wie warm es dabei tatsächlich wird, hängt an der Lampe: Der Hub steuert bis 1800 K herunter, eine Hue-Leuchte macht bis 2000 K mit, eine Shelly-Lampe nur bis 2700 K. Was darunter liegt, begrenzt der Adapter auf das, was das Gerät kann – statt einen Fehler zu melden.',
+          'Wer einen Verlauf **vorzeitig beendet**, bekommt nicht sein Ziel: Das Licht bleibt stehen, wo es gerade ist. Ein Sonnenaufgang, den man nach zwei Minuten abbricht, soll nicht auf volle Helligkeit springen.',
+          'Für beides gibt es Vorlagen mit Uhrzeit („Mit Licht geweckt werden", „Einschlaflicht"). Beim Wecklicht ist die Uhrzeit der **Beginn**: Bei 20 Minuten Dauer und Aufstehen um 7 Uhr gehört dort 06:40 hin.',
+        ],
+      },
+      {
+        heading: 'Warum Farben jetzt wandern statt zu springen',
+        body: [
+          'Jede Bridge und jedes Gerät kann Übergänge – der Hub hatte nur nie danach gefragt. Bis dahin sprang jede Farbe hart auf ihren neuen Wert.',
+          'Wo etwas **von selbst** geschieht, wird jetzt geblendet: Der Farbverlauf blendet über den ganzen Takt, die Kerze über den größten Teil, Wecken und Einschlafen ohnehin. Wo jemand **selbst am Regler zieht**, bleibt es beim sofortigen Schalten – dort wäre eine Verzögerung ein Fehler.',
+          'Disco, Gruselmodus und Gewitter springen weiterhin mit Absicht: Ein Blitz, der hinüberblendet, ist keiner.',
+          'Umgerechnet wird je Hersteller: Hue nimmt Millisekunden, die alte runde Bridge Zehntelsekunden, Shelly Sekunden (höchstens fünf), die FRITZ!Box wieder Zehntelsekunden (höchstens zehn). Ausgeschaltet wird nie mit Übergang – sonst meldete der Hub „aus", während die Lampe noch leuchtet.',
         ],
       },
       {

@@ -467,7 +467,7 @@ describe('Lichteffekte über die Schnittstelle', () => {
     assert.equal(status, 200);
     assert.deepEqual(
       data.effects.map((effect: { id: string }) => effect.id).sort(),
-      ['disco', 'farbwechsel', 'gewitter', 'gruselig', 'kerze'],
+      ['disco', 'einschlafen', 'farbwechsel', 'gewitter', 'gruselig', 'kerze', 'sonnenaufgang'],
     );
     assert.deepEqual(data.running, []);
     // Ohne eingebundene Bridge gibt es im Testhaushalt keine Lampen.

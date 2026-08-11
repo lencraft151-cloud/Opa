@@ -37,9 +37,11 @@ Geräte.
 | **Messwerte** | Temperatur, Luftfeuchte, Helligkeit, Leistung, Energie, Batterie – dauerhaft archiviert, mit Verlaufsdiagramm |
 | **Stromverbrauch** | Verbrauch und Kosten je Gerät, Raum und Zeitraum, Hochrechnung auf Monat/Jahr, Erkennung von Dauerverbrauchern |
 | **Firmware-Updates** | Prüfung für Hue Bridge und Shelly, Übersicht über **alle** Geräte samt Firmwarestand, Installation auf Knopfdruck oder automatisch im gewählten Nachtfenster |
-| **Automationen** | Dreizehn fertige Vorlagen mit vorausgewählten Geräten, dazu frei baubare Regeln aus Sensorschwellen, Gerätezuständen, Uhrzeiten und **Wiederholungen** mit Zeitfenster und Wochentagen |
-| **Lichteffekte** | Disco, Farbwechsel, Gruselmodus, Kerze und Gewitter – von Hand gestartet oder an einen Lichtschalter gehängt („wenn das Licht ausgeht“). Laufzeit begrenzt, Takt an der Bridge bemessen, danach steht das Licht wieder wie vorher |
-| **Darstellung** | Schriftgröße, Akzentfarben, hell/dunkel, „Bewegung reduzieren“, die Lichtvorschau und ob Meldungen von Automationen eingeblendet werden – am Haushalt gespeichert und damit auf jedem Gerät gleich |
+| **Automationen** | Fünfzehn fertige Vorlagen mit vorausgewählten Geräten, dazu frei baubare Regeln aus Sensorschwellen, Gerätezuständen, Uhrzeiten und **Wiederholungen** mit Zeitfenster und Wochentagen |
+| **Lichteffekte** | Disco, Farbverlauf, Gruselmodus, Kerze und Gewitter – von Hand gestartet oder an einen Lichtschalter gehängt („wenn das Licht ausgeht“). Laufzeit begrenzt, Takt an der Bridge bemessen, danach steht das Licht wieder wie vorher |
+| **Wecken und Einschlafen** | **Sonnenaufgang** (tiefrot und fast dunkel bis hell und warmweiß) und **Einschlaflicht** (immer wärmer und dunkler, dann aus) – beides mit Uhrzeit-Vorlage, Fortschrittsbalken und der Regel: vorzeitig beendet heißt stehen bleiben, nicht ans Ziel springen |
+| **Sanfte Übergänge** | Farbe und Helligkeit *wandern*, statt zu springen – über `dynamics.duration` (Hue), `transitiontime` (Hue V1), `transition_duration` (Shelly) und `duration` (FRITZ!Box). Nur wo jemand selbst am Regler zieht, wird weiterhin sofort geschaltet |
+| **Darstellung** | Schriftgröße, **zwei Akzentfarben mit Verläufen** (Knöpfe, Reiter, Balken, Messuhren) samt Vorschau, hell/dunkel, „Bewegung reduzieren“, die Lichtvorschau und ob Meldungen von Automationen eingeblendet werden – am Haushalt gespeichert und damit auf jedem Gerät gleich |
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
 | **Geräte geraderücken** | Name, Raum, Gruppe und das Entfernen an einer Stelle – bei Geräten ohne Raum offen sichtbar, sonst hinter einem Aufklapper |

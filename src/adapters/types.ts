@@ -1,6 +1,7 @@
 import { AppError } from '../core/errors.js';
 import type {
   Capability,
+  CommandOptions,
   DeviceCommand,
   DeviceState,
   Integration,
@@ -113,11 +114,18 @@ export interface IntegrationAdapter {
   /** Liest nur die Zustände (günstiger als `listDevices`). */
   readStates(ctx: IntegrationContext): Promise<Map<string, DeviceState>>;
 
-  /** Führt ein Kommando aus und liefert den daraus folgenden Zustand. */
+  /**
+   * Führt ein Kommando aus und liefert den daraus folgenden Zustand.
+   *
+   * `options` ist freiwillig – ein Adapter, dessen Geräte keine Übergänge
+   * kennen (Homematic etwa), lässt den Parameter einfach weg und schaltet
+   * wie bisher sofort.
+   */
   execute(
     ctx: IntegrationContext,
     externalId: string,
     command: DeviceCommand,
+    options?: CommandOptions,
   ): Promise<DeviceState>;
 
   /** Optionaler Push-Kanal (Hue Eventstream). Gibt eine Stop-Funktion zurück. */

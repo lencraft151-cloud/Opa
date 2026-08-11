@@ -3,6 +3,7 @@ import { events } from '../core/events.js';
 import { createLogger } from '../core/logger.js';
 import type {
   Capability,
+  CommandOptions,
   Device,
   DeviceCommand,
   DeviceState,
@@ -129,13 +130,17 @@ export class DeviceService {
   // Steuerung
   // -------------------------------------------------------------------------
 
-  async execute(deviceId: string, command: DeviceCommand): Promise<Device> {
+  async execute(
+    deviceId: string,
+    command: DeviceCommand,
+    options?: CommandOptions,
+  ): Promise<Device> {
     const device = this.get(deviceId);
     assertSupported(device, command);
 
     const adapter = this.registry.get(device.vendor);
     const ctx = this.integrations.contextForDevice(device);
-    const state = await adapter.execute(ctx, device.externalId, command);
+    const state = await adapter.execute(ctx, device.externalId, command, options);
 
     log.debug('Kommando ausgeführt', { device: device.name, command: command.type });
     return this.applyState(device.id, state, true);

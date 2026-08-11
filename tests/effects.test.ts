@@ -348,6 +348,34 @@ describe('Effekte starten und beenden', () => {
     await effects.shutdown();
   });
 
+  it('löst einen Effekt ab, der dieselbe Lampe bespielt', async () => {
+    const { service } = recordingDevices();
+    const effects = new EffectService(fakeRepos(lampen()), service);
+
+    /*
+     * Beim Nachmessen an einem echten Gerät liefen einmal Gruselmodus und
+     * Sonnenaufgang zugleich auf derselben Lampe – heraus kam ein Zucken
+     * zwischen grün und orange, das zu keinem von beiden gehörte.
+     */
+    await effects.start('hh_1', 'gruselig', { deviceIds: ['dev_farbe'] });
+    assert.equal(effects.isRunning('gruselig'), true);
+
+    await effects.start('hh_1', 'sonnenaufgang', { deviceIds: ['dev_farbe'] });
+    assert.equal(effects.isRunning('gruselig'), false, 'der ältere gibt die Lampe frei');
+    assert.equal(effects.isRunning('sonnenaufgang'), true);
+    await effects.shutdown();
+  });
+
+  it('lässt Effekte auf verschiedenen Lampen in Ruhe nebeneinander laufen', async () => {
+    const { service } = recordingDevices();
+    const effects = new EffectService(fakeRepos(lampen()), service);
+
+    await effects.start('hh_1', 'gruselig', { deviceIds: ['dev_farbe'] });
+    await effects.start('hh_1', 'kerze', { deviceIds: ['dev_weiss'] });
+    assert.equal(effects.overview('hh_1').running.length, 2, 'sie stören sich nicht');
+    await effects.shutdown();
+  });
+
   it('lässt mehrere verschiedene Effekte nebeneinander laufen', async () => {
     const { service } = recordingDevices();
     const effects = new EffectService(fakeRepos(lampen()), service);
@@ -363,6 +391,38 @@ describe('Effekte starten und beenden', () => {
     // Der Panikknopf nimmt alles mit.
     assert.equal(await effects.stop(), 2);
     assert.equal(effects.overview('hh_1').running.length, 0);
+  });
+
+  it('lässt einen abgebrochenen Verlauf stehen, wo er ist', async () => {
+    const { service, log } = recordingDevices();
+    const effects = new EffectService(fakeRepos(lampen()), service);
+
+    await effects.start('hh_1', 'sonnenaufgang', { deviceIds: ['dev_weiss'], minutes: 30 });
+    await settle();
+    log.length = 0;
+
+    // Von Hand beendet: Der Sonnenaufgang darf nicht auf volle Helligkeit
+    // springen, nur weil das sein Ziel gewesen wäre.
+    await effects.stop('sonnenaufgang');
+    assert.deepEqual(log, [], 'kein einziger Befehl nach dem Abbruch');
+  });
+
+  it('stellt nach einem Verlauf nichts wieder her', async () => {
+    const { service, log } = recordingDevices();
+    const effects = new EffectService(fakeRepos(lampen()), service);
+
+    await effects.start('hh_1', 'einschlafen', { deviceIds: ['dev_farbe'], minutes: 1 });
+    await settle();
+    log.length = 0;
+    await effects.stop('einschlafen');
+
+    // Die Lampe war vorher an – ein wiederhergestellter Zustand wäre hier
+    // genau das, was niemand will.
+    assert.equal(
+      log.some((entry) => entry.command.type === 'setPower' && entry.command.on),
+      false,
+      'nichts darf wieder angehen',
+    );
   });
 
   it('meldet beteiligte Lampen als vom Effekt gesteuert', async () => {
@@ -470,6 +530,23 @@ describe('Effekte als Aktion einer Regel', () => {
     });
     assert.equal((rule.trigger as { equals: boolean }).equals, true);
     assert.equal((rule.actions[0] as { effect: string }).effect, 'disco');
+  });
+
+  it('legt Wecklicht und Einschlaflicht aus Vorlagen an', async () => {
+    const wecken = await automations.createFromTemplate(householdId, 'wake-light', {});
+    assert.equal(wecken.name, 'Wecklicht');
+    // Die Uhrzeit ist der Beginn: 06:40 plus 20 Minuten sind 7 Uhr.
+    assert.deepEqual(wecken.trigger, { type: 'schedule', at: '06:40', days: [1, 2, 3, 4, 5] });
+    assert.deepEqual(wecken.actions[0], {
+      type: 'effect',
+      effect: 'sonnenaufgang',
+      target: { deviceIds: ['dev_lampe'] },
+      minutes: 20,
+    });
+
+    const schlafen = await automations.createFromTemplate(householdId, 'sleep-light', {});
+    assert.equal((schlafen.actions[0] as { effect: string }).effect, 'einschlafen');
+    assert.equal((schlafen.trigger as { at: string }).at, '22:30');
   });
 
   it('weist einen erfundenen Effekt ab', async () => {
