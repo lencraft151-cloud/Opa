@@ -699,6 +699,46 @@ legend {
   cursor: pointer;
 }
 
+/*
+ * Mehrere Ankreuzfelder nebeneinander – etwa die Lampenauswahl der
+ * Lichteffekte. Untereinander bräuchte eine Wohnung mit zwölf Lampen den
+ * halben Bildschirm; die Mindestbreite hält lange Gerätenamen zusammen.
+ */
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.35rem 1rem;
+  margin-top: 0.5rem;
+}
+.check-grid .check {
+  align-items: flex-start;
+  padding: 0.15rem 0;
+}
+.check-grid .check span span {
+  display: block;
+}
+
+/* ---------------------------------------------------------- Lichteffekte */
+
+/*
+ * Ein laufender Effekt soll auf der Karte zu sehen sein, ohne dass man die
+ * Lampe im Blick hat. Der Rand pulst dafür in der Akzentfarbe – bei
+ * „Bewegung reduzieren" steht er still und bleibt trotzdem farbig.
+ */
+.effect-card.is-running {
+  border-color: var(--accent);
+  animation: effect-pulse 1.8s ease-in-out infinite;
+}
+@keyframes effect-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--accent-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 0.4rem var(--accent-soft);
+  }
+}
+
 /* ------------------------------------------------------- Einstellungen */
 
 .setting-block {

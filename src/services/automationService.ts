@@ -21,6 +21,7 @@ import {
   type TemplateValues,
 } from './automationTemplates.js';
 import type { DeviceService } from './deviceService.js';
+import type { EffectService } from './effectService.js';
 import type { HouseholdService } from './householdService.js';
 
 const log = createLogger('automations');
@@ -77,7 +78,20 @@ export class AutomationService {
     private readonly repos: Repositories,
     private readonly devices: DeviceService,
     private readonly households: HouseholdService,
+    /**
+     * Die Lichteffekte.
+     *
+     * Nachgereicht statt im Konstruktor verlangt, weil der Effektdienst
+     * seinerseits Geräte braucht – und zwei Dienste, die sich gegenseitig im
+     * Konstruktor fordern, lassen sich nicht bauen.
+     */
+    private effects: EffectService | null = null,
   ) {}
+
+  /** Wird beim Zusammenbau nachgereicht – siehe Konstruktor. */
+  useEffects(effects: EffectService): void {
+    this.effects = effects;
+  }
 
   // -------------------------------------------------------------------------
   // CRUD
@@ -287,6 +301,24 @@ export class AutomationService {
     const state = this.stateFor(rule.id);
     const now = Date.now();
 
+    /*
+     * Was ein Lichteffekt an dieser Lampe anstellt, ist keine Nachricht über
+     * die Wohnung. Der Zustand wird trotzdem mitgeführt – und zwar so, als
+     * hätte die Regel bereits ausgelöst. Sonst holte sie es nach, sobald die
+     * nächste Abfrage denselben Zustand meldet, und eine Regel „wenn das Licht
+     * ausgeht, starte den Gruselmodus" startete sich in Endlosschleife selbst.
+     */
+    if (this.effects?.controls(device.id)) {
+      if (satisfied) {
+        state.satisfiedSince ??= now;
+        state.firedForEpisode = true;
+      } else {
+        state.satisfiedSince = null;
+        state.firedForEpisode = false;
+      }
+      return;
+    }
+
     if (!satisfied) {
       // Flanke zurückgesetzt – die Regel darf erneut auslösen.
       state.satisfiedSince = null;
@@ -396,7 +428,27 @@ export class AutomationService {
               householdId: rule.householdId,
               message: action.message,
               level: 'info',
+              source: 'automation',
             });
+            executed++;
+            break;
+          }
+          case 'effect': {
+            /*
+             * Ein Effekt ist kein Zustand, sondern ein Vorgang: Er läuft
+             * weiter, bis die Zeit um ist. Deshalb keine Rücknahme über
+             * `forSeconds` – die Laufzeit steckt im Effekt selbst.
+             */
+            await this.effects?.start(rule.householdId, action.effect, {
+              ...(action.target?.deviceIds ? { deviceIds: action.target.deviceIds } : {}),
+              ...(action.target?.roomIds ? { roomIds: action.target.roomIds } : {}),
+              ...(action.minutes ? { minutes: action.minutes } : {}),
+            });
+            executed++;
+            break;
+          }
+          case 'stopEffect': {
+            await this.effects?.stop(action.effect);
             executed++;
             break;
           }
@@ -516,9 +568,11 @@ export class AutomationService {
     }
 
     for (const action of actions) {
-      if (action.type !== 'command') continue;
-      for (const deviceId of action.target.deviceIds ?? []) assertDevice(deviceId);
-      for (const roomId of action.target.roomIds ?? []) {
+      // Ein Effekt darf ebenso wenig auf fremde Geräte zeigen wie ein Kommando.
+      const target = action.type === 'command' || action.type === 'effect' ? action.target : null;
+      if (!target) continue;
+      for (const deviceId of target.deviceIds ?? []) assertDevice(deviceId);
+      for (const roomId of target.roomIds ?? []) {
         const room = this.repos.rooms.find(roomId);
         if (!room || room.householdId !== householdId) {
           throw badRequest(`Raum ${roomId} gehört nicht zu diesem Haushalt`);

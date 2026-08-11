@@ -311,7 +311,7 @@ zusammengeführt – wer nur die Schriftgröße ändert, verliert seine Farben n
 ```json
 { "appearance": { "fontScale": 1.3, "accentColor": "#1f8a4c",
                   "accentColorAlt": "#7cc242", "theme": "dark",
-                  "reduceMotion": false } }
+                  "reduceMotion": false, "automationNotifications": false } }
 ```
 
 | Feld | Werte | Bedeutung |
@@ -322,6 +322,7 @@ zusammengeführt – wer nur die Schriftgröße ändert, verliert seine Farben n
 | `theme` | `auto`, `light`, `dark` | `auto` folgt der Systemeinstellung |
 | `reduceMotion` | `true`/`false` | Animationen abschalten |
 | `livePreview` | `true`/`false` | Lichtvorschau auf den Gerätekarten (Vorgabe: an) |
+| `automationNotifications` | `true`/`false` | Meldungen aus Automationen und Lichteffekten einblenden (Vorgabe: an). Aus heißt nur „nicht einblenden": Der Verlauf bekommt sie weiterhin, und Fehler erscheinen unabhängig davon |
 
 Werte außerhalb der Grenzen und Farben, die keine sind, werden mit `400`
 abgewiesen – eine ungültige Farbe würde der Browser stillschweigend verwerfen
@@ -927,7 +928,56 @@ statt alles Versäumte nachgeholt.
   "command": { "type": "setPower", "on": true } }
 { "type": "webhook", "url": "https://…", "method": "POST", "body": { } }
 { "type": "notify", "message": "Fenster im Bad noch offen" }
+{ "type": "effect", "effect": "gruselig",
+  "target": { "deviceIds": ["dev_…"] }, "minutes": 20 }
+{ "type": "stopEffect", "effect": "gruselig" }
 ```
 
 `cooldownSeconds` verhindert zu häufiges Auslösen. Sensorregeln sind
 flankengesteuert: sie feuern einmal pro erfüllter Episode.
+
+Bei `effect` sind `target` und `minutes` optional: ohne Ziel gilt der Effekt
+für alle Lampen, die ihn zeigen können, ohne Laufzeit die Vorgabe des Effekts.
+`stopEffect` ohne `effect` beendet alle.
+
+---
+
+## Lichteffekte
+
+| Methode | Pfad | Beschreibung |
+| --- | --- | --- |
+| `GET` | `/effects` | Alle Effekte, was gerade läuft, wie viele Lampen infrage kommen |
+| `POST` | `/effects/:effect/start` | Starten – Body optional |
+| `POST` | `/effects/:effect/stop` | Diesen Effekt beenden |
+| `POST` | `/effects/stop` | Alle beenden (der Panikknopf) |
+
+Effekte: `disco`, `farbwechsel`, `gruselig`, `kerze`, `gewitter`.
+
+```bash
+# Disco auf zwei Lampen, zehn Minuten
+curl -X POST localhost:8080/api/effects/disco/start \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"deviceIds":["dev_a","dev_b"],"minutes":10}'
+```
+
+Body: `deviceIds`, `roomIds` und `minutes` (1–120) sind alle optional. Ohne
+Auswahl nimmt der Hub jede Lampe, die den Effekt zeigen kann – `disco` und
+`farbwechsel` verlangen `color`, die übrigen `dimmer`. Passt keine, antwortet
+der Hub mit 400 und einem Hinweis, welche Art Lampe fehlt.
+
+Die Antwort nennt den tatsächlichen Takt:
+
+```json
+{ "effect": "disco", "deviceIds": ["dev_a", "dev_b"],
+  "startedAt": "…", "endsAt": "…", "stepMs": 600 }
+```
+
+`stepMs` kann größer sein als gewünscht: Der Hub schickt höchstens zehn
+Befehle je Sekunde und Effekt – so viel nimmt eine Hue Bridge an. Die Disco
+kostet je Lampe drei Befehle, zwei Lampen also 600 ms statt 450.
+
+Beim Beenden – von Hand, durch Ablauf der Zeit oder beim Herunterfahren des
+Hubs – wird der Zustand von vor dem Start wiederhergestellt: erst Farbe, dann
+Helligkeit, zuletzt der Schalter. Solange ein Effekt läuft (und ein paar
+Sekunden danach), gelten die Zustandswechsel dieser Lampen weder als Auslöser
+für Automationen noch als Einträge im Verlauf.

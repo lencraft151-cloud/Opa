@@ -8,10 +8,12 @@
  */
 
 import { badRequest } from '../core/errors.js';
-import type { Capability, Device, Room } from '../core/types.js';
+import { LIGHT_EFFECT_IDS } from '../core/types.js';
+import type { Capability, Device, LightEffect, Room } from '../core/types.js';
 import type { CreateRuleInput } from './automationService.js';
+import { EFFECTS } from './effectService.js';
 
-export type TemplateFieldType = 'device' | 'devices' | 'room' | 'number' | 'time';
+export type TemplateFieldType = 'device' | 'devices' | 'room' | 'number' | 'time' | 'choice';
 
 export interface TemplateField {
   key: string;
@@ -19,6 +21,8 @@ export interface TemplateField {
   type: TemplateFieldType;
   /** Für Gerätefelder: welche Fähigkeit das Gerät haben muss. */
   capability?: Capability;
+  /** Für `choice`: die feste Auswahl. Geräte holen sich ihre Liste selbst. */
+  choices?: Array<{ value: string; label: string }>;
   unit?: string;
   min?: number;
   max?: number;
@@ -75,6 +79,19 @@ const num = (values: TemplateValues, key: string): number => {
     throw badRequest(`Für "${key}" wurde keine Zahl angegeben.`);
   }
   return value;
+};
+
+const effect = (values: TemplateValues, key: string): LightEffect => {
+  const value = str(values, key);
+  const found = LIGHT_EFFECT_IDS.find((id) => id === value);
+  if (!found) {
+    throw badRequest(
+      `"${value}" ist kein bekannter Lichteffekt.`,
+      undefined,
+      `Möglich sind: ${LIGHT_EFFECT_IDS.join(', ')}.`,
+    );
+  }
+  return found;
 };
 
 const time = (values: TemplateValues, key: string): string => {
@@ -511,7 +528,226 @@ export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
       cooldownSeconds: 1800,
     }),
   },
+
+  /*
+   * Die drei Effekt-Vorlagen unterscheiden sich nur im Auslöser. Sie stehen
+   * trotzdem einzeln da, weil „Wenn das Licht ausgeht" und „Wenn das Licht
+   * angeht" zwei verschiedene Absichten sind – und niemand vor einer Vorlage
+   * stehen soll, die erst nach dem Lesen eines Auswahlfeldes verrät, was sie
+   * eigentlich tut.
+   */
+  {
+    id: 'effect-when-off',
+    emoji: '👻',
+    name: 'Effekt starten, wenn das Licht ausgeht',
+    summary: 'Sobald die gewählte Lampe ausgeschaltet wird, startet der Effekt.',
+    explanation:
+      'Der Klassiker für den Gruselmodus: Licht aus – und im Raum fängt es an zu flackern. ' +
+      'Der Effekt läuft die eingestellte Zeit und stellt danach her, wie das Licht vorher war. ' +
+      'Dass er sich dabei selbst erneut auslöst, verhindert der Hub.',
+    fields: [
+      {
+        key: 'watch',
+        label: 'Diese Lampe wird beobachtet',
+        type: 'device',
+        capability: 'switch',
+        help: 'Der Effekt startet, sobald sie ausgeht.',
+      },
+      {
+        key: 'effect',
+        label: 'Effekt',
+        type: 'choice',
+        choices: effectChoices(),
+        help: 'Disco und Farbwechsel brauchen Lampen, die Farbe können.',
+      },
+      {
+        key: 'lights',
+        label: 'Diese Lampen zeigen den Effekt',
+        type: 'devices',
+        capability: 'dimmer',
+        help: 'Darf dieselbe Lampe sein, die beobachtet wird.',
+      },
+      {
+        key: 'minutes',
+        label: 'Wie lange',
+        type: 'number',
+        unit: 'Minuten',
+        min: 1,
+        max: 120,
+        step: 1,
+        help: 'Danach hört der Effekt von selbst auf.',
+      },
+    ],
+    build: (values) => ({
+      name: `${EFFECTS[effect(values, 'effect')].label}, wenn das Licht ausgeht`,
+      trigger: {
+        type: 'deviceState',
+        deviceId: str(values, 'watch'),
+        property: 'on',
+        equals: false,
+      },
+      actions: [
+        {
+          type: 'effect',
+          effect: effect(values, 'effect'),
+          target: { deviceIds: list(values, 'lights') },
+          minutes: num(values, 'minutes'),
+        },
+      ],
+      cooldownSeconds: 60,
+    }),
+  },
+
+  {
+    id: 'effect-when-on',
+    emoji: '🪩',
+    name: 'Effekt starten, wenn das Licht angeht',
+    summary: 'Sobald die gewählte Lampe eingeschaltet wird, startet der Effekt.',
+    explanation:
+      'Das Gegenstück: Licht an – und statt gewöhnlichem Weiß gibt es Disco. Praktisch für ' +
+      'einen Schalter, der die Party startet, ohne dass jemand das Handy hervorholen muss.',
+    fields: [
+      {
+        key: 'watch',
+        label: 'Diese Lampe wird beobachtet',
+        type: 'device',
+        capability: 'switch',
+        help: 'Der Effekt startet, sobald sie angeht.',
+      },
+      {
+        key: 'effect',
+        label: 'Effekt',
+        type: 'choice',
+        choices: effectChoices(),
+        help: 'Disco und Farbwechsel brauchen Lampen, die Farbe können.',
+      },
+      {
+        key: 'lights',
+        label: 'Diese Lampen zeigen den Effekt',
+        type: 'devices',
+        capability: 'dimmer',
+        help: 'Darf dieselbe Lampe sein, die beobachtet wird.',
+      },
+      {
+        key: 'minutes',
+        label: 'Wie lange',
+        type: 'number',
+        unit: 'Minuten',
+        min: 1,
+        max: 120,
+        step: 1,
+        help: 'Danach hört der Effekt von selbst auf.',
+      },
+    ],
+    build: (values) => ({
+      name: `${EFFECTS[effect(values, 'effect')].label}, wenn das Licht angeht`,
+      trigger: {
+        type: 'deviceState',
+        deviceId: str(values, 'watch'),
+        property: 'on',
+        equals: true,
+      },
+      actions: [
+        {
+          type: 'effect',
+          effect: effect(values, 'effect'),
+          target: { deviceIds: list(values, 'lights') },
+          minutes: num(values, 'minutes'),
+        },
+      ],
+      cooldownSeconds: 60,
+    }),
+  },
+
+  {
+    id: 'effect-at-time',
+    emoji: '🕯️',
+    name: 'Effekt zu einer Uhrzeit',
+    summary: 'Zur eingestellten Uhrzeit startet der gewählte Lichteffekt.',
+    explanation:
+      'Für den Kerzenschein ab acht oder den Gruselmodus, wenn abends die Klingel geht. ' +
+      'Die Uhrzeit ist fest – Sonnenuntergang kennt der Hub nicht.',
+    fields: [
+      { key: 'at', label: 'Uhrzeit', type: 'time', help: 'Wann der Effekt losgeht.' },
+      {
+        key: 'effect',
+        label: 'Effekt',
+        type: 'choice',
+        choices: effectChoices(),
+        help: 'Disco und Farbwechsel brauchen Lampen, die Farbe können.',
+      },
+      {
+        key: 'lights',
+        label: 'Diese Lampen',
+        type: 'devices',
+        capability: 'dimmer',
+        help: 'Wähle mindestens eine Lampe.',
+      },
+      {
+        key: 'minutes',
+        label: 'Wie lange',
+        type: 'number',
+        unit: 'Minuten',
+        min: 1,
+        max: 120,
+        step: 1,
+        help: 'Danach hört der Effekt von selbst auf.',
+      },
+    ],
+    build: (values) => ({
+      name: `${EFFECTS[effect(values, 'effect')].label} zur festen Zeit`,
+      trigger: { type: 'schedule', at: time(values, 'at'), days: [] },
+      actions: [
+        {
+          type: 'effect',
+          effect: effect(values, 'effect'),
+          target: { deviceIds: list(values, 'lights') },
+          minutes: num(values, 'minutes'),
+        },
+      ],
+      cooldownSeconds: 0,
+    }),
+  },
+
+  {
+    id: 'effect-stop-when-on',
+    emoji: '🛑',
+    name: 'Effekte beenden, wenn das Licht angeht',
+    summary: 'Sobald die gewählte Lampe eingeschaltet wird, hören alle Effekte auf.',
+    explanation:
+      'Der Notausgang am Lichtschalter: Wer genug hat vom Flackern, schaltet die Lampe ein – ' +
+      'und alles läuft wieder normal. Sinnvoll mit einer Lampe, die selbst nicht am Effekt ' +
+      'beteiligt ist, etwa der im Flur.',
+    fields: [
+      {
+        key: 'watch',
+        label: 'Diese Lampe beendet die Effekte',
+        type: 'device',
+        capability: 'switch',
+        help: 'Am besten eine, die nicht selbst mitflackert.',
+      },
+    ],
+    build: (values) => ({
+      name: 'Effekte am Schalter beenden',
+      trigger: {
+        type: 'deviceState',
+        deviceId: str(values, 'watch'),
+        property: 'on',
+        equals: true,
+      },
+      actions: [{ type: 'stopEffect' }],
+      cooldownSeconds: 5,
+    }),
+  },
 ];
+
+/** Die Auswahl der Effekte – Beschriftung samt Symbol aus dem Effektdienst. */
+function effectChoices(): Array<{ value: string; label: string }> {
+  return LIGHT_EFFECT_IDS.map((id) => ({
+    value: id,
+    label: `${EFFECTS[id].icon} ${EFFECTS[id].label}`,
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Vorbelegung anhand des echten Gerätebestands
@@ -534,6 +770,11 @@ const FIELD_DEFAULTS: Record<string, Record<string, string | number>> = {
   'all-off-night': { at: '23:30' },
   'airing-reminder': { everyMinutes: 180, from: '08:00', to: '20:00' },
   'heating-night-setback': { at: '22:30', targetTemperature: 17 },
+  // Die Effekte kommen mit der Laufzeit, die zu ihnen passt: Gruseln zwanzig
+  // Minuten, Disco zehn, Kerzenschein den ganzen Abend.
+  'effect-when-off': { effect: 'gruselig', minutes: 20 },
+  'effect-when-on': { effect: 'disco', minutes: 10 },
+  'effect-at-time': { at: '20:00', effect: 'kerze', minutes: 60 },
 };
 
 /** Zeitfelder, die nicht die Standardvorgabe bekommen sollen. */
@@ -593,6 +834,15 @@ export function resolveTemplates(devices: Device[], rooms: Room[]): ResolvedTemp
           presets[field.key] ?? (MULTI_TIME_TEMPLATES.has(template.id) ? '08:00' : '07:00');
         continue;
       }
+      if (field.type === 'choice') {
+        // Die Auswahl steht in der Vorlage; hier fehlt nur die Vorbelegung.
+        options[field.key] = (field.choices ?? []).map((choice) => ({
+          id: choice.value,
+          label: choice.label,
+        }));
+        defaults[field.key] = presets[field.key] ?? field.choices?.[0]?.value ?? '';
+        continue;
+      }
       if (!field.capability) continue;
 
       const candidates = withCapability(field.capability);
@@ -627,6 +877,7 @@ function describeMissing(field: TemplateField): string {
     'sensor.humidity': 'Es ist kein Feuchtesensor eingebunden.',
     'sensor.battery': 'Kein Gerät meldet einen Batteriestand.',
     switch: 'Es ist kein schaltbares Gerät eingebunden.',
+    dimmer: 'Es ist keine dimmbare Lampe eingebunden – ohne die gibt es nichts zu sehen.',
     cover: 'Es ist kein Rollladen eingebunden.',
     thermostat: 'Es ist keine Heizung mit Solltemperatur eingebunden.',
   };

@@ -19,6 +19,7 @@ import { SceneService } from './services/sceneService.js';
 import { SetupService } from './services/setupService.js';
 import { SonosService } from './services/sonosService.js';
 import { ActivityService } from './services/activityService.js';
+import { EffectService } from './services/effectService.js';
 import { SpotifyService } from './services/spotifyService.js';
 import { TelemetryService } from './services/telemetryService.js';
 import { UpdateService } from './services/updateService.js';
@@ -56,6 +57,7 @@ export interface Container {
   /** Wiedergabe bei Spotify. */
   spotify: SpotifyService;
   activity: ActivityService;
+  effects: EffectService;
   presence: PresenceService;
   /** Startet Hintergrunddienste, sobald ein Haushalt existiert. */
   startBackgroundServices: () => Promise<void>;
@@ -110,6 +112,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const nextcloud = new NextcloudService(repos, config.secretKey);
   const spotify = new SpotifyService(repos, config.secretKey);
   const activity = new ActivityService(repos);
+  const effects = new EffectService(repos, devices);
+  // Regeln dürfen Effekte starten – siehe `useEffects`.
+  automations.useEffects(effects);
+  // Und der Verlauf soll das Blinken eines Effekts nicht mitschreiben.
+  activity.useEffects(effects);
 
   const startBackgroundServices = async (): Promise<void> => {
     const household = households.current();
@@ -137,6 +144,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automations.stop();
     hubUpdate.stop();
     activity.stop();
+    await effects.shutdown();
     updates.stop();
     presence.stop();
     nextcloud.stop();
@@ -149,6 +157,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     hubUpdate.stop();
     activity.stop();
     await activity.flush();
+    await effects.shutdown();
     updates.stop();
     presence.stop();
     nextcloud.stop();
@@ -182,6 +191,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     sonos,
     spotify,
     activity,
+    effects,
     startBackgroundServices,
     stopBackgroundServices,
     shutdown,

@@ -62,6 +62,19 @@ describe('Darstellung prüfen und begrenzen', () => {
     assert.deepEqual(appearanceOf(old), DEFAULT_APPEARANCE);
     assert.deepEqual(appearanceOf(undefined), DEFAULT_APPEARANCE);
   });
+
+  it('lässt Schalter an, solange niemand sie ausschaltet', () => {
+    // Wer nichts einstellt, bekommt Vorschau und Meldungen – abschalten muss
+    // man ausdrücklich, und dann muss es auch halten.
+    assert.equal(appearanceOf(undefined).automationNotifications, true);
+    assert.equal(appearance({ automationNotifications: false }).automationNotifications, false);
+    assert.equal(appearance({ livePreview: false }).livePreview, false);
+    assert.equal(
+      appearance({ automationNotifications: undefined as never }).automationNotifications,
+      true,
+      'eine fehlende Angabe ist keine Abschaltung',
+    );
+  });
 });
 
 describe('Datenbank rüstet fehlende Felder nach', () => {

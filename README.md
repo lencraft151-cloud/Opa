@@ -37,8 +37,9 @@ Geräte.
 | **Messwerte** | Temperatur, Luftfeuchte, Helligkeit, Leistung, Energie, Batterie – dauerhaft archiviert, mit Verlaufsdiagramm |
 | **Stromverbrauch** | Verbrauch und Kosten je Gerät, Raum und Zeitraum, Hochrechnung auf Monat/Jahr, Erkennung von Dauerverbrauchern |
 | **Firmware-Updates** | Prüfung für Hue Bridge und Shelly, Übersicht über **alle** Geräte samt Firmwarestand, Installation auf Knopfdruck oder automatisch im gewählten Nachtfenster |
-| **Automationen** | Neun fertige Vorlagen mit vorausgewählten Geräten, dazu frei baubare Regeln aus Sensorschwellen, Gerätezuständen, Uhrzeiten und **Wiederholungen** mit Zeitfenster und Wochentagen |
-| **Darstellung** | Schriftgröße, Akzentfarben, hell/dunkel, „Bewegung reduzieren“ und die Lichtvorschau – am Haushalt gespeichert und damit auf jedem Gerät gleich |
+| **Automationen** | Dreizehn fertige Vorlagen mit vorausgewählten Geräten, dazu frei baubare Regeln aus Sensorschwellen, Gerätezuständen, Uhrzeiten und **Wiederholungen** mit Zeitfenster und Wochentagen |
+| **Lichteffekte** | Disco, Farbwechsel, Gruselmodus, Kerze und Gewitter – von Hand gestartet oder an einen Lichtschalter gehängt („wenn das Licht ausgeht“). Laufzeit begrenzt, Takt an der Bridge bemessen, danach steht das Licht wieder wie vorher |
+| **Darstellung** | Schriftgröße, Akzentfarben, hell/dunkel, „Bewegung reduzieren“, die Lichtvorschau und ob Meldungen von Automationen eingeblendet werden – am Haushalt gespeichert und damit auf jedem Gerät gleich |
 | **Lichtvorschau** | Beim Verstellen zeigt die Gerätekarte sofort, wie das Licht aussehen wird – abschaltbar |
 | **Kein Gerät geht verloren** | Unbekannte Kanäle werden aus ihren Werten erkannt; was übrig bleibt, steht mit Begründung in der Diagnose, und der Gerätetyp lässt sich von Hand richtigstellen |
 | **Geräte geraderücken** | Name, Raum, Gruppe und das Entfernen an einer Stelle – bei Geräten ohne Raum offen sichtbar, sonst hinter einem Aufklapper |

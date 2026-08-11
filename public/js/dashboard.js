@@ -59,6 +59,8 @@ export const store = {
   updates: null,
   energy: null,
   templates: null,
+  /** Antwort von `/effects`: was es gibt und was gerade läuft. */
+  effects: null,
   energyPeriod: 'today',
   historyDeviceId: '',
   historyMetric: 'temperatureC',
@@ -209,6 +211,10 @@ export function renderPanel(name) {
   // Musik lebt nur, solange jemand hinsieht – siehe music.js.
   if (name === 'services') startMusicTicker();
   else stopMusicTicker();
+
+  // Dasselbe für die Restzeit der Lichteffekte.
+  if (name === 'automations') startEffectTicker();
+  else stopEffectTicker();
 
   renderCurrent({ reason: 'manual' });
 }
@@ -2087,12 +2093,18 @@ async function renderAutomations() {
   }
   const templates = store.templates?.templates ?? [];
 
+  // Ein älterer Hub kennt `/effects` noch nicht. Dann fehlen die Karten, und
+  // der Rest der Ansicht steht trotzdem – deshalb hier kein Fehlerbanner.
+  store.effects ??= await api('/effects').catch(() => null);
+
   panel.innerHTML = `
     <p class="intro">
       Eine Automation macht etwas von allein: „Wenn es im Bad unter 19 °C fällt, schalte den
       Heizlüfter ein.“ Am schnellsten geht es mit einer der fertigen Vorlagen – die passenden
       Geräte sind schon ausgewählt. ${wikiLink('automationen', 'Auslöser, Takte und Dauer erklärt')}
     </p>
+
+    <div id="effects-section">${effectsSection()}</div>
 
     <div class="section-head"><h2>Fertige Vorlagen</h2>
       <span class="muted small">Ein Klick genügt</span></div>
@@ -2213,6 +2225,7 @@ async function renderAutomations() {
     </details>`;
 
   wireTemplates(panel);
+  wireEffects(panel);
   restoreOpenSections(panel);
 
   // Umschalter zwischen Messwert, Uhrzeit und Wiederholung.
@@ -2274,6 +2287,227 @@ async function renderAutomations() {
       void renderAutomations();
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Lichteffekte
+// ---------------------------------------------------------------------------
+
+/**
+ * Welche Lampen der nächste Effekt bespielen soll.
+ *
+ * Steht außerhalb von `store`, weil die Auswahl nichts ist, was der Hub
+ * kennen müsste – sie gilt nur, bis der Effekt gestartet ist. Leer heißt:
+ * alle, die den Effekt zeigen können.
+ */
+const effectSelection = new Set();
+
+/**
+ * Die Effekte stehen über den Automationen, nicht in einem eigenen Reiter.
+ *
+ * Ein Effekt ist eine Automation, die nur kürzer dauert: Etwas passiert von
+ * selbst, ohne dass jemand am Regler steht. Und wer die Disco eben von Hand
+ * gestartet hat, sieht direkt darunter die Vorlage, mit der sie künftig am
+ * Lichtschalter losgeht.
+ */
+function effectsSection() {
+  const state = store.effects;
+  if (!state) return '';
+
+  const lamps = store.devices.filter(
+    (device) => !device.hidden && device.capabilities.includes('dimmer'),
+  );
+  const running = new Map((state.running ?? []).map((entry) => [entry.effect, entry]));
+  const chosen = effectSelection;
+
+  return `
+    <div class="section-head"><h2>Lichteffekte ${help(
+      'Ein Effekt verstellt die Lampen im Takt – Farbe, Helligkeit, beides. Er läuft die eingestellte Zeit und stellt danach her, wie das Licht vorher war.',
+    )}</h2>
+      <span class="muted small">${
+        lamps.length
+          ? `${plural(lamps.length, 'Lampe', 'Lampen')} kommen infrage`
+          : 'Dafür fehlt eine dimmbare Lampe'
+      }</span>
+    </div>
+
+    ${
+      lamps.length
+        ? `<details class="card" data-section="effect-target">
+             <summary>Wo? ${
+               chosen.size === 0
+                 ? '<span class="muted small">Alle passenden Lampen</span>'
+                 : `<span class="muted small">${plural(chosen.size, 'Lampe', 'Lampen')} ausgewählt</span>`
+             }</summary>
+             <p class="field-help">
+               Nichts angekreuzt heißt: alle Lampen, die den Effekt zeigen können. Disco und
+               Farbwechsel brauchen Farbe, die übrigen kommen mit Helligkeit aus.
+             </p>
+             <div class="check-grid">${lamps.map(effectLampCheck).join('')}</div>
+           </details>`
+        : `<div class="callout warn">
+             <strong>Noch keine dimmbare Lampe</strong>
+             <span>Effekte verstellen Helligkeit und Farbe – an einer Steckdose gäbe es nichts zu sehen.</span>
+           </div>`
+    }
+
+    <div class="grid">${(state.effects ?? [])
+      .map((definition) => effectCard(definition, running.get(definition.id), lamps.length))
+      .join('')}</div>
+
+    ${
+      running.size
+        ? `<div class="row tight" style="margin-top:.6rem">
+             <button class="danger" data-effect-stop-all>Alle Effekte beenden</button>
+             <span class="muted small">Stellt das Licht wieder her, wie es vorher war.</span>
+           </div>`
+        : ''
+    }`;
+}
+
+function effectLampCheck(device) {
+  const colorReady = device.capabilities.includes('color');
+  return `<label class="check">
+    <input type="checkbox" name="effect-lights" value="${esc(device.id)}"
+           ${effectSelection.has(device.id) ? 'checked' : ''} />
+    <span>${esc(device.name)}
+      <span class="muted small">${esc(roomName(device.roomId))}${
+        colorReady ? '' : ' · nur Helligkeit'
+      }</span>
+    </span>
+  </label>`;
+}
+
+function effectCard(definition, running, lampCount) {
+  const active = Boolean(running);
+  return `<article class="device-card effect-card ${active ? 'is-running' : ''}"
+                   data-effect="${esc(definition.id)}">
+    <header>
+      <div>
+        <div class="name">${definition.icon} ${esc(definition.label)}</div>
+        <div class="meta">${esc(definition.description)}</div>
+      </div>
+      ${active ? '<span class="badge ok">läuft</span>' : ''}
+    </header>
+
+    ${
+      active
+        ? `<p class="muted small">
+             Noch ${esc(remainingLabel(running.endsAt))} ·
+             ${plural(running.deviceIds.length, 'Lampe', 'Lampen')} ·
+             alle ${(running.stepMs / 1000).toFixed(1).replace('.', ',')} s ein Schritt
+           </p>`
+        : `<p class="muted small">Vorschlag: ${definition.defaultMinutes} Minuten, ${
+            definition.needs === 'color' ? 'braucht Farbe' : 'braucht Helligkeit'
+          }</p>`
+    }
+
+    <div class="row tight">
+      <label>Minuten
+        <input type="number" class="narrow" data-effect-minutes min="1" max="120"
+               value="${definition.defaultMinutes}" />
+      </label>
+      <button class="primary" data-effect-start ${lampCount ? '' : 'disabled'}>
+        ${active ? 'Neu starten' : 'Starten'}
+      </button>
+      ${active ? '<button class="small danger" data-effect-stop>Beenden</button>' : ''}
+    </div>
+  </article>`;
+}
+
+/** „noch 9 Minuten" – Sekunden interessieren hier niemanden. */
+function remainingLabel(endsAt) {
+  const seconds = Math.max(0, (new Date(endsAt).getTime() - Date.now()) / 1000);
+  if (seconds < 90) return `${Math.round(seconds)} Sekunden`;
+  return `${Math.round(seconds / 60)} Minuten`;
+}
+
+function wireEffects(root) {
+  // Beim Neuzeichnen des Abschnitts wird er selbst übergeben, beim Aufbau der
+  // Ansicht deren Wurzel – beides soll gehen.
+  const section = root.id === 'effects-section' ? root : root.querySelector('#effects-section');
+  if (!section) return;
+
+  section.querySelectorAll('input[name="effect-lights"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (input.checked) effectSelection.add(input.value);
+      else effectSelection.delete(input.value);
+    });
+  });
+
+  section.querySelectorAll('[data-effect]').forEach((card) => {
+    const effect = card.dataset.effect;
+    const minutes = () => Number(card.querySelector('[data-effect-minutes]')?.value) || undefined;
+
+    card.querySelector('[data-effect-start]')?.addEventListener('click', async (event) => {
+      event.currentTarget.disabled = true;
+      await guard(
+        () =>
+          api(`/effects/${effect}/start`, {
+            method: 'POST',
+            body: {
+              // Leere Auswahl gar nicht erst mitschicken: Der Hub nimmt dann
+              // alle Lampen, die den Effekt zeigen können.
+              ...(effectSelection.size ? { deviceIds: [...effectSelection] } : {}),
+              ...(minutes() ? { minutes: minutes() } : {}),
+            },
+          }),
+        { success: 'Effekt gestartet.' },
+      );
+      await refreshEffects();
+    });
+
+    card.querySelector('[data-effect-stop]')?.addEventListener('click', async () => {
+      await guard(() => api(`/effects/${effect}/stop`, { method: 'POST' }), {
+        success: 'Effekt beendet.',
+        successHint: 'Das Licht steht wieder wie vorher.',
+      });
+      await refreshEffects();
+    });
+  });
+
+  section.querySelector('[data-effect-stop-all]')?.addEventListener('click', async () => {
+    await guard(() => api('/effects/stop', { method: 'POST' }), { success: 'Alle Effekte beendet.' });
+    await refreshEffects();
+  });
+}
+
+/**
+ * Holt den Effektzustand und zeichnet nur diesen Abschnitt neu.
+ *
+ * Bewusst nicht die ganze Ansicht: Wer gerade eine Vorlage ausfüllt, soll
+ * seine Eingaben behalten, während nebenan eine Disco läuft.
+ */
+async function refreshEffects() {
+  const section = document.querySelector('#effects-section');
+  if (!section) return;
+  store.effects = await api('/effects').catch(() => store.effects);
+  section.innerHTML = effectsSection();
+  wireEffects(section);
+  restoreOpenSections(section);
+}
+
+/**
+ * Solange die Ansicht offen ist, läuft die Restzeit sichtbar herunter.
+ *
+ * Zwanzig Sekunden reichen dafür: Die Anzeige rundet ohnehin auf Minuten,
+ * und ein Effekt endet nicht plötzlich, sondern zur bekannten Zeit.
+ */
+let effectTicker = null;
+
+export function startEffectTicker() {
+  stopEffectTicker();
+  effectTicker = setInterval(() => {
+    if (document.hidden) return;
+    if (!document.querySelector('#effects-section')) return;
+    void refreshEffects();
+  }, 20_000);
+  effectTicker.unref?.();
+}
+
+export function stopEffectTicker() {
+  if (effectTicker) clearInterval(effectTicker);
+  effectTicker = null;
 }
 
 /**
@@ -2414,7 +2648,8 @@ function templateField(template, field) {
   }
 
   const options = template.options[field.key] ?? [];
-  if (field.type === 'device') {
+  // Feste Auswahl (etwa der Lichteffekt) – wie ein Gerätefeld, nur ohne Geräte.
+  if (field.type === 'device' || field.type === 'choice') {
     return `<label>${esc(field.label)}
       <select name="${esc(field.key)}">${options
         .map(
@@ -2485,7 +2720,9 @@ function automationItem(rule) {
       <div class="title">${esc(rule.name)}
         ${rule.enabled ? '<span class="badge ok">aktiv</span>' : '<span class="badge">pausiert</span>'}
       </div>
-      <div class="sub">${esc(describeTrigger(rule.trigger))} · zuletzt ${esc(fmt.relative(rule.lastTriggeredAt))}</div>
+      <div class="sub">${esc(describeTrigger(rule.trigger))} → ${esc(
+        describeActions(rule.actions),
+      )} · zuletzt ${esc(fmt.relative(rule.lastTriggeredAt))}</div>
     </div>
     <div class="row tight">
       <button class="small" data-rule-action="run" data-rule-id="${esc(rule.id)}">Testen</button>
@@ -2494,6 +2731,92 @@ function automationItem(rule) {
       <button class="small danger" data-rule-action="delete" data-rule-id="${esc(rule.id)}">Löschen</button>
     </div>
   </div>`;
+}
+
+/**
+ * Beschriftung eines Effekts.
+ *
+ * Bevorzugt die Angaben des Hubs; die Liste hier springt ein, solange
+ * `/effects` noch nicht geantwortet hat – eine Regel ohne lesbaren Namen
+ * wäre in der Liste sonst ein Rätsel.
+ */
+const EFFECT_LABELS = {
+  disco: '🪩 Disco',
+  farbwechsel: '🌈 Farbwechsel',
+  gruselig: '👻 Gruselig',
+  kerze: '🕯️ Kerze',
+  gewitter: '⛈️ Gewitter',
+};
+
+export function effectLabel(id) {
+  const known = (store.effects?.effects ?? []).find((entry) => entry.id === id);
+  return known ? `${known.icon} ${known.label}` : (EFFECT_LABELS[id] ?? id);
+}
+
+/**
+ * Was eine Regel tut – in einem Halbsatz.
+ *
+ * Bis hierher stand in der Liste nur der Auslöser. Bei zwei Regeln auf
+ * denselben Bewegungsmelder sah man damit zweimal dasselbe und musste raten,
+ * welche man gerade pausiert.
+ */
+export function describeActions(actions = []) {
+  const parts = actions.map((action) => {
+    switch (action.type) {
+      case 'notify':
+        return 'Meldung';
+      case 'webhook':
+        return 'Adresse aufrufen';
+      case 'effect':
+        return `${effectLabel(action.effect)}${action.minutes ? ` (${action.minutes} min)` : ''}`;
+      case 'stopEffect':
+        return action.effect ? `${effectLabel(action.effect)} beenden` : 'Effekte beenden';
+      case 'command':
+        return describeCommand(action.command, action.target);
+      default:
+        return 'etwas';
+    }
+  });
+  return parts.join(', ') || 'nichts';
+}
+
+function describeCommand(command, target) {
+  const where = describeTarget(target);
+  switch (command?.type) {
+    case 'setPower':
+      return `${where} ${command.on ? 'an' : 'aus'}`;
+    case 'toggle':
+      return `${where} umschalten`;
+    case 'setBrightness':
+      return `${where} auf ${command.brightness} %`;
+    case 'setColor':
+      return `${where} färben`;
+    case 'setColorTemperature':
+      return `${where} auf ${command.kelvin} K`;
+    case 'openCover':
+      return `${where} auf`;
+    case 'closeCover':
+      return `${where} zu`;
+    case 'setPosition':
+      return `${where} auf ${command.position} %`;
+    case 'setTargetTemperature':
+      return `${where} auf ${fmt.temperature(command.targetTemperatureC)}`;
+    default:
+      return where;
+  }
+}
+
+/** „Stehlampe", „3 Geräte" oder „alles Schaltbare". */
+function describeTarget(target) {
+  if (!target) return 'Geräte';
+  if (target.allWithCapability) return 'alle passenden Geräte';
+  const ids = target.deviceIds ?? [];
+  if (ids.length === 1) return deviceById(ids[0])?.name ?? 'ein Gerät';
+  if (ids.length > 1) return plural(ids.length, 'Gerät', 'Geräte');
+  const rooms = target.roomIds ?? [];
+  if (rooms.length === 1) return roomName(rooms[0]);
+  if (rooms.length > 1) return plural(rooms.length, 'Raum', 'Räume');
+  return 'Geräte';
 }
 
 export function describeTrigger(trigger, lookup = (id) => deviceById(id)?.name ?? id) {
@@ -3327,6 +3650,24 @@ function appearanceCard() {
         <input type="checkbox" id="reduce-motion" ${current.reduceMotion ? 'checked' : ''} />
         <span>Bewegung reduzieren – Animationen laufen dann nicht mehr</span>
       </label>
+    </div>
+
+    <div class="setting-block">
+      <div class="setting-head"><strong>Einblendungen</strong>
+        <span class="muted small">Was der Hub von sich aus meldet</span></div>
+      <label class="check">
+        <input type="checkbox" id="automation-notifications"
+               ${current.automationNotifications !== false ? 'checked' : ''} />
+        <span>
+          Meldungen von Automationen und Lichteffekten einblenden – abgeschaltet
+          bleibt es still, wenn eine Regel greift oder ein Effekt startet
+        </span>
+      </label>
+      <p class="field-help">
+        Abschalten heißt nur „nicht einblenden": Im Verlauf steht weiterhin jede
+        Auslösung, und Fehler, Update-Hinweise sowie Nachrichten aus der Nextcloud
+        erscheinen unabhängig davon.
+      </p>
     </div>
 
     <div class="row tight">
@@ -4991,6 +5332,13 @@ function wireAppearance(panel) {
     .querySelector('#live-preview')
     ?.addEventListener('change', (event) => void change({ livePreview: event.target.checked }));
 
+  panel
+    .querySelector('#automation-notifications')
+    ?.addEventListener(
+      'change',
+      (event) => void change({ automationNotifications: event.target.checked }),
+    );
+
   panel.querySelector('#btn-appearance-reset').addEventListener('click', () =>
     void change({
       fontScale: 1,
@@ -4999,6 +5347,7 @@ function wireAppearance(panel) {
       theme: 'auto',
       reduceMotion: false,
       livePreview: true,
+      automationNotifications: true,
     }),
   );
 }

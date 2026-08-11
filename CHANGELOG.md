@@ -8,6 +8,57 @@ Das Format ist bewusst schlicht: eine Überschrift `## <Version> – <Datum>`,
 darunter Absätze und Listen. Nichts davon wird ausgewertet außer der Version
 in der Überschrift.
 
+## 1.14.0 – 2026-08-10
+
+**Lichteffekte.** Fünf Stück, oben in der Ansicht „Automationen":
+
+- **Disco** – schnelle, kräftige Farbwechsel, jede Lampe eine andere. Die
+  Farben springen nicht zufällig, sondern um den goldenen Winkel weiter;
+  echter Zufall trifft zu oft dieselbe Ecke des Farbkreises.
+- **Farbwechsel** – dieselbe Idee, nur ruhig: langsam durch den Regenbogen.
+- **Gruselig** – düster, unregelmäßiges Flackern, kalter Grünstich. Das
+  Unheimliche liegt in der Unregelmäßigkeit; ein gleichmäßiges Blinken wirkt
+  bloß technisch.
+- **Kerze** – warmes Licht, das sanft schwankt wie eine Flamme.
+- **Gewitter** – dunkel, und dann ein kalter Doppelblitz. Selten, dafür heftig.
+
+Ohne Auswahl gilt ein Effekt für alle Lampen, die ihn zeigen können; sonst
+lassen sich einzelne ankreuzen. Jeder läuft nur die eingestellte Zeit,
+höchstens zwei Stunden, und **stellt danach her, wie das Licht vorher war** –
+erst Farbe, dann Helligkeit, zuletzt der Schalter. Wer zuerst einschaltet,
+sieht sonst für einen Moment noch die Discofarbe. „Alle Effekte beenden" tut
+dasselbe sofort.
+
+Der Takt bemisst sich an der Zahl der Befehle, nicht an der Zahl der Lampen:
+Eine Hue Bridge nimmt rund zehn Befehle je Sekunde an, und die Disco schickt
+je Lampe drei. Bei vielen Lampen wird der Effekt deshalb langsamer, statt
+unterwegs verworfen zu werden.
+
+**Effekte als Automation.** Vier neue Vorlagen: „Effekt starten, wenn das
+Licht ausgeht", dasselbe umgekehrt „wenn das Licht angeht", „Effekt zu einer
+Uhrzeit" und „Effekte beenden, wenn das Licht angeht" – der Notausgang am
+Lichtschalter. Damit geht der Gruselmodus los, sobald jemand das Licht
+ausmacht, ohne dass ein Handy im Spiel ist.
+
+Dabei lauerte ein Fallstrick: Der Effekt schaltet die Lampe selbst, und am
+Ende stellt er sie auf „aus" zurück – dieselbe Meldung, die die Regel
+auslöst. Ohne Sperre hätte sich der Gruselmodus endlos selbst neu gestartet.
+Was ein Effekt an einer Lampe anstellt, zählt deshalb nicht mehr als
+Ereignis: weder für die Automationen noch für den Verlauf. Sonst stünden nach
+zehn Minuten Disco tausend Zeilen „Stehlampe eingeschaltet" darin und
+verdrängten alles andere.
+
+**Meldungen von Automationen lassen sich abschalten.** Unter Einstellungen →
+Darstellung → Einblendungen. Wer viele Regeln hat, bekam sonst den halben Tag
+Einblendungen zu sehen, die nichts erfordern. Aus heißt nur „nicht
+einblenden": Im Verlauf steht weiterhin jede Auslösung, und Fehler,
+Update-Hinweise sowie Nachrichten aus der Nextcloud erscheinen unabhängig
+davon.
+
+**In der Regelliste steht jetzt auch, was eine Regel tut.** Bisher nur der
+Auslöser – bei zwei Regeln auf denselben Bewegungsmelder sah man zweimal
+dasselbe und musste raten, welche man gerade pausiert.
+
 ## 1.13.0 – 2026-08-10
 
 **Ein Reiter „Verlauf".** Bisher beantwortete der Hub nur „wie warm war es?"

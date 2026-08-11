@@ -1,7 +1,7 @@
 /** Einstiegspunkt: Navigation, Live-Updates, Service Worker. */
 
 import { api, setUnauthorizedHandler, showError, toast } from './api.js';
-import { applyAppearance, applyStoredAppearance } from './appearance.js';
+import { applyAppearance, applyStoredAppearance, currentAppearance } from './appearance.js';
 import {
   loadDashboardData,
   refreshNextcloudCard,
@@ -383,6 +383,16 @@ function scheduleRender() {
 }
 
 /**
+ * Dürfen Meldungen aus Automationen und Lichteffekten eingeblendet werden?
+ *
+ * Die Einstellung hängt am Haushalt, wird aber lokal gespiegelt – die
+ * Antwort muss auch dann stimmen, wenn der Hub gerade erst antwortet.
+ */
+function showAutomationMessages() {
+  return currentAppearance().automationNotifications !== false;
+}
+
+/**
  * Verbindet den Ereignisstrom. `EventSource` versucht zwar selbst erneut zu
  * verbinden, meldet dem Nutzer aber nichts – deshalb ein eigener Aufbau mit
  * Backoff und sichtbarem Zustand.
@@ -423,6 +433,7 @@ function connectEventStream() {
   });
   source.addEventListener('automation.triggered', (event) => {
     const { ruleName } = JSON.parse(event.data);
+    if (!showAutomationMessages()) return;
     toast(`Automation ausgelöst: ${ruleName}`, { kind: 'success', timeout: 4000 });
   });
   /*
@@ -453,14 +464,28 @@ function connectEventStream() {
       return;
     }
 
-    toast(message, {
-      kind: level === 'error' ? 'error' : 'info',
-      hint: hint ?? '',
-      link: link ?? '',
-      // Eine Nachricht aus der Nextcloud will gelesen werden – dafür sind
-      // sechs Sekunden zu knapp, wenn man gerade nicht davorsteht.
-      timeout: origin === 'nextcloud' ? 15_000 : 8000,
-    });
+    /*
+     * Meldungen aus Automationen und Lichteffekten lassen sich abschalten –
+     * bei vielen Regeln sind das sonst den halben Tag Einblendungen, die
+     * nichts erfordern. Zwei Einschränkungen: Ein Fehler wird trotzdem
+     * gezeigt, und der Verlauf bekommt ohnehin alles. Deshalb geht es unten
+     * weiter statt zurück.
+     */
+    const quiet =
+      (origin === 'automation' || origin === 'effect') &&
+      level !== 'error' &&
+      !showAutomationMessages();
+
+    if (!quiet) {
+      toast(message, {
+        kind: level === 'error' ? 'error' : 'info',
+        hint: hint ?? '',
+        link: link ?? '',
+        // Eine Nachricht aus der Nextcloud will gelesen werden – dafür sind
+        // sechs Sekunden zu knapp, wenn man gerade nicht davorsteht.
+        timeout: origin === 'nextcloud' ? 15_000 : 8000,
+      });
+    }
     if (origin === 'nextcloud') refreshNextcloudCard();
     // Steht der Verlauf offen, gehört die Meldung sofort hinein.
     if (activeTab === 'history') void refreshHistory();

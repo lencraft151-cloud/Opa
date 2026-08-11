@@ -257,7 +257,7 @@ export const ARTICLES = [
     title: 'Automationen',
     icon: '⚙️',
     summary:
-      'Wenn-dann-Regeln, die der Hub selbst ausführt. Neun fertige Vorlagen gibt es dazu.',
+      'Wenn-dann-Regeln, die der Hub selbst ausführt – samt Lichteffekten. Dreizehn fertige Vorlagen gibt es dazu.',
     sections: [
       {
         heading: 'Was auslösen kann',
@@ -279,6 +279,23 @@ export const ARTICLES = [
         heading: 'Wann eine Regel *nicht* auslöst',
         body: [
           'Regeln lösen flankengesteuert aus: Solange die Bedingung erfüllt bleibt, feuert die Regel einmal. Erst wenn sie zwischendurch nicht mehr zutrifft, ist die Regel wieder scharf. Das verhindert, dass eine Regel bei 20,9 °C im Sekundentakt zuschlägt.',
+          'Was ein **Lichteffekt** an einer Lampe anstellt, zählt dabei nicht als Ereignis. Sonst würde eine Regel „wenn das Licht ausgeht, starte den Gruselmodus" durch das Aufräumen am Effektende erneut auslösen und nie zur Ruhe kommen.',
+        ],
+      },
+      {
+        heading: 'Lichteffekte',
+        body: [
+          'Oben in der Ansicht stehen fünf Effekte: **Disco** (schnelle Farbwechsel, jede Lampe eine andere), **Farbwechsel** (langsam durch den Regenbogen), **Gruselig** (düster, unregelmäßiges Flackern, kalter Grünstich), **Kerze** (warmes Schwanken) und **Gewitter** (dunkel, dann ein Doppelblitz).',
+          'Ohne Auswahl gilt ein Effekt für alle Lampen, die ihn zeigen können – Disco und Farbwechsel brauchen Farbe, die übrigen kommen mit Helligkeit aus.',
+          'Jeder Effekt läuft nur die eingestellte Zeit, höchstens zwei Stunden, und stellt danach her, wie das Licht vorher war: erst Farbe, dann Helligkeit, zuletzt der Schalter. „Alle Effekte beenden" tut dasselbe sofort.',
+          'Der Takt richtet sich nach der Zahl der Lampen: Eine Hue Bridge nimmt rund zehn Befehle je Sekunde an, darüber verwirft sie. Bei vielen Lampen wird der Effekt deshalb langsamer, statt unterwegs verloren zu gehen.',
+          'Per Vorlage lässt sich ein Effekt an einen Lichtschalter hängen – „wenn das Licht ausgeht" oder umgekehrt „wenn es angeht" – oder an eine Uhrzeit.',
+        ],
+      },
+      {
+        heading: 'Wenn die Einblendungen stören',
+        body: [
+          'Unter Einstellungen → Darstellung → Einblendungen lassen sich Meldungen von Automationen und Effekten abschalten. Im Verlauf steht danach weiterhin jede Auslösung; Fehler, Update-Hinweise und Nachrichten aus der Nextcloud erscheinen unabhängig davon.',
         ],
       },
     ],

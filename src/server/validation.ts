@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   CAPABILITIES,
   INTEGRATION_TYPES,
+  LIGHT_EFFECT_IDS,
   METRICS,
   SETUP_STEPS,
   THEME_PREFERENCES,
@@ -121,6 +122,18 @@ export const actionSchema = z.discriminatedUnion('type', [
     body: z.unknown().optional(),
   }),
   z.object({ type: z.literal('notify'), message: z.string().min(1).max(500) }),
+  /*
+   * Lichteffekte. Ohne Ziel gilt der Effekt für alle Lampen, die ihn zeigen
+   * können; die Laufzeit ist bei 120 Minuten gedeckelt – der Dienst kürzt
+   * ohnehin, aber eine Regel mit „9999" wäre schon beim Anlegen ein Irrtum.
+   */
+  z.object({
+    type: z.literal('effect'),
+    effect: z.enum(LIGHT_EFFECT_IDS),
+    target: targetSchema.optional(),
+    minutes: z.number().int().min(1).max(120).optional(),
+  }),
+  z.object({ type: z.literal('stopEffect'), effect: z.enum(LIGHT_EFFECT_IDS).optional() }),
 ]);
 
 export const ruleSchema = z.object({
@@ -167,6 +180,7 @@ export const appearanceSchema = z
     theme: z.enum(THEME_PREFERENCES).optional(),
     reduceMotion: z.boolean().optional(),
     livePreview: z.boolean().optional(),
+    automationNotifications: z.boolean().optional(),
   })
   .strict();
 

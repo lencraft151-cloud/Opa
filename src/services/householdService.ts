@@ -250,6 +250,7 @@ export function normalizeAppearance(appearance: Appearance): Appearance {
     reduceMotion: appearance.reduceMotion === true,
     // Vorgabe ist an – wer sie nicht will, schaltet sie ab.
     livePreview: appearance.livePreview !== false,
+    automationNotifications: appearance.automationNotifications !== false,
   };
 }
 

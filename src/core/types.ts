@@ -247,6 +247,15 @@ export interface Appearance {
    * Abschaltbar, denn auf einem schwachen Tablet kostet das Rechenzeit.
    */
   livePreview: boolean;
+  /**
+   * Sollen Meldungen aus Automationen und Lichteffekten als Popup erscheinen?
+   *
+   * Wer viele Regeln hat – vor allem wiederholende – bekommt sonst den halben
+   * Tag Einblendungen zu sehen, die nichts erfordern. Aus heißt nur „nicht
+   * einblenden": Im Verlauf steht weiterhin jede Auslösung, und Meldungen von
+   * Fehlern, Updates oder aus der Nextcloud kommen unabhängig davon.
+   */
+  automationNotifications: boolean;
 }
 
 export const THEME_PREFERENCES = ['auto', 'dark', 'light'] as const;
@@ -259,6 +268,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   theme: 'auto',
   reduceMotion: false,
   livePreview: true,
+  automationNotifications: true,
 };
 
 export interface Room {
@@ -468,7 +478,15 @@ export type RuleAction =
       forSeconds?: number;
     }
   | { type: 'webhook'; url: string; method?: 'GET' | 'POST'; body?: unknown }
-  | { type: 'notify'; message: string };
+  | { type: 'notify'; message: string }
+  /**
+   * Startet einen Lichteffekt – Disco, Farbwechsel, Gruselmodus.
+   *
+   * Kein gewöhnliches Kommando, weil ein Effekt kein Zustand ist, sondern ein
+   * Vorgang: Er läuft weiter, bis die Zeit um ist oder jemand ihn beendet.
+   */
+  | { type: 'effect'; effect: LightEffect; target?: RuleTarget; minutes?: number }
+  | { type: 'stopEffect'; effect?: LightEffect };
 
 export interface AutomationRule {
   id: string;
@@ -706,6 +724,13 @@ export interface ActivityEntry {
   /** Zusatz für die Suche – Gerätename, Raumname, Herstellername. */
   detail: string | null;
 }
+
+/**
+ * Die Lichteffekte. Steht hier und nicht nur im Dienst, weil auch
+ * Automationsregeln sie benennen – und die liegen in der Datenbank.
+ */
+export const LIGHT_EFFECT_IDS = ['disco', 'farbwechsel', 'gruselig', 'kerze', 'gewitter'] as const;
+export type LightEffect = (typeof LIGHT_EFFECT_IDS)[number];
 
 export const TRANSPORT_STATES = ['playing', 'paused', 'stopped', 'transitioning'] as const;
 export type TransportState = (typeof TRANSPORT_STATES)[number];

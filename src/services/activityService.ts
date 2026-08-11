@@ -63,7 +63,20 @@ export class ActivityService {
    */
   private integrationStatus = new Map<string, string>();
 
+  /**
+   * Die Lichteffekte – nachgereicht, weil sie ihrerseits Geräte brauchen.
+   *
+   * Sie sind hier nur für eine Frage da: Blinkt diese Lampe gerade, weil ein
+   * Effekt läuft? Dann gehört das nicht in den Verlauf.
+   */
+  private effects: { controls(deviceId: string): boolean } | null = null;
+
   constructor(private readonly repos: Repositories) {}
+
+  /** Wird beim Zusammenbau nachgereicht – siehe `effects`. */
+  useEffects(effects: { controls(deviceId: string): boolean }): void {
+    this.effects = effects;
+  }
 
   start(householdId: string): void {
     this.stop();
@@ -176,6 +189,15 @@ export class ActivityService {
   private onDeviceChanged(device: Device, changed: string[]): void {
     const relevant = changed.filter((key) => (MEANINGFUL as readonly string[]).includes(key));
     if (relevant.length === 0) return;
+
+    /*
+     * Läuft an dieser Lampe gerade ein Lichteffekt, bleibt der Verlauf still.
+     * Eine Disco schaltet zweimal je Sekunde – nach zehn Minuten stünden
+     * tausend Zeilen „Stehlampe eingeschaltet" im Verlauf, und alles andere
+     * wäre aus den 800 aufbewahrten Einträgen hinausgedrängt. Dass der Effekt
+     * läuft, steht ohnehin als eigene Meldung darin.
+     */
+    if (this.effects?.controls(device.id)) return;
 
     if (relevant.includes('reachable')) {
       this.record(

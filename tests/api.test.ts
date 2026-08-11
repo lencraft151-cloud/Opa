@@ -461,6 +461,42 @@ describe('Geräte und Abschluss', () => {
   });
 });
 
+describe('Lichteffekte über die Schnittstelle', () => {
+  it('zählt auf, was es gibt', async () => {
+    const { status, data } = await call('GET', '/api/effects');
+    assert.equal(status, 200);
+    assert.deepEqual(
+      data.effects.map((effect: { id: string }) => effect.id).sort(),
+      ['disco', 'farbwechsel', 'gewitter', 'gruselig', 'kerze'],
+    );
+    assert.deepEqual(data.running, []);
+    // Ohne eingebundene Bridge gibt es im Testhaushalt keine Lampen.
+    assert.equal(data.candidates, 0);
+  });
+
+  it('weist einen erfundenen Effekt ab', async () => {
+    const { status } = await call('POST', '/api/effects/technoparty/start', {});
+    assert.equal(status, 400);
+  });
+
+  it('sagt verständlich, wenn keine Lampe infrage kommt', async () => {
+    const { status, data } = await call('POST', '/api/effects/disco/start', { minutes: 5 });
+    assert.equal(status, 400);
+    assert.match(data.error.message, /mindestens eine Lampe/);
+  });
+
+  it('begrenzt die Laufzeit schon in der Prüfung', async () => {
+    const { status } = await call('POST', '/api/effects/disco/start', { minutes: 9999 });
+    assert.equal(status, 400);
+  });
+
+  it('lässt den Panikknopf auch dann zu, wenn nichts läuft', async () => {
+    const { status, data } = await call('POST', '/api/effects/stop');
+    assert.equal(status, 200);
+    assert.equal(data.stopped, 0);
+  });
+});
+
 describe('Automationen', () => {
   it('lehnt Regeln mit unbekannten Geräten ab', async () => {
     const { status, data } = await call('POST', '/api/automations', {
@@ -571,6 +607,9 @@ describe('Darstellung', () => {
       // Die Lichtvorschau ist vorgabemäßig an – sie schließt die Lücke
       // zwischen „Regler bewegen" und „Lampe reagiert".
       livePreview: true,
+      // Meldungen von Automationen und Effekten ebenso: Wer sie nicht mag,
+      // schaltet sie ab; wer nichts einstellt, sieht, was der Hub tut.
+      automationNotifications: true,
     });
   });
 

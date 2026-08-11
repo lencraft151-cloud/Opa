@@ -19,6 +19,7 @@ export const DEFAULT_APPEARANCE = {
   theme: 'auto',
   reduceMotion: false,
   livePreview: true,
+  automationNotifications: true,
 };
 
 /** Auswahlmöglichkeiten für die Einstellungen – Beschriftung inklusive. */
@@ -111,6 +112,17 @@ export function applyAppearance(appearance) {
 /** Wendet die zuletzt bekannte Darstellung an, bevor der Hub antwortet. */
 export function applyStoredAppearance() {
   return applyAppearance(readStoredAppearance());
+}
+
+/**
+ * Die zuletzt angewendete Darstellung.
+ *
+ * Der Ereignisstrom fragt danach, bevor er eine Meldung einblendet – dort
+ * liegt kein Haushalt vor, und die Einstellung soll auch dann schon gelten,
+ * wenn die Antwort des Hubs noch unterwegs ist.
+ */
+export function currentAppearance() {
+  return active;
 }
 
 /**
